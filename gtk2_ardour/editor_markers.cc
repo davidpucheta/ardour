@@ -1394,7 +1394,6 @@ Editor::toggle_marker_lock_style ()
 
 	if (mm) {
 		MeterSection* msp = &mm->meter();
-
 		if (mm->meter().position_lock_style() == AudioTime) {
 			_session->tempo_map().replace_meter (*msp, Meter (msp->divisions_per_bar(), msp->note_divisor()), msp->bbt());
 		} else {
@@ -1419,11 +1418,9 @@ Editor::toggle_tempo_type ()
 
 	if (tm) {
 		TempoSection* tsp = &tm->tempo();
-		if (tm->tempo().type() == TempoSection::Constant) {
-			_session->tempo_map().replace_tempo (*tsp, Tempo (tsp->beats_per_minute(), tsp->note_type()), tsp->pulse(), TempoSection::Ramp);
-		} else {
-			_session->tempo_map().replace_tempo (*tsp, Tempo (tsp->beats_per_minute(), tsp->note_type()), tsp->pulse(), TempoSection::Constant);
-		}
+		_session->tempo_map().replace_tempo (*tsp, Tempo (tsp->beats_per_minute(), tsp->note_type())
+						     , (tsp->position_lock_style() == MusicTime) ? tsp->pulse() : tsp->frame()
+						     , (tsp->type() == TempoSection::Ramp) ? TempoSection::Constant : TempoSection::Ramp);
 	}
 }
 

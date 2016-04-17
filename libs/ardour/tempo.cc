@@ -1931,23 +1931,7 @@ TempoMap::solve_map (Metrics& imaginary, TempoSection* section, const framepos_t
 		recompute_meters (imaginary);
 		return true;
 	}
-#if (0)
-	MetricSectionSorter cmp;
-	imaginary.sort (cmp);
-	if (section->position_lock_style() == MusicTime) {
-		/* we're setting the frame */
-		section->set_position_lock_style (AudioTime);
-		recompute_tempos (imaginary);
-		section->set_position_lock_style (MusicTime);
-	} else {
-		recompute_tempos (imaginary);
-	}
 
-	if (check_solved (imaginary, true)) {
-		recompute_meters (imaginary);
-		return true;
-	}
-#endif
 	//dump (imaginary, std::cerr);
 
 	return false;
@@ -2022,23 +2006,7 @@ TempoMap::solve_map (Metrics& imaginary, TempoSection* section, const double& pu
 		recompute_meters (imaginary);
 		return true;
 	}
-#if (0)
-	MetricSectionFrameSorter fcmp;
-	imaginary.sort (fcmp);
-	if (section->position_lock_style() == AudioTime) {
-		/* we're setting the pulse */
-		section->set_position_lock_style (MusicTime);
-		recompute_tempos (imaginary);
-		section->set_position_lock_style (AudioTime);
-	} else {
-		recompute_tempos (imaginary);
-	}
 
-	if (check_solved (imaginary, false)) {
-		recompute_meters (imaginary);
-		return true;
-	}
-#endif
 	//dump (imaginary, std::cerr);
 
 	return false;
@@ -2346,11 +2314,11 @@ TempoMap::gui_move_meter (MeterSection* ms, const framepos_t&  frame)
 }
 
 void
-TempoMap::gui_move_meter (MeterSection* ms, const double&  beat)
+TempoMap::gui_move_meter (MeterSection* ms, const double& pulse)
 {
 	{
 		Glib::Threads::RWLock::WriterLock lm (lock);
-		solve_map (_metrics, ms, pulse_at_beat_locked (_metrics, beat));
+		solve_map (_metrics, ms, pulse);
 	}
 
 	MetricPositionChanged (); // Emit Signal

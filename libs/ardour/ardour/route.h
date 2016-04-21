@@ -179,8 +179,6 @@ class LIBARDOUR_API Route : public Stripable,
 	bool is_safe () const {
 		return _solo_safe_control->get_value();
 	}
-
-	bool listening_via_monitor () const;
 	void enable_monitor_send ();
 
 	void set_denormal_protection (bool yn);

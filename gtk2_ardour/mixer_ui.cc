@@ -1817,25 +1817,6 @@ Mixer_UI::set_state (const XMLNode& node, int version)
 	return 0;
 }
 
-float
-paned_position_as_fraction (Gtk::Paned& paned, bool h)
-{
-	const guint pos = gtk_paned_get_position (const_cast<GtkPaned*>(static_cast<const Paned*>(&paned)->gobj()));
-	return (double) pos / (h ? paned.get_allocation().get_height() : paned.get_allocation().get_width());
-}
-
-void
-gtk_paned_set_position_as_fraction (Gtk::Paned& paned, float fraction, bool h)
-{
-	gint v = (h ? paned.get_allocation().get_height() : paned.get_allocation().get_width());
-
-	if (v < 1) {
-		return;
-	}
-
-	paned.set_position ((guint) floor (fraction * v));
-}
-
 XMLNode&
 Mixer_UI::get_state ()
 {
@@ -1926,7 +1907,7 @@ Mixer_UI::pane_allocation_handler (Allocation& allocation, Gtk::Paned* which)
 			}
 		} else {
 			if ((done[0] = (allocation.get_height() > 1.0/pos))) {
-				gtk_paned_set_position_as_fraction (rhs_pane1, pos, true);
+				paned_set_position_as_fraction (rhs_pane1, pos, true);
 			}
 		}
 	}
@@ -1949,7 +1930,7 @@ Mixer_UI::pane_allocation_handler (Allocation& allocation, Gtk::Paned* which)
 			}
 		} else {
 			if ((done[1] = (allocation.get_height() > 1.0/pos))) {
-				gtk_paned_set_position_as_fraction (rhs_pane2, pos, true);
+				paned_set_position_as_fraction (rhs_pane2, pos, true);
 			}
 		}
 	}
@@ -1972,7 +1953,7 @@ Mixer_UI::pane_allocation_handler (Allocation& allocation, Gtk::Paned* which)
 			}
 		} else {
 			if ((done[2] = (allocation.get_width() > 1.0/pos))) {
-				gtk_paned_set_position_as_fraction (list_hpane, pos, false);
+				paned_set_position_as_fraction (list_hpane, pos, false);
 			}
 		}
 	}
@@ -1995,7 +1976,7 @@ Mixer_UI::pane_allocation_handler (Allocation& allocation, Gtk::Paned* which)
 			}
 		} else {
 			if ((done[3] = (allocation.get_width() > 1.0/pos))) {
-				gtk_paned_set_position_as_fraction (inner_pane, pos, false);
+				paned_set_position_as_fraction (inner_pane, pos, false);
 			}
 		}
 	}

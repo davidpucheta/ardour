@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __pbd_event_loop_h__
 #define __pbd_event_loop_h__
@@ -45,40 +45,53 @@ namespace PBD
 
 class LIBPBD_API EventLoop
 {
-  public:
+public:
 	EventLoop (std::string const&);
-	virtual ~EventLoop() {}
+	virtual ~EventLoop();
 
 	enum RequestType {
 		range_guarantee = ~0
 	};
 
-        struct BaseRequestObject;
+	struct BaseRequestObject;
 
-        struct InvalidationRecord {
-	    std::list<BaseRequestObject*> requests;
-	    PBD::EventLoop* event_loop;
-	    const char* file;
-	    int line;
+	struct InvalidationRecord {
+		std::list<BaseRequestObject*> requests;
+		PBD::EventLoop* event_loop;
+		gint _valid;
+		gint _ref;
+		const char* file;
+		int line;
 
-	    InvalidationRecord() : event_loop (0) {}
-        };
+		InvalidationRecord() : event_loop (0), _valid (1), _ref (0) {}
+		void invalidate () { g_atomic_int_set (&_valid, 0); }
+		bool valid () { return g_atomic_int_get (&_valid) == 1; }
 
-        static void* invalidate_request (void* data);
+		void ref ()    { g_atomic_int_inc (&_ref); }
+		void unref ()  { (void) g_atomic_int_dec_and_test (&_ref); }
+		bool in_use () { return g_atomic_int_get (&_ref) > 0; }
+		int  use_count () { return g_atomic_int_get (&_ref); }
+	};
+
+	static void* invalidate_request (void* data);
 
 	struct BaseRequestObject {
-	    RequestType             type;
-            bool                    valid;
-            InvalidationRecord*     invalidation;
-	    boost::function<void()> the_slot;
+		RequestType             type;
+		InvalidationRecord*     invalidation;
+		boost::function<void()> the_slot;
 
-            BaseRequestObject() : valid (true), invalidation (0) {}
+		BaseRequestObject() : invalidation (0) {}
+		~BaseRequestObject() {
+			if (invalidation) {
+				invalidation->unref ();
+			}
+		}
 	};
 
 	virtual void call_slot (InvalidationRecord*, const boost::function<void()>&) = 0;
-        virtual Glib::Threads::Mutex& slot_invalidation_mutex() = 0;
+	virtual Glib::Threads::Mutex& slot_invalidation_mutex() = 0;
 
-        std::string event_loop_name() const { return _name; }
+	std::string event_loop_name() const { return _name; }
 
 	static EventLoop* get_event_loop_for_thread();
 	static void set_event_loop_for_thread (EventLoop* ui);
@@ -95,8 +108,10 @@ class LIBPBD_API EventLoop
 	static void pre_register (const std::string& emitting_thread_name, uint32_t num_requests);
 	static void remove_request_buffer_from_map (void* ptr);
 
-  private:
-        static Glib::Threads::Private<EventLoop> thread_event_loop;
+	std::list<InvalidationRecord*> trash;
+
+private:
+	static Glib::Threads::Private<EventLoop> thread_event_loop;
 	std::string _name;
 
 	typedef std::map<std::string,ThreadBufferMapping> ThreadRequestBufferList;
@@ -106,14 +121,14 @@ class LIBPBD_API EventLoop
 	struct RequestBufferSupplier {
 
 		/* @param name : name of object/entity that will/may accept
-		   requests from other threads, via a request buffer.
-		*/
+		 * requests from other threads, via a request buffer.
+		 */
 		std::string name;
 
 		/* @param factory : a function that can be called (with an
-		   argument specifying the @param number_of_requests) to create and
-		   return a request buffer for communicating with @param name)
-		*/
+		 * argument specifying the @param number_of_requests) to create and
+		 * return a request buffer for communicating with @param name)
+		 */
 		void* (*factory)(uint32_t nunber_of_requests);
 	};
 	typedef std::vector<RequestBufferSupplier> RequestBufferSuppliers;

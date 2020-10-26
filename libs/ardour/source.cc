@@ -1,21 +1,27 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2000-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005-2006 Jesse Chappell <jesse@essej.net>
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2018 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -33,25 +39,35 @@
 #include "pbd/xml++.h"
 #include "pbd/pthread_utils.h"
 #include "pbd/enumwriter.h"
+#include "pbd/types_convert.h"
 
 #include "ardour/debug.h"
 #include "ardour/profile.h"
 #include "ardour/session.h"
 #include "ardour/source.h"
 #include "ardour/transient_detector.h"
+#include "ardour/types_convert.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
+
+namespace PBD {
+	DEFINE_ENUM_CONVERT(ARDOUR::Source::Flag);
+}
 
 using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
 
+PBD::Signal1<void,boost::shared_ptr<ARDOUR::Source> > Source::SourcePropertyChanged;
+
+
 Source::Source (Session& s, DataType type, const string& name, Flag flags)
 	: SessionObject(s, name)
 	, _type(type)
 	, _flags(flags)
-	, _timeline_position(0)
-        , _use_count (0)
+	, _natural_position(0)
+	, _have_natural_position (false)
+	, _use_count (0)
 	, _level (0)
 {
 	_analysed = false;
@@ -63,7 +79,8 @@ Source::Source (Session& s, const XMLNode& node)
 	: SessionObject(s, "unnamed source")
 	, _type(DataType::AUDIO)
 	, _flags (Flag (Writable|CanRename))
-	, _timeline_position(0)
+	, _natural_position(0)
+	, _have_natural_position (false)
         , _use_count (0)
 	, _level (0)
 {
@@ -94,17 +111,20 @@ XMLNode&
 Source::get_state ()
 {
 	XMLNode *node = new XMLNode ("Source");
-	char buf[64];
 
-	node->add_property ("name", name());
-	node->add_property ("type", _type.to_string());
-	node->add_property (X_("flags"), enum_2_string (_flags));
-	id().print (buf, sizeof (buf));
-	node->add_property ("id", buf);
+	node->set_property ("name", name());
+	node->set_property ("take-id", take_id());
+	node->set_property ("type", _type);
+	node->set_property (X_("flags"), _flags);
+	node->set_property ("id", id());
 
 	if (_timestamp != 0) {
-		snprintf (buf, sizeof (buf), "%ld", _timestamp);
-		node->add_property ("timestamp", buf);
+		int64_t t = _timestamp;
+		node->set_property ("timestamp", t);
+	}
+
+	if (_have_natural_position) {
+		node->set_property ("natural-position", _natural_position);
 	}
 
 	return *node;
@@ -113,10 +133,9 @@ Source::get_state ()
 int
 Source::set_state (const XMLNode& node, int version)
 {
-	const XMLProperty* prop;
-
-	if ((prop = node.property ("name")) != 0) {
-		_name = prop->value();
+	std::string str;
+	if (node.get_property ("name", str)) {
+		_name = str;
 	} else {
 		return -1;
 	}
@@ -125,29 +144,43 @@ Source::set_state (const XMLNode& node, int version)
 		return -1;
 	}
 
-	if ((prop = node.property ("type")) != 0) {
-		_type = DataType(prop->value());
+	node.get_property ("type", _type);
+
+	int64_t t;
+	if (node.get_property ("timestamp", t)) {
+		_timestamp = (time_t) t;
 	}
 
-	if ((prop = node.property ("timestamp")) != 0) {
-		sscanf (prop->value().c_str(), "%ld", &_timestamp);
+	samplepos_t ts;
+	if (node.get_property ("natural-position", ts)) {
+		_natural_position = ts;
+		_have_natural_position = true;
+	} else if (node.get_property ("timeline-position", ts)) {
+		/* some older versions of ardour might have stored this with
+		   this property name.
+		*/
+		_natural_position = ts;
+		_have_natural_position = true;
 	}
 
-	if ((prop = node.property (X_("flags"))) != 0) {
-		_flags = Flag (string_2_enum (prop->value(), _flags));
-	} else {
+	if (!node.get_property (X_("flags"), _flags)) {
 		_flags = Flag (0);
+	}
 
+	/* Destructive is no longer valid */
+
+	if (_flags & Destructive) {
+		_session.set_had_destructive_tracks (true);
+	}
+	_flags = Flag (_flags & ~Destructive);
+
+	if (!node.get_property (X_("take-id"), _take_id)) {
+		_take_id = "";
 	}
 
 	/* old style, from the period when we had DestructiveFileSource */
-	if ((prop = node.property (X_("destructive"))) != 0) {
-		_flags = Flag (_flags | Destructive);
-	}
-
-	if (Profile->get_trx() && (_flags & Destructive)) {
-		error << string_compose (_("%1: this session uses destructive tracks, which are not supported"), PROGRAM_NAME) << endmsg;
-		return -1;
+	if (node.get_property (X_("destructive"), str)) {
+		_session.set_had_destructive_tracks (true);
 	}
 
 	if (version < 3000) {
@@ -155,9 +188,7 @@ Source::set_state (const XMLNode& node, int version)
 		   and therefore cannot be removable/writable etc. etc.; 2.X
 		   sometimes marks sources as removable which shouldn't be.
 		*/
-		if (!(_flags & Destructive)) {
-			_flags = Flag (_flags & ~(Writable|Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
-		}
+		_flags = Flag (_flags & ~(Writable|Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
 	}
 
 	return 0;
@@ -202,8 +233,8 @@ Source::load_transients (const string& path)
 			break;
 		}
 
-		framepos_t frame = (framepos_t) floor (val * _session.frame_rate());
-		transients.push_back (frame);
+		samplepos_t sample = (samplepos_t) floor (val * _session.sample_rate());
+		transients.push_back (sample);
 	}
 
 	::fclose (tf);
@@ -254,22 +285,19 @@ Source::check_for_analysis_data_on_disk ()
 void
 Source::mark_for_remove ()
 {
-	// This operation is not allowed for sources for destructive tracks or out-of-session files.
+	// This operation is not allowed for sources for out-of-session files.
 
 	/* XXX need a way to detect _within_session() condition here - move it from FileSource?
 	 */
-
-	if ((_flags & Destructive)) {
-		return;
-	}
 
 	_flags = Flag (_flags | Removable | RemoveAtDestroy);
 }
 
 void
-Source::set_timeline_position (framepos_t pos)
+Source::set_natural_position (samplepos_t pos)
 {
-	_timeline_position = pos;
+	_natural_position = pos;
+	_have_natural_position = true;
 }
 
 void
@@ -289,7 +317,14 @@ Source::set_allow_remove_if_empty (bool yn)
 void
 Source::inc_use_count ()
 {
-        g_atomic_int_inc (&_use_count);
+    g_atomic_int_inc (&_use_count);
+
+    try {
+	    boost::shared_ptr<Source> sptr = shared_from_this();
+	    SourcePropertyChanged (sptr);
+    } catch (...) {
+	    /* no shared_ptr available, relax; */
+    }
 }
 
 void
@@ -305,6 +340,13 @@ Source::dec_use_count ()
 #else
         g_atomic_int_add (&_use_count, -1);
 #endif
+
+	try {
+		boost::shared_ptr<Source> sptr = shared_from_this();
+		SourcePropertyChanged (sptr);
+	} catch (...) {
+		/* no shared_ptr available, relax; */
+	}
 }
 
 bool
@@ -312,4 +354,3 @@ Source::writable () const
 {
         return (_flags & Writable) && _session.writable();
 }
-

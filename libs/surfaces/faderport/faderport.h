@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2015-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef ardour_surface_faderport_h
 #define ardour_surface_faderport_h
@@ -34,7 +34,6 @@
 
 namespace PBD {
 	class Controllable;
-	class ControllableDescriptor;
 }
 
 #include <midi++/types.h>
@@ -164,9 +163,9 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 	std::list<boost::shared_ptr<ARDOUR::Bundle> > bundles ();
 
   private:
-	boost::shared_ptr<ARDOUR::Route> _current_route;
-	boost::weak_ptr<ARDOUR::Route> pre_master_route;
-	boost::weak_ptr<ARDOUR::Route> pre_monitor_route;
+	boost::shared_ptr<ARDOUR::Stripable> _current_stripable;
+	boost::weak_ptr<ARDOUR::Stripable> pre_master_stripable;
+	boost::weak_ptr<ARDOUR::Stripable> pre_monitor_stripable;
 
 	boost::shared_ptr<ARDOUR::AsyncMIDIPort> _input_port;
 	boost::shared_ptr<ARDOUR::AsyncMIDIPort> _output_port;
@@ -178,7 +177,7 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 
 	PBD::ScopedConnectionList midi_connections;
 
-	bool midi_input_handler (Glib::IOCondition ioc, boost::shared_ptr<ARDOUR::AsyncMIDIPort> port);
+	bool midi_input_handler (Glib::IOCondition ioc, boost::weak_ptr<ARDOUR::AsyncMIDIPort> port);
 
 	mutable void *gui;
 	void build_gui ();
@@ -232,7 +231,7 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 		std::string get_action (bool press, FaderPort::ButtonState bs = ButtonState (0));
 
 		void set_led_state (boost::shared_ptr<MIDI::Port>, bool onoff);
-		void invoke (ButtonState bs, bool press);
+		bool invoke (ButtonState bs, bool press);
 		bool uses_flash () const { return flash; }
 		void set_flash (bool yn) { flash = yn; }
 
@@ -294,17 +293,16 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 	void start_blinking (ButtonID);
 	void stop_blinking (ButtonID);
 
-	void set_current_route (boost::shared_ptr<ARDOUR::Route>);
-	void drop_current_route ();
+	void set_current_stripable (boost::shared_ptr<ARDOUR::Stripable>);
+	void drop_current_stripable ();
 	void use_master ();
 	void use_monitor ();
-	void gui_track_selection_changed (ARDOUR::RouteNotificationListPtr);
+	void stripable_selection_changed ();
 	PBD::ScopedConnection selection_connection;
-	PBD::ScopedConnectionList route_connections;
+	PBD::ScopedConnectionList stripable_connections;
 
-	void map_route_state ();
+	void map_stripable_state ();
 	void map_solo ();
-	void map_listen ();
 	void map_mute ();
 	bool rec_enable_state;
 	void map_recenable ();
@@ -330,9 +328,8 @@ class FaderPort : public ARDOUR::ControlProtocol, public AbstractUI<FaderPortReq
 	void mute ();
 	void rec_enable ();
 
-	void ardour_pan_azimuth (int);
-	void ardour_pan_width (int);
-	void mixbus_pan (int);
+	void pan_azimuth (int);
+	void pan_width (int);
 
 	void punch ();
 };

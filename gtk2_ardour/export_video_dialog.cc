@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2015 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 André Nusser <andre.nusser@googlemail.com>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cstdio>
 #include <string>
 #include <sstream>
@@ -28,6 +30,10 @@
 #include <fcntl.h>
 
 #include <sigc++/bind.h>
+
+#include <gtkmm/filechooserdialog.h>
+#include <gtkmm/stock.h>
+#include <gtkmm/table.h>
 
 #include "pbd/gstdio_compat.h"
 
@@ -55,7 +61,7 @@
 #include "opts.h"
 #include "export_video_dialog.h"
 #include "utils_videotl.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace std;
@@ -150,7 +156,6 @@ ExportVideoDialog::ExportVideoDialog ()
 	path_hbox->pack_start (*l, false, false, 2);
 	vbox->pack_start (*path_hbox, false, false, 2);
 
-	insnd_combo.append_text (string_compose (_("from the %1 session's start to the session's end"), PROGRAM_NAME));
 	outfn_path_entry.set_width_chars(38);
 
 	l = manage (new Label (_("<b>Settings:</b>"), Gtk::ALIGN_LEFT, Gtk::ALIGN_CENTER, false));
@@ -330,14 +335,19 @@ ExportVideoDialog::apply_state (TimeSelection &tme, bool range)
 	outfn_path_entry.set_text (_session->session_directory().export_path() + G_DIR_SEPARATOR +"export.avi");
 
 	// TODO remember setting for export-range.. somehow, (let explicit range override)
-	frameoffset_t av_offset = ARDOUR_UI::instance()->video_timeline->get_offset();
+	sampleoffset_t av_offset = ARDOUR_UI::instance()->video_timeline->get_offset();
+
+	insnd_combo.remove_all ();
+
+	insnd_combo.append_text (_("from session start marker to session end marker"));
+
 	if (av_offset < 0 ) {
-		insnd_combo.append_text (_("from 00:00:00:00 to the video's end"));
+		insnd_combo.append_text (_("from 00:00:00:00 to the video end"));
 	} else {
-		insnd_combo.append_text (_("from the video's start to the video's end"));
+		insnd_combo.append_text (_("from video start to video end"));
 	}
 	if (!export_range.empty()) {
-		insnd_combo.append_text (_("Selected range"));  // TODO show export_range.start() -> export_range.end_frame()
+		insnd_combo.append_text (_("Selected range"));  // TODO show export_range.start() -> export_range.end_sample()
 	}
 	if (range) {
 		insnd_combo.set_active(2);
@@ -366,25 +376,21 @@ ExportVideoDialog::apply_state (TimeSelection &tme, bool range)
 
 	float tcfps = _session->timecode_frames_per_second();
 
-	LocaleGuard lg (X_("C"));
-
 	XMLNode* node = _session->extra_xml (X_("Videotimeline"));
 	bool filenameset = false;
 	if (node) {
-		if (node->property(X_("OriginalVideoFile"))) {
-			std::string filename = node->property(X_("OriginalVideoFile"))->value();
+		std::string filename;
+		if (node->get_property(X_("OriginalVideoFile"), filename)) {
 			if (Glib::file_test(filename, Glib::FILE_TEST_EXISTS)) {
 				invid_path_entry.set_text (filename);
 				filenameset = true;
 			}
 		}
-		if (!filenameset
-				&& node->property(X_("Filename"))
-				&& node->property(X_("LocalFile"))
-				&& node->property(X_("LocalFile"))->value() == X_("1")
-		   )
-		{
-			std::string filename = node->property(X_("Filename"))->value();
+
+		bool local_file;
+
+		if (!filenameset && node->get_property (X_("Filename"), filename) &&
+		    node->get_property (X_("LocalFile"), local_file) && local_file) {
 			if (filename.at(0) != G_DIR_SEPARATOR)
 			{
 				filename = Glib::build_filename (_session->session_directory().video_path(), filename);
@@ -402,55 +408,78 @@ ExportVideoDialog::apply_state (TimeSelection &tme, bool range)
 
 	node = _session->extra_xml (X_("Videoexport"));
 	if (node) {
-		const XMLProperty* prop;
-		prop = node->property (X_("ChangeGeometry"));
-		if (prop) { scale_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("KeepAspect"));
-		if (prop) { scale_aspect.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("ChangeAspect"));
-		if (prop) { aspect_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("NormalizeAudio"));
-		if (prop) { normalize_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("TwoPassEncode"));
-		if (prop) { twopass_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("CodecOptimzations"));
-		if (prop) { optimizations_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("Deinterlace"));
-		if (prop) { deinterlace_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("BFrames"));
-		if (prop) { bframes_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("ChangeFPS"));
-		if (prop) { fps_checkbox.set_active(atoi(prop->value())?true:false); }
-		prop = node->property (X_("Metadata"));
-		if (prop) { meta_checkbox.set_active(atoi(prop->value())?true:false); }
+		bool yn;
+		if (node->get_property (X_("ChangeGeometry"), yn)) {
+			scale_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("KeepAspect"), yn)) {
+			scale_aspect.set_active (yn);
+		}
+		if (node->get_property (X_("ChangeAspect"), yn)) {
+			aspect_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("NormalizeAudio"), yn)) {
+			normalize_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("TwoPassEncode"), yn)) {
+			twopass_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("CodecOptimzations"), yn)) {
+			optimizations_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("Deinterlace"), yn)) {
+			deinterlace_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("BSamples"), yn)) {
+			bframes_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("ChangeFPS"), yn)) {
+			fps_checkbox.set_active (yn);
+		}
+		if (node->get_property (X_("Metadata"), yn)) {
+			meta_checkbox.set_active (yn);
+		}
 
-		prop = node->property (X_("Format"));
-		if (prop && !prop->value().empty()) { change_file_extension( "." + prop->value()); }
+		std::string str;
+		if (node->get_property (X_("Format"), str) && !str.empty()) {
+			change_file_extension ("." + str);
+		}
 
 		_suspend_signals = true;
-		prop = node->property (X_("Width"));
-		if (prop) { width_spinner.set_value(atoi(prop->value())); }
-		prop = node->property (X_("Height"));
-		if (prop) { height_spinner.set_value(atoi(prop->value())); }
+		double val;
+		if (node->get_property (X_("Width"), val)) {
+			width_spinner.set_value (val);
+		}
+		if (node->get_property (X_("Height"), val)) {
+			height_spinner.set_value (val);
+		}
 		_suspend_signals = false;
 
-		prop = node->property (X_("FPS"));
-		if (prop && fps_checkbox.get_active()) { tcfps = atof(prop->value()); }
+		if (fps_checkbox.get_active () && node->get_property (X_("FPS"), val)) {
+			tcfps = val;
+		}
 
-		prop = node->property (X_("Preset"));
-		if (prop) { preset_combo.set_active_text(prop->value()); }
-		prop = node->property (X_("VCodec"));
-		if (prop) { video_codec_combo.set_active_text(prop->value()); }
-		prop = node->property (X_("ACodec"));
-		if (prop) { audio_codec_combo.set_active_text(prop->value()); }
-		prop = node->property (X_("VBitrate"));
-		if (prop) { video_bitrate_combo.set_active_text(prop->value()); }
-		prop = node->property (X_("ABitrate"));
-		if (prop) { audio_bitrate_combo.set_active_text(prop->value()); }
-		prop = node->property (X_("AspectRatio"));
-		if (prop) { aspect_combo.set_active_text(prop->value()); }
-		prop = node->property (X_("SampleRate"));
-		if (prop) { audio_samplerate_combo.set_active_text(prop->value()); }
+		if (node->get_property (X_("Preset"), str)) {
+			preset_combo.set_active_text (str);
+		}
+		if (node->get_property (X_("VCodec"), str)) {
+			video_codec_combo.set_active_text (str);
+		}
+		if (node->get_property (X_("ACodec"), str)) {
+			audio_codec_combo.set_active_text (str);
+		}
+		if (node->get_property (X_("VBitrate"), str)) {
+			video_bitrate_combo.set_active_text (str);
+		}
+		if (node->get_property (X_("ABitrate"), str)) {
+			audio_bitrate_combo.set_active_text (str);
+		}
+		if (node->get_property (X_("AspectRatio"), str)) {
+			aspect_combo.set_active_text (str);
+		}
+		if (node->get_property (X_("SampleRate"), str)) {
+			audio_samplerate_combo.set_active_text (str);
+		}
 	}
 
 	if      (fabs(tcfps - 23.976) < 0.01) { fps_combo.set_active(0); }
@@ -482,32 +511,31 @@ ExportVideoDialog::apply_state (TimeSelection &tme, bool range)
 XMLNode&
 ExportVideoDialog::get_state ()
 {
-	LocaleGuard lg (X_("C"));
 	XMLNode* node = new XMLNode (X_("Videoexport"));
-	node->add_property (X_("ChangeGeometry"), scale_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("KeepAspect"), scale_aspect.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("ChangeAspect"), aspect_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("NormalizeAudio"), normalize_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("TwoPassEncode"), twopass_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("CodecOptimzations"), optimizations_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("Deinterlace"), deinterlace_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("BFrames"), bframes_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("ChangeFPS"), fps_checkbox.get_active() ? X_("1") : X_("0"));
-	node->add_property (X_("Metadata"), meta_checkbox.get_active() ? X_("1") : X_("0"));
+	node->set_property (X_("ChangeGeometry"), scale_checkbox.get_active());
+	node->set_property (X_("KeepAspect"), scale_aspect.get_active());
+	node->set_property (X_("ChangeAspect"), aspect_checkbox.get_active());
+	node->set_property (X_("NormalizeAudio"), normalize_checkbox.get_active());
+	node->set_property (X_("TwoPassEncode"), twopass_checkbox.get_active());
+	node->set_property (X_("CodecOptimzations"), optimizations_checkbox.get_active());
+	node->set_property (X_("Deinterlace"), deinterlace_checkbox.get_active());
+	node->set_property (X_("BSamples"), bframes_checkbox.get_active());
+	node->set_property (X_("ChangeFPS"), fps_checkbox.get_active());
+	node->set_property (X_("Metadata"), meta_checkbox.get_active());
 
-	node->add_property (X_("Format"), get_file_extension(outfn_path_entry.get_text()));
+	node->set_property (X_("Format"), get_file_extension(outfn_path_entry.get_text()));
 
-	node->add_property (X_("Width"), width_spinner.get_value());
-	node->add_property (X_("Height"), height_spinner.get_value());
+	node->set_property (X_("Width"), width_spinner.get_value());
+	node->set_property (X_("Height"), height_spinner.get_value());
 
-	node->add_property (X_("Preset"), preset_combo.get_active_text());
-	node->add_property (X_("VCodec"), video_codec_combo.get_active_text());
-	node->add_property (X_("ACodec"), audio_codec_combo.get_active_text());
-	node->add_property (X_("VBitrate"), video_bitrate_combo.get_active_text());
-	node->add_property (X_("ABitrate"), audio_bitrate_combo.get_active_text());
-	node->add_property (X_("AspectRatio"), aspect_combo.get_active_text());
-	node->add_property (X_("SampleRate"), audio_samplerate_combo.get_active_text());
-	node->add_property (X_("FPS"), fps_combo.get_active_text());
+	node->set_property (X_("Preset"), preset_combo.get_active_text());
+	node->set_property (X_("VCodec"), video_codec_combo.get_active_text());
+	node->set_property (X_("ACodec"), audio_codec_combo.get_active_text());
+	node->set_property (X_("VBitrate"), video_bitrate_combo.get_active_text());
+	node->set_property (X_("ABitrate"), audio_bitrate_combo.get_active_text());
+	node->set_property (X_("AspectRatio"), aspect_combo.get_active_text());
+	node->set_property (X_("SampleRate"), audio_samplerate_combo.get_active_text());
+	node->set_property (X_("FPS"), fps_combo.get_active_text());
 
 	return *node;
 }
@@ -533,7 +561,7 @@ ExportVideoDialog::abort_clicked ()
 }
 
 void
-ExportVideoDialog::update_progress (framecnt_t c, framecnt_t a)
+ExportVideoDialog::update_progress (samplecnt_t c, samplecnt_t a)
 {
 	if (a == 0 || c > a) {
 		pbar.set_pulse_step(.1);
@@ -559,12 +587,12 @@ ExportVideoDialog::audio_progress_display ()
 	switch (status->active_job) {
 		case ExportStatus::Normalizing:
 			pbar.set_text (_("Normalizing audio"));
-			progress = ((float) status->current_normalize_cycle) / status->total_normalize_cycles;
+			progress = ((float) status->current_postprocessing_cycle) / status->total_postprocessing_cycles;
 			progress = progress / (_twopass ? 4.0 : 3.0) + (_twopass ? .25 : 1.0 / 3.0);
 			break;
 		case ExportStatus::Exporting:
 			pbar.set_text (_("Exporting audio"));
-			progress = ((float) status->processed_frames_current_timespan) / status->total_frames_current_timespan;
+			progress = ((float) status->processed_samples_current_timespan) / status->total_samples_current_timespan;
 			progress = progress / ((_twopass ? 2.0 : 1.0) + (_normalize ? 2.0 : 1.0));
 			break;
 		default:
@@ -644,7 +672,7 @@ ExportVideoDialog::launch_export ()
 	XMLTree tree;
 	std::string vtl_samplerate = audio_samplerate_combo.get_active_text();
 	std::string vtl_normalize = _normalize ? "true" : "false";
-	tree.read_buffer(std::string(
+	tree.read_buffer(std::string (
 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
 "<ExportFormatSpecification name=\"VTL-WAV-16\" id=\"3094591e-ccb9-4385-a93f-c9955ffeb1f0\">"
 "  <Encoding id=\"F_WAV\" type=\"T_Sndfile\" extension=\"wav\" name=\"WAV\" has-sample-format=\"true\" channel-limit=\"256\"/>"
@@ -675,23 +703,23 @@ ExportVideoDialog::launch_export ()
 "    </Silence>"
 "  </Processing>"
 "</ExportFormatSpecification>"
-));
+	).c_str());
 	boost::shared_ptr<ExportFormatSpecification> fmp = _session->get_export_handler()->add_format(*tree.root());
 
 	/* set up range */
-	framepos_t start, end;
+	samplepos_t start, end;
 	start = end = 0;
 	if (insnd_combo.get_active_row_number() == 1) {
 		_transcoder = new TranscodeFfmpeg(invid_path_entry.get_text());
 		if (_transcoder->probe_ok() && _transcoder->get_fps() > 0) {
-			end = _transcoder->get_duration() * _session->nominal_frame_rate() / _transcoder->get_fps();
+			end = _transcoder->get_duration() * _session->nominal_sample_rate() / _transcoder->get_fps();
 		} else {
 			warning << _("Export Video: Cannot query duration of video-file, using duration from timeline instead.") << endmsg;
 			end = ARDOUR_UI::instance()->video_timeline->get_duration();
 		}
 		if (_transcoder) {delete _transcoder; _transcoder = 0;}
 
-		frameoffset_t av_offset = ARDOUR_UI::instance()->video_timeline->get_offset();
+		sampleoffset_t av_offset = ARDOUR_UI::instance()->video_timeline->get_offset();
 #if 0 /* DEBUG */
 		printf("audio-range -- AV offset: %lld\n", av_offset);
 #endif
@@ -701,19 +729,19 @@ ExportVideoDialog::launch_export ()
 		end += av_offset;
 	}
 	else if (insnd_combo.get_active_row_number() == 2) {
-		start = ARDOUR_UI::instance()->video_timeline->quantify_frames_to_apv(export_range.start());
-		end   = ARDOUR_UI::instance()->video_timeline->quantify_frames_to_apv(export_range.end_frame());
+		start = ARDOUR_UI::instance()->video_timeline->quantify_samples_to_apv(export_range.start());
+		end   = ARDOUR_UI::instance()->video_timeline->quantify_samples_to_apv(export_range.end_sample());
 	}
 	if (end <= 0) {
-		start = _session->current_start_frame();
-		end   = _session->current_end_frame();
+		start = _session->current_start_sample();
+		end   = _session->current_end_sample();
 	}
 #if 0 /* DEBUG */
 	printf("audio export-range %lld -> %lld\n", start, end);
 #endif
 
-	const frameoffset_t vstart = ARDOUR_UI::instance()->video_timeline->get_offset();
-	const frameoffset_t vend   = vstart + ARDOUR_UI::instance()->video_timeline->get_duration();
+	const sampleoffset_t vstart = ARDOUR_UI::instance()->video_timeline->get_offset();
+	const sampleoffset_t vend   = vstart + ARDOUR_UI::instance()->video_timeline->get_duration();
 
 	if ( (start >= end) || (end < vstart) || (start > vend)) {
 		warning << _("Export Video: export-range does not include video.") << endmsg;
@@ -749,6 +777,7 @@ ExportVideoDialog::launch_export ()
 
 	/* do sound export */
 	fmp->set_soundcloud_upload(false);
+	_session->get_export_handler()->reset ();
 	_session->get_export_handler()->add_export_config (tsp, ccp, fmp, fnp, b);
 	_session->get_export_handler()->do_export();
 	status = _session->get_export_status ();
@@ -764,7 +793,7 @@ ExportVideoDialog::launch_export ()
 		}
 	}
 	audio_progress_connection.disconnect();
-	status->finish ();
+	status->finish (TRS_UI);
 	if (status->aborted()) {
 		::g_unlink (_insnd.c_str());
 		delete _transcoder; _transcoder = 0;
@@ -914,23 +943,23 @@ ExportVideoDialog::encode_pass (int pass)
 		ffs["-passlogfile"] =  Glib::path_get_dirname (outfn) + G_DIR_SEPARATOR + "ffmpeg2pass";
 	}
 
-	frameoffset_t av_offset = ARDOUR_UI::instance()->video_timeline->get_offset();
+	sampleoffset_t av_offset = ARDOUR_UI::instance()->video_timeline->get_offset();
 	double duration_s  = 0;
 
 	if (insnd_combo.get_active_row_number() == 0) {
 		/* session start to session end */
-		framecnt_t duration_f = _session->current_end_frame() - _session->current_start_frame();
-		duration_s = (double)duration_f / (double)_session->nominal_frame_rate();
+		samplecnt_t duration_f = _session->current_end_sample() - _session->current_start_sample();
+		duration_s = (double)duration_f / (double)_session->nominal_sample_rate();
 	} else if (insnd_combo.get_active_row_number() == 2) {
 		/* selected range */
-		duration_s = export_range.length() / (double)_session->nominal_frame_rate();
+		duration_s = export_range.length() / (double)_session->nominal_sample_rate();
 	} else {
 		/* video start to end */
-		framecnt_t duration_f = ARDOUR_UI::instance()->video_timeline->get_duration();
+		samplecnt_t duration_f = ARDOUR_UI::instance()->video_timeline->get_duration();
 		if (av_offset < 0 ) {
 			duration_f += av_offset;
 		}
-		duration_s = (double)duration_f / (double)_session->nominal_frame_rate();
+		duration_s = (double)duration_f / (double)_session->nominal_sample_rate();
 	}
 
 	std::ostringstream osstream; osstream << duration_s;
@@ -938,14 +967,14 @@ ExportVideoDialog::encode_pass (int pass)
 	_transcoder->set_duration(duration_s * _transcoder->get_fps());
 
 	if (insnd_combo.get_active_row_number() == 0 || insnd_combo.get_active_row_number() == 2) {
-		framepos_t start, snend;
-		const frameoffset_t vid_duration = ARDOUR_UI::instance()->video_timeline->get_duration();
+		samplepos_t start, snend;
+		const sampleoffset_t vid_duration = ARDOUR_UI::instance()->video_timeline->get_duration();
 		if (insnd_combo.get_active_row_number() == 0) {
-			start = _session->current_start_frame();
-			snend = _session->current_end_frame();
+			start = _session->current_start_sample();
+			snend = _session->current_end_sample();
 		} else {
 			start = export_range.start();
-			snend = export_range.end_frame();
+			snend = export_range.end_sample();
 		}
 
 #if 0 /* DEBUG */
@@ -954,53 +983,34 @@ ExportVideoDialog::encode_pass (int pass)
 #endif
 
 		if (av_offset > start && av_offset + vid_duration < snend) {
-			_transcoder->set_leadinout((av_offset - start) / (double)_session->nominal_frame_rate(),
-				(snend - (av_offset + vid_duration)) / (double)_session->nominal_frame_rate());
+			_transcoder->set_leadinout((av_offset - start) / (double)_session->nominal_sample_rate(),
+				(snend - (av_offset + vid_duration)) / (double)_session->nominal_sample_rate());
 		} else if (av_offset > start) {
-			_transcoder->set_leadinout((av_offset - start) / (double)_session->nominal_frame_rate(), 0);
+			_transcoder->set_leadinout((av_offset - start) / (double)_session->nominal_sample_rate(), 0);
 		} else if (av_offset + vid_duration < snend) {
-			_transcoder->set_leadinout(0, (snend - (av_offset + vid_duration)) / (double)_session->nominal_frame_rate());
-			_transcoder->set_avoffset((av_offset - start) / (double)_session->nominal_frame_rate());
+			_transcoder->set_leadinout(0, (snend - (av_offset + vid_duration)) / (double)_session->nominal_sample_rate());
+			_transcoder->set_avoffset((av_offset - start) / (double)_session->nominal_sample_rate());
 		}
 #if 0
 		else if (start > av_offset) {
-			std::ostringstream osstream; osstream << ((start - av_offset) / (double)_session->nominal_frame_rate());
+			std::ostringstream osstream; osstream << ((start - av_offset) / (double)_session->nominal_sample_rate());
 			ffs["-ss"] = osstream.str();
 		}
 #endif
 		else {
-			_transcoder->set_avoffset((av_offset - start) / (double)_session->nominal_frame_rate());
+			_transcoder->set_avoffset((av_offset - start) / (double)_session->nominal_sample_rate());
 		}
 
 	} else if (av_offset < 0) {
 		/* from 00:00:00:00 to video-end */
-		_transcoder->set_avoffset(av_offset / (double)_session->nominal_frame_rate());
+		_transcoder->set_avoffset(av_offset / (double)_session->nominal_sample_rate());
 	}
 
-	TranscodeFfmpeg::FFSettings meta = _transcoder->default_meta_data();
+	/* NOTE: type (MetaDataMap) == type (FFSettings) == map<string, string> */
+	ARDOUR::SessionMetadata::MetaDataMap meta = _transcoder->default_meta_data();
 	if (meta_checkbox.get_active()) {
 		ARDOUR::SessionMetadata * session_data = ARDOUR::SessionMetadata::Metadata();
-		if (session_data->year() > 0 ) {
-			std::ostringstream osstream; osstream << session_data->year();
-			meta["year"] = osstream.str();
-		}
-		if (session_data->track_number() > 0 ) {
-			std::ostringstream osstream; osstream << session_data->track_number();
-			meta["track"] = osstream.str();
-		}
-		if (session_data->disc_number() > 0 ) {
-			std::ostringstream osstream; osstream << session_data->disc_number();
-			meta["disc"] = osstream.str();
-		}
-		if (!session_data->title().empty())     {meta["title"] = session_data->title();}
-		if (!session_data->artist().empty())    {meta["author"] = session_data->artist();}
-		if (!session_data->album_artist().empty()) {meta["album_artist"] = session_data->album_artist();}
-		if (!session_data->album().empty())     {meta["album"] = session_data->album();}
-		if (!session_data->genre().empty())     {meta["genre"] = session_data->genre();}
-		if (!session_data->composer().empty())  {meta["composer"] = session_data->composer();}
-		if (!session_data->comment().empty())   {meta["comment"] = session_data->comment();}
-		if (!session_data->copyright().empty()) {meta["copyright"] = session_data->copyright();}
-		if (!session_data->subtitle().empty())  {meta["description"] = session_data->subtitle();}
+		session_data->av_export_tag (meta);
 	}
 
 #if 1 /* tentative debug mode */
@@ -1135,7 +1145,7 @@ ExportVideoDialog::preset_combo_changed ()
 		video_codec_combo.set_active(6);
 		audio_bitrate_combo.set_active(2);
 		video_bitrate_combo.set_active(4);
-		if (_session->nominal_frame_rate() == 48000 || _session->nominal_frame_rate() == 96000) {
+		if (_session->nominal_sample_rate() == 48000 || _session->nominal_sample_rate() == 96000) {
 			audio_samplerate_combo.set_active(2);
 		} else {
 			audio_samplerate_combo.set_active(1);
@@ -1147,7 +1157,7 @@ ExportVideoDialog::preset_combo_changed ()
 		video_codec_combo.set_active(2);
 		audio_bitrate_combo.set_active(3);
 		video_bitrate_combo.set_active(4);
-		if (_session->nominal_frame_rate() == 48000 || _session->nominal_frame_rate() == 96000) {
+		if (_session->nominal_sample_rate() == 48000 || _session->nominal_sample_rate() == 96000) {
 			audio_samplerate_combo.set_active(2);
 		} else {
 			audio_samplerate_combo.set_active(1);
@@ -1159,7 +1169,7 @@ ExportVideoDialog::preset_combo_changed ()
 		video_codec_combo.set_active(7);
 		audio_bitrate_combo.set_active(3);
 		video_bitrate_combo.set_active(4);
-		if (_session->nominal_frame_rate() == 48000 || _session->nominal_frame_rate() == 96000) {
+		if (_session->nominal_sample_rate() == 48000 || _session->nominal_sample_rate() == 96000) {
 			audio_samplerate_combo.set_active(2);
 		} else {
 			audio_samplerate_combo.set_active(1);
@@ -1190,7 +1200,7 @@ ExportVideoDialog::preset_combo_changed ()
 		video_codec_combo.set_active(5);
 		audio_bitrate_combo.set_active(4);
 		video_bitrate_combo.set_active(5);
-		if (_session->nominal_frame_rate() == 48000 || _session->nominal_frame_rate() == 96000) {
+		if (_session->nominal_sample_rate() == 48000 || _session->nominal_sample_rate() == 96000) {
 			audio_samplerate_combo.set_active(2);
 		} else {
 			audio_samplerate_combo.set_active(1);
@@ -1202,7 +1212,7 @@ ExportVideoDialog::preset_combo_changed ()
 		video_codec_combo.set_active(6);
 		audio_bitrate_combo.set_active(0);
 		video_bitrate_combo.set_active(0);
-		if (_session->nominal_frame_rate() == 48000 || _session->nominal_frame_rate() == 96000) {
+		if (_session->nominal_sample_rate() == 48000 || _session->nominal_sample_rate() == 96000) {
 			audio_samplerate_combo.set_active(2);
 		} else {
 			audio_samplerate_combo.set_active(1);
@@ -1249,6 +1259,7 @@ void
 ExportVideoDialog::open_outfn_dialog ()
 {
 	Gtk::FileChooserDialog dialog(_("Save Exported Video File"), Gtk::FILE_CHOOSER_ACTION_SAVE);
+	Gtkmm2ext::add_volume_shortcuts (dialog);
 	dialog.set_filename (outfn_path_entry.get_text());
 
 	dialog.add_button(Gtk::Stock::CANCEL, Gtk::RESPONSE_CANCEL);
@@ -1269,6 +1280,7 @@ void
 ExportVideoDialog::open_invid_dialog ()
 {
 	Gtk::FileChooserDialog dialog(_("Save Exported Video File"), Gtk::FILE_CHOOSER_ACTION_SAVE);
+	Gtkmm2ext::add_volume_shortcuts (dialog);
 	dialog.set_filename (invid_path_entry.get_text());
 
 	dialog.add_button(Gtk::Stock::CANCEL, Gtk::RESPONSE_CANCEL);

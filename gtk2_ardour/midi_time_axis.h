@@ -1,20 +1,25 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2012 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_midi_time_axis_h__
 #define __ardour_midi_time_axis_h__
@@ -29,13 +34,12 @@
 #include <gtkmm/radiomenuitem.h>
 #include <gtkmm/checkmenuitem.h>
 
-#include "gtkmm2ext/selector.h"
-
 #include "ardour/types.h"
 #include "ardour/region.h"
 
+#include "widgets/ardour_dropdown.h"
+
 #include "ardour_dialog.h"
-#include "ardour_dropdown.h"
 #include "route_ui.h"
 #include "enums.h"
 #include "route_time_axis.h"
@@ -45,6 +49,7 @@ namespace MIDI {
 namespace Name {
 class MasterDeviceNames;
 class CustomDeviceMode;
+struct PatchPrimaryKey;
 }
 }
 
@@ -82,21 +87,18 @@ public:
 
 	void set_height (uint32_t, TrackHeightMode m = OnlySelf);
 
-	boost::shared_ptr<ARDOUR::MidiRegion> add_region (ARDOUR::framepos_t, ARDOUR::framecnt_t, bool);
+	boost::shared_ptr<ARDOUR::MidiRegion> add_region (ARDOUR::samplepos_t, ARDOUR::samplecnt_t, bool);
 
 	void show_all_automation (bool apply_to_selection = false);
 	void show_existing_automation (bool apply_to_selection = false);
 	void create_automation_child (const Evoral::Parameter& param, bool show);
 
-	bool paste (ARDOUR::framepos_t, const Selection&, PasteContext& ctx);
+	void get_regions_with_selected_data (RegionSelection&);
+
+	bool paste (ARDOUR::samplepos_t, const Selection&, PasteContext& ctx, const int32_t sub_num);
 
 	ARDOUR::NoteMode  note_mode() const { return _note_mode; }
 	ARDOUR::ColorMode color_mode() const { return _color_mode; }
-
-	boost::shared_ptr<MIDI::Name::MasterDeviceNames> get_device_names();
-	boost::shared_ptr<MIDI::Name::CustomDeviceMode> get_device_mode();
-
-	void update_range();
 
 	Gtk::CheckMenuItem* automation_child_menu_item (Evoral::Parameter);
 
@@ -108,15 +110,22 @@ public:
 
 	uint8_t get_channel_for_add () const;
 
-	void get_per_region_note_selection (std::list<std::pair<PBD::ID, std::set<boost::shared_ptr<Evoral::Note<Evoral::Beats> > > > >&);
+	void get_per_region_note_selection (std::list<std::pair<PBD::ID, std::set<boost::shared_ptr<Evoral::Note<Temporal::Beats> > > > >&);
+	void use_midnam_info ();
 
 protected:
 	void start_step_editing ();
 	void stop_step_editing ();
+	void processors_changed (ARDOUR::RouteProcessorChange);
 
 private:
 	sigc::signal<void, std::string, std::string>  _midi_patch_settings_changed;
 
+	void setup_midnam_patches ();
+
+	sigc::connection _note_range_changed_connection;
+
+	void maybe_trigger_model_change ();
 	void model_changed(const std::string& model);
 	void custom_device_mode_changed(const std::string& mode);
 
@@ -128,30 +137,30 @@ private:
 	void set_note_mode (ARDOUR::NoteMode mode, bool apply_to_selection = false);
 	void set_color_mode (ARDOUR::ColorMode, bool force = false, bool redisplay = true, bool apply_to_selection = false);
 	void set_note_range (MidiStreamView::VisibleNoteRange range, bool apply_to_selection = false);
-
 	void route_active_changed ();
 	void note_range_changed ();
 	void contents_height_changed ();
 
 	void update_control_names ();
+	void update_midi_controls_visibility (uint32_t);
 
-	bool                         _ignore_signals;
-	MidiScroomer*                _range_scroomer;
-	PianoRollHeader*             _piano_roll_header;
-	ARDOUR::NoteMode             _note_mode;
-	Gtk::RadioMenuItem*          _note_mode_item;
-	Gtk::RadioMenuItem*          _percussion_mode_item;
-	ARDOUR::ColorMode            _color_mode;
-	Gtk::RadioMenuItem*          _meter_color_mode_item;
-	Gtk::RadioMenuItem*          _channel_color_mode_item;
-	Gtk::RadioMenuItem*          _track_color_mode_item;
-	Gtk::Label                   _playback_channel_status;
-	Gtk::Label                   _capture_channel_status;
-	Gtk::HBox                    _channel_status_box;
-	Gtk::VBox                    _midi_controls_box;
-	MidiChannelSelectorWindow*   _channel_selector;
-	ArdourDropdown               _midnam_model_selector;
-	ArdourDropdown               _midnam_custom_device_mode_selector;
+	bool                          _ignore_signals;
+	bool                          _asked_all_automation;
+	std::string                   _effective_model;
+	std::string                   _effective_mode;
+	MidiScroomer*                 _range_scroomer;
+	PianoRollHeader*              _piano_roll_header;
+	ARDOUR::NoteMode              _note_mode;
+	Gtk::RadioMenuItem*           _note_mode_item;
+	Gtk::RadioMenuItem*           _percussion_mode_item;
+	ARDOUR::ColorMode             _color_mode;
+	Gtk::RadioMenuItem*           _meter_color_mode_item;
+	Gtk::RadioMenuItem*           _channel_color_mode_item;
+	Gtk::RadioMenuItem*           _track_color_mode_item;
+	Gtk::VBox                     _midi_controls_box;
+	MidiChannelSelectorWindow*    _channel_selector;
+	ArdourWidgets::ArdourDropdown _midnam_model_selector;
+	ArdourWidgets::ArdourDropdown _midnam_custom_device_mode_selector;
 
 	Gtk::CheckMenuItem*          _step_edit_item;
 	Gtk::Menu*                    default_channel_menu;
@@ -163,7 +172,7 @@ private:
 	Gtk::Menu* controller_menu;
 
 	void add_single_channel_controller_item (Gtk::Menu_Helpers::MenuList& ctl_items, int ctl, const std::string& name);
-	void add_multi_channel_controller_item (Gtk::Menu_Helpers::MenuList& ctl_items, int ctl, const std::string& name);
+	void add_multi_channel_controller_item (Gtk::Menu_Helpers::MenuList& ctl_items, uint16_t chanels, int ctl, const std::string& name);
 	void build_controller_menu ();
 	void toggle_channel_selector ();
 	void channel_selector_hidden ();
@@ -177,7 +186,7 @@ private:
 	void add_note_selection_region_view (RegionView* rv, uint8_t note, uint16_t chn_mask);
 	void extend_note_selection_region_view (RegionView*, uint8_t note, uint16_t chn_mask);
 	void toggle_note_selection_region_view (RegionView*, uint8_t note, uint16_t chn_mask);
-	void get_per_region_note_selection_region_view (RegionView*, std::list<std::pair<PBD::ID, std::set<boost::shared_ptr<Evoral::Note<Evoral::Beats> > > > >&);
+	void get_per_region_note_selection_region_view (RegionView*, std::list<std::pair<PBD::ID, std::set<boost::shared_ptr<Evoral::Note<Temporal::Beats> > > > >&);
 
 	void ensure_step_editor ();
 
@@ -187,9 +196,6 @@ private:
 	ParameterMenuMap _controller_menu_map;
 
 	StepEditor* _step_editor;
-
-	void capture_channel_mode_changed();
-	void playback_channel_mode_changed();
 };
 
 #endif /* __ardour_midi_time_axis_h__ */

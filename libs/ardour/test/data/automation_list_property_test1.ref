@@ -2,12 +2,12 @@
 <test>
   <FadeIn>
     <from>
-      <AutomationList automation-id="fadein" id="164" default="1" min-yval="0" max-yval="2" interpolation-style="Linear" state="Off" style="Absolute"/>
+      <AutomationList automation-id="fadein" id="164" interpolation-style="Linear" state="Off"/>
     </from>
     <to>
-      <AutomationList automation-id="fadein" id="163" default="1" min-yval="0" max-yval="2" interpolation-style="Linear" state="Off" style="Absolute">
-        <events>1 2
-3 4
+      <AutomationList automation-id="fadein" id="163" interpolation-style="Linear" state="Off">
+        <events>1 0.5
+3 2
 </events>
       </AutomationList>
     </to>

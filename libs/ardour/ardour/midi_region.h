@@ -1,39 +1,45 @@
 /*
-    Copyright (C) 2000-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-    $Id: midiregion.h 733 2006-08-01 17:19:38Z drobilla $
-*/
+ * Copyright (C) 2006-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2016-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_midi_region_h__
 #define __ardour_midi_region_h__
 
 #include <vector>
 
-#include "evoral/Beats.hpp"
+#include "temporal/beats.h"
+#include "evoral/Range.h"
+
+#include "pbd/string_convert.h"
 
 #include "ardour/ardour.h"
+#include "ardour/midi_cursor.h"
 #include "ardour/region.h"
 
 class XMLNode;
 
 namespace ARDOUR {
 	namespace Properties {
-		LIBARDOUR_API extern PBD::PropertyDescriptor<Evoral::Beats> start_beats;
-		LIBARDOUR_API extern PBD::PropertyDescriptor<Evoral::Beats> length_beats;
+		LIBARDOUR_API extern PBD::PropertyDescriptor<double> start_beats;
+		LIBARDOUR_API extern PBD::PropertyDescriptor<double> length_beats;
 	}
 }
 
@@ -61,33 +67,39 @@ class LIBARDOUR_API MidiRegion : public Region
 
 	~MidiRegion();
 
+	bool do_export (std::string path) const;
+
 	boost::shared_ptr<MidiRegion> clone (std::string path = std::string()) const;
 	boost::shared_ptr<MidiRegion> clone (boost::shared_ptr<MidiSource>) const;
 
 	boost::shared_ptr<MidiSource> midi_source (uint32_t n=0) const;
 
 	/* Stub Readable interface */
-	virtual framecnt_t read (Sample*, framepos_t /*pos*/, framecnt_t /*cnt*/, int /*channel*/) const { return 0; }
-	virtual framecnt_t readable_length() const { return length(); }
+	virtual samplecnt_t read (Sample*, samplepos_t /*pos*/, samplecnt_t /*cnt*/, int /*channel*/) const { return 0; }
+	virtual samplecnt_t readable_length() const { return length(); }
 
-	framecnt_t read_at (Evoral::EventSink<framepos_t>& dst,
-	                    framepos_t position,
-	                    framecnt_t dur,
+	samplecnt_t read_at (Evoral::EventSink<samplepos_t>& dst,
+	                    samplepos_t position,
+	                    samplecnt_t dur,
+	                    Evoral::Range<samplepos_t>* loop_range,
+	                    MidiCursor& cursor,
 	                    uint32_t  chan_n = 0,
 	                    NoteMode  mode = Sustained,
 	                    MidiStateTracker* tracker = 0,
 	                    MidiChannelFilter* filter = 0) const;
 
-	framecnt_t master_read_at (MidiRingBuffer<framepos_t>& dst,
-	                           framepos_t position,
-	                           framecnt_t dur,
+	samplecnt_t master_read_at (MidiRingBuffer<samplepos_t>& dst,
+	                           samplepos_t position,
+	                           samplecnt_t dur,
+	                           Evoral::Range<samplepos_t>* loop_range,
+	                           MidiCursor& cursor,
 	                           uint32_t  chan_n = 0,
 	                           NoteMode  mode = Sustained) const;
 
 	XMLNode& state ();
 	int      set_state (const XMLNode&, int version);
 
-	int separate_by_channel (ARDOUR::Session&, std::vector< boost::shared_ptr<Region> >&) const;
+	int separate_by_channel (std::vector< boost::shared_ptr<Region> >&) const;
 
 	/* automation */
 
@@ -101,6 +113,15 @@ class LIBARDOUR_API MidiRegion : public Region
 	boost::shared_ptr<const MidiModel> model() const;
 
 	void fix_negative_start ();
+	double start_beats () const {return _start_beats; }
+	double length_beats () const {return _length_beats; }
+
+	void clobber_sources (boost::shared_ptr<MidiSource> source);
+
+	int render (Evoral::EventSink<samplepos_t>& dst,
+	            uint32_t                        chan_n,
+	            NoteMode                        mode,
+	            MidiChannelFilter*              filter) const;
 
   protected:
 
@@ -110,16 +131,18 @@ class LIBARDOUR_API MidiRegion : public Region
 
   private:
 	friend class RegionFactory;
-	PBD::Property<Evoral::Beats> _start_beats;
-	PBD::Property<Evoral::Beats> _length_beats;
+	PBD::Property<double> _start_beats;
+	PBD::Property<double> _length_beats;
 
 	MidiRegion (const SourceList&);
 	MidiRegion (boost::shared_ptr<const MidiRegion>);
-	MidiRegion (boost::shared_ptr<const MidiRegion>, frameoffset_t offset);
+	MidiRegion (boost::shared_ptr<const MidiRegion>, ARDOUR::MusicSample offset);
 
-	framecnt_t _read_at (const SourceList&, Evoral::EventSink<framepos_t>& dst,
-	                     framepos_t position,
-	                     framecnt_t dur,
+	samplecnt_t _read_at (const SourceList&, Evoral::EventSink<samplepos_t>& dst,
+	                     samplepos_t position,
+	                     samplecnt_t dur,
+	                     Evoral::Range<samplepos_t>* loop_range,
+	                     MidiCursor& cursor,
 	                     uint32_t chan_n = 0,
 	                     NoteMode mode = Sustained,
 	                     MidiStateTracker* tracker = 0,
@@ -131,23 +154,30 @@ class LIBARDOUR_API MidiRegion : public Region
 	void recompute_at_start ();
 	void recompute_at_end ();
 
-	void set_position_internal (framepos_t pos, bool allow_bbt_recompute);
-	void set_length_internal (framecnt_t len);
-	void set_start_internal (framecnt_t);
-	void update_length_beats ();
+	bool set_name (const std::string & str);
+
+	void set_position_internal (samplepos_t pos, bool allow_bbt_recompute, const int32_t sub_num);
+	void set_position_music_internal (double qn);
+	void set_length_internal (samplecnt_t len, const int32_t sub_num);
+	void set_start_internal (samplecnt_t, const int32_t sub_num);
+	void trim_to_internal (samplepos_t position, samplecnt_t length, const int32_t sub_num);
+	void update_length_beats (const int32_t sub_num);
 
 	void model_changed ();
+	void model_contents_changed ();
+	void model_shifted (double qn_distance);
 	void model_automation_state_changed (Evoral::Parameter const &);
 
-	void set_start_beats_from_start_frames ();
-	void update_after_tempo_map_change ();
+	void set_start_beats_from_start_samples ();
+	void update_after_tempo_map_change (bool send_change = true);
 
 	std::set<Evoral::Parameter> _filtered_parameters; ///< parameters that we ask our source not to return when reading
 	PBD::ScopedConnection _model_connection;
+	PBD::ScopedConnection _model_shift_connection;
+	PBD::ScopedConnection _model_changed_connection;
 	PBD::ScopedConnection _source_connection;
 	PBD::ScopedConnection _model_contents_connection;
-
-	double _last_length_beats;
+	bool _ignore_shift;
 };
 
 } /* namespace ARDOUR */

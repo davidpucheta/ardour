@@ -1,37 +1,39 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2009 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/audio_track_importer.h"
 
 #include "ardour/audio_playlist_importer.h"
-#include "ardour/audio_diskstream.h"
+#include "ardour/disk_reader.h"
 #include "ardour/session.h"
 
 #include "pbd/controllable.h"
-#include "pbd/convert.h"
 #include "pbd/failed_constructor.h"
+#include "pbd/string_convert.h"
 
 #include <sstream>
 #include <algorithm>
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -51,11 +53,11 @@ AudioTrackImportHandler::AudioTrackImportHandler (XMLTree const & source, Sessio
 
 	XMLNodeList const & route_list = routes->children();
 	for (XMLNodeList::const_iterator it = route_list.begin(); it != route_list.end(); ++it) {
-		const XMLProperty* type = (*it)->property("default-type");
+		XMLProperty const * type = (*it)->property("default-type");
 		if ( (!type || type->value() == "audio") &&  ((*it)->property ("diskstream") != 0 || (*it)->property ("diskstream-id") != 0)) {
 			try {
 				elements.push_back (ElementPtr ( new AudioTrackImporter (source, session, *this, **it, pl_handler)));
-			} catch (failed_constructor err) {
+			} catch (failed_constructor const&) {
 				set_dirty();
 			}
 		}
@@ -99,7 +101,7 @@ AudioTrackImporter::AudioTrackImporter (XMLTree const & source,
 	XMLNode * remote_control = xml_track.child ("RemoteControl");
 	if (remote_control && (prop = remote_control->property ("id"))) {
 		uint32_t control_id = session.ntracks() + session.nbusses() + 1;
-		prop->set_value (to_string (control_id, std::dec));
+		prop->set_value (to_string (control_id));
 	}
 
 	xml_track.remove_nodes_and_delete ("Extra");
@@ -254,7 +256,7 @@ AudioTrackImporter::_prepare_move ()
 		return false;
 	}
 
-	XMLProperty* p = c->property ("name");
+	XMLProperty * p = c->property ("name");
 	if (!p) {
 		error << _("badly-formed XML in imported track") << endmsg;
 		return false;
@@ -277,6 +279,8 @@ AudioTrackImporter::_cancel_move ()
 void
 AudioTrackImporter::_move ()
 {
+	/* XXX DISK */
+#if 0
 	/* Add diskstream */
 
 	boost::shared_ptr<XMLSharedNodeList> ds_node_list;
@@ -289,13 +293,13 @@ AudioTrackImporter::_move ()
 	}
 
 	boost::shared_ptr<XMLNode> ds_node = ds_node_list->front();
-	XMLProperty* p = ds_node->property (X_("id"));
+	XMLProperty * p = ds_node->property (X_("id"));
 	assert (p);
 	p->set_value (new_ds_id.to_s());
 
-	boost::shared_ptr<Diskstream> new_ds (new AudioDiskstream (session, *ds_node));
+	boost::shared_ptr<DiskReader> new_ds (new DiskReader (session, *ds_node));
 	new_ds->set_name (name);
-	new_ds->do_refill_with_alloc ();
+	new_ds->do_refill_with_alloc (true, false);
 	new_ds->set_block_size (session.get_block_size ());
 
 	/* Import playlists */
@@ -309,6 +313,7 @@ AudioTrackImporter::_move ()
 	XMLNode routes ("Routes");
 	routes.add_child_copy (xml_track);
 	session.load_routes (routes, 3000);
+#endif
 }
 
 bool
@@ -374,7 +379,7 @@ AudioTrackImporter::rate_convert_events (XMLNode & node)
 	std::stringstream str (content_node->content());
 	std::ostringstream new_content;
 
-	framecnt_t x;
+	samplecnt_t x;
 	double y;
 	bool ok = true;
 

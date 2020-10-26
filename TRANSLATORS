@@ -21,8 +21,13 @@ showing the case for Russian):
 
 libs/gtkmm2ext/po/ru.po
 
+You might want to translate the appdata file as well which is here to help
+distribution's packagers (showing the case for French)
+
+gtk2_ardour/appdata/po/fr.po
+
 Every PO file's name is a two-character code, e.g. 'de' for German, 'es' for
-Spanish and so on. However it's fairly common to have localizations for local
+Spanish, and so on. However it's fairly common to have localizations for local
 versions of a language, e.g. 'pt_BR' would stand for Brazilian Portuguese, and
 'es_MX' would stand for Mexican Spanish. Please refer to ISO language code
 table for details.
@@ -30,22 +35,63 @@ table for details.
 Here is the best workflow for existing translations.
 
 1. Build Ardour  using './waf' command (this step is actually optional).
+
 2a. If there is no existing translation for your language, run './waf i18n_pot'
 which will generate a POT (.pot) file for each of the directories shown
-above. For each directory you plan to translate, rename the POT file to end in .po and then
-continue with step 3.
+above. For each directory you plan to translate, rename the POT file to end in 
+.po and then continue with step 3.
+
 2b. If there is an existing translation for your language, run './waf
-i18n_pot' which will bring it up to date (along with all other PO files)
+i18n_po' which will bring it up to date (along with all other PO files)
+
 3. Open the relevant PO file in you PO editor of choice (see below).
-4. Open Ardour, find something untranslated, locate this phrase in PO file, translate.
+
+4. Open Ardour, find something untranslated, locate this phrase in PO file, 
+translate.
+
 5. Repeat previous step several times, save the PO file.
-6. Run './waf i18n_mo' to regenerate binary MO files and 'sudo ./waf install' to install them.
-7. Restart Ardour to see what your translation looks like and whether it needs fixes, e.g. has to be shorter.
 
-Note that as of Ardour 3 beta 1 the translations are only installed when you
-run './waf i18n' after './waf' and before 'sudo ./waf install'.
+6. Run './waf i18n_mo' to regenerate binary MO files and 'sudo ./waf install' 
+to install them.
 
-When you are done, save the file and submit it to the tracker.
+7. Restart Ardour to see what your translation looks like and whether it needs 
+fixes, e.g. has to be shorter.
+
+8. IMPORTANT NOTE: there are times when the English phrase to be translated is
+ambiguous without more context. What does "S" mean? In such cases, we use a
+different markup for translated strings which includes context. It will appear
+in the msgid in the .po/.pot file like this:
+
+    CONTEXT|ToBeTranslated
+
+So for example
+
+    Solo|S
+
+This should help you understand the the "S" here is a short form designed to refer to "Solo".
+
+In your translated text, you should remove the CONTEXT and the | symbol. 
+
+
+Note that as of Ardour 4 the translations are only installed when you run 
+'./waf i18n' after './waf' and before 'sudo ./waf install'.
+
+When you are done translating, it's best to get credited for your contribution. 
+Here is how you can do it:
+
+1. Run 'git commit -a' (assuming you only modified translation files) and 
+describe the changes you made. Typically the commit message looks like 
+'Update German translation'. That should be sufficient.
+
+2. Run 'git format-patch origin/master' (assuming you worked on a clone of the 
+master branch. That should generate a file called something like 
+'0001-Update-German-translation.patch'.
+
+3. Run 'bzip2 0001-Update-German-translation.patch' to compress the file.
+
+4. File a new bug report at http://tracker.ardour.org and attach the resulted 
+compressed file and tell either rgareus (Robin Gareus) or las (Paul Davis) on 
+the project's IRC channel (#ardour at irc.freenode.net) about your patch.
 
 There are some more things you need to know.
 
@@ -90,7 +136,18 @@ http://git.gnome.org/browse/gimp/plain/po/ru.po
 "%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2); 10<=4 && (n%100<10 || n"
 "%100>=20) ? 1 : 2);\n"
 
-4. PO editors
+4. Special case when translating
+
+4a. slash
+If you find something like : "Preferences/GUI", you will want to translate the whole thing.
+Example for French : "Préférences/Interface graphique" .
+
+4b. pipe
+If you find something like : "Preferences|GUI", you will only want to translate the second part.
+Example for French : "Interface graphique".
+
+
+5. PO editors
 
 It's really up to you which PO editor you choose. These ones are most popular:
 

@@ -1,28 +1,31 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-
-*/
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/button.h>
 
 #include "ardour/audio_track.h"
 #include "ardour/audioplaylist.h"
-#include "ardour/playlist.h"
+#include "ardour/midi_playlist.h"
+
 #include "ardour/session_playlist.h"
 
 #include <gtkmm2ext/gtk_ui.h>
@@ -31,7 +34,7 @@
 #include "route_ui.h"
 #include "gui_thread.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -61,8 +64,10 @@ PlaylistSelector::PlaylistSelector ()
 
 	get_vbox()->pack_start (scroller);
 
-	Button* b = add_button (_("Close"), RESPONSE_CANCEL);
-	b->signal_clicked().connect (sigc::mem_fun(*this, &PlaylistSelector::close_button_click));
+	Button* close_btn = add_button (_("Close"), RESPONSE_CANCEL);
+	Button* ok_btn = add_button (_("OK"), RESPONSE_OK);
+	close_btn->signal_clicked().connect (sigc::mem_fun(*this, &PlaylistSelector::close_button_click));
+	ok_btn->signal_clicked().connect (sigc::mem_fun(*this, &PlaylistSelector::ok_button_click));
 
 }
 
@@ -105,7 +110,7 @@ PlaylistSelector::show_for (RouteUI* ruix)
 
 	model->clear ();
 
-	_session->playlists->foreach (this, &PlaylistSelector::add_playlist_to_map);
+	_session->playlists()->foreach (this, &PlaylistSelector::add_playlist_to_map);
 
 	boost::shared_ptr<Track> this_track = rui->track();
 
@@ -115,27 +120,19 @@ PlaylistSelector::show_for (RouteUI* ruix)
 	boost::shared_ptr<Playlist> proxy = others[columns.playlist];
 	proxy.reset ();
 
+	if (this_track->playlist()) {
+		current_playlist = this_track->playlist();
+	}
+
 	for (TrackPlaylistMap::iterator x = trpl_map.begin(); x != trpl_map.end(); ++x) {
 
 		boost::shared_ptr<Track> tr = boost::dynamic_pointer_cast<Track> (_session->route_by_id (x->first));
-
-		/* legacy sessions stored the diskstream ID as the original
-		 * playlist owner. so try there instead.
-		 */
-
-		if (tr == 0) {
-			tr = _session->track_by_diskstream_id (x->first);
-		}
-
-		if (tr == 0) {
-			continue;
-		}
 
 		/* add a node for the track */
 
 		string nodename;
 
-		if (tr->name().empty()) {
+		if (!tr || tr->name().empty()) {
 			nodename = _("unassigned");
 		} else {
 			nodename = tr->name().c_str();
@@ -183,7 +180,7 @@ PlaylistSelector::show_for (RouteUI* ruix)
 
 	// Add unassigned (imported) playlists to the list
 	list<boost::shared_ptr<Playlist> > unassigned;
-	_session->playlists->unassigned (unassigned);
+	_session->playlists()->unassigned (unassigned);
 
 	TreeModel::Row row;
 	TreeModel::Row selected_row;
@@ -219,20 +216,25 @@ PlaylistSelector::show_for (RouteUI* ruix)
 void
 PlaylistSelector::add_playlist_to_map (boost::shared_ptr<Playlist> pl)
 {
-	boost::shared_ptr<AudioPlaylist> apl;
-
 	if (pl->frozen()) {
 		return;
 	}
 
-	if ((apl = boost::dynamic_pointer_cast<AudioPlaylist> (pl)) == 0) {
-		return;
+	if (rui->is_midi_track ()) {
+		if (boost::dynamic_pointer_cast<MidiPlaylist> (pl) == 0) {
+			return;
+		}
+	} else {
+		assert (rui->is_audio_track ());
+		if (boost::dynamic_pointer_cast<AudioPlaylist> (pl) == 0) {
+			return;
+		}
 	}
 
 	TrackPlaylistMap::iterator x;
 
-	if ((x = trpl_map.find (apl->get_orig_track_id())) == trpl_map.end()) {
-		x = trpl_map.insert (trpl_map.end(), make_pair (apl->get_orig_track_id(), new list<boost::shared_ptr<Playlist> >));
+	if ((x = trpl_map.find (pl->get_orig_track_id ())) == trpl_map.end()) {
+		x = trpl_map.insert (trpl_map.end(), make_pair (pl->get_orig_track_id(), new list<boost::shared_ptr<Playlist> >));
 	}
 
 	x->second->push_back (pl);
@@ -241,14 +243,30 @@ PlaylistSelector::add_playlist_to_map (boost::shared_ptr<Playlist> pl)
 void
 PlaylistSelector::close_button_click ()
 {
+	if (rui && current_playlist) {
+		rui->track ()->use_playlist (rui->is_audio_track () ? DataType::AUDIO : DataType::MIDI, current_playlist);
+	}
 	rui = 0;
 	hide ();
 }
 
 void
+PlaylistSelector::ok_button_click()
+{
+	rui = 0;
+	hide();
+}
+
+bool PlaylistSelector::on_delete_event (GdkEventAny*)
+{
+	close_button_click();
+	return false;
+}
+
+void
 PlaylistSelector::selection_changed ()
 {
-	boost::shared_ptr<Playlist> playlist;
+	boost::shared_ptr<Playlist> pl;
 
 	TreeModel::iterator iter = tree.get_selection()->get_selected();
 
@@ -257,25 +275,15 @@ PlaylistSelector::selection_changed ()
 		return;
 	}
 
-	if ((playlist = ((*iter)[columns.playlist])) != 0) {
+	if ((pl = ((*iter)[columns.playlist])) != 0) {
 
-		boost::shared_ptr<AudioTrack> at;
-		boost::shared_ptr<AudioPlaylist> apl;
-
-		if ((at = rui->audio_track()) == 0) {
-			/* eh? */
+		if (rui->is_audio_track () && boost::dynamic_pointer_cast<AudioPlaylist> (pl) == 0) {
+			return;
+		}
+		if (rui->is_midi_track () && boost::dynamic_pointer_cast<MidiPlaylist> (pl) == 0) {
 			return;
 		}
 
-		if ((apl = boost::dynamic_pointer_cast<AudioPlaylist> (playlist)) == 0) {
-			/* eh? */
-			return;
-		}
-
-		at->use_playlist (apl);
-
-		hide ();
+		rui->track ()->use_playlist (rui->is_audio_track () ? DataType::AUDIO : DataType::MIDI, pl);
 	}
-
 }
-

@@ -1,5 +1,7 @@
 /*
- * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2017 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +13,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "winmmemidi_output_device.h"
@@ -22,17 +24,16 @@
 
 #include "pbd/debug.h"
 #include "pbd/compose.h"
+#include "pbd/pthread_utils.h"
 #include "pbd/windows_timer_utils.h"
 #include "pbd/windows_mmcss.h"
 
-#include "rt_thread.h"
 #include "midi_util.h"
 
 #include "debug.h"
 
 // remove dup with input_device
 static const uint32_t MIDI_BUFFER_SIZE = 32768;
-static const uint32_t MAX_MIDI_MSG_SIZE = 256; // fix this for sysex
 static const uint32_t MAX_QUEUE_SIZE = 4096;
 
 namespace ARDOUR {
@@ -46,7 +47,7 @@ WinMMEMidiOutputDevice::WinMMEMidiOutputDevice (int index)
 	, m_enabled(false)
 	, m_thread_running(false)
 	, m_thread_quit(false)
-	, m_midi_buffer(new RingBuffer<uint8_t>(MIDI_BUFFER_SIZE))
+	, m_midi_buffer(new PBD::RingBuffer<uint8_t>(MIDI_BUFFER_SIZE))
 {
 	DEBUG_MIDI (string_compose ("Creating midi output device index: %1\n", index));
 
@@ -118,13 +119,7 @@ WinMMEMidiOutputDevice::close (std::string& error_msg)
 {
 	// return error message for first error encountered?
 	bool success = true;
-	MMRESULT result = midiOutReset (m_handle);
-	if (result != MMSYSERR_NOERROR) {
-		error_msg = get_error_string (result);
-		DEBUG_MIDI (error_msg);
-		success = false;
-	}
-	result = midiOutClose (m_handle);
+	MMRESULT result = midiOutClose (m_handle);
 	if (result != MMSYSERR_NOERROR) {
 		error_msg = get_error_string (result);
 		DEBUG_MIDI (error_msg);
@@ -233,11 +228,8 @@ WinMMEMidiOutputDevice::start_midi_output_thread ()
 {
 	m_thread_quit = false;
 
-	//pthread_attr_t attr;
-	size_t stacksize = 100000;
-
 	// TODO Use native threads
-	if (_realtime_pthread_create (SCHED_FIFO, -21, stacksize,
+	if (pbd_realtime_pthread_create (PBD_SCHED_FIFO, PBD_RT_PRI_MIDI, PBD_RT_STACKSIZE_HELP,
 				&m_output_thread_handle, midi_output_thread, this)) {
 		return false;
 	}
@@ -367,7 +359,7 @@ WinMMEMidiOutputDevice::midi_output_thread ()
 		DEBUG_MIDI ("WinMMEMidiOut: output thread woken by semaphore\n");
 
 		MidiEventHeader h (0, 0);
-		uint8_t data[MAX_MIDI_MSG_SIZE];
+		uint8_t data[MaxWinMidiEventSize];
 
 		const uint32_t read_space = m_midi_buffer->read_space ();
 
@@ -381,7 +373,7 @@ WinMMEMidiOutputDevice::midi_output_thread ()
 			}
 			assert (read_space >= h.size);
 
-			if (h.size > MAX_MIDI_MSG_SIZE) {
+			if (h.size > MaxWinMidiEventSize) {
 				m_midi_buffer->increment_read_idx (h.size);
 				DEBUG_MIDI ("WinMMEMidiOut: MIDI event too large!\n");
 				continue;
@@ -437,10 +429,10 @@ WinMMEMidiOutputDevice::midi_output_thread ()
 		switch (h.size) {
 		case 3:
 			message |= (((DWORD)data[2]) << 16);
-		// Fallthrough on purpose.
+			/* fallthrough */
 		case 2:
 			message |= (((DWORD)data[1]) << 8);
-		// Fallthrough on purpose.
+			/* fallthrough */
 		case 1:
 			message |= (DWORD)data[0];
 			result = midiOutShortMsg (m_handle, message);

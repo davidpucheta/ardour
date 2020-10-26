@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_monitor_processor_h__
 #define __ardour_monitor_processor_h__
@@ -54,20 +57,17 @@ public:
 
 	/* Controllable API */
 
-	void set_value (double v, PBD::Controllable::GroupControlDisposition group_override) {
+	void set_value (double v, PBD::Controllable::GroupControlDisposition gcd) {
 		T newval = (T) v;
 		if (newval != _value) {
 			_value = std::max (_lower, std::min (_upper, newval));
-			Changed(); /* EMIT SIGNAL */
+			Changed (true, gcd); /* EMIT SIGNAL */
 		}
 	}
 
 	double get_value () const {
 		return (float) _value;
 	}
-
-	double internal_to_user (double i) const { return accurate_coefficient_to_dB (i);}
-	double user_to_internal (double u) const { return dB_to_coefficient(u) ;}
 
 	std::string get_user_string () const
 	{
@@ -84,7 +84,7 @@ public:
 	MPControl& operator=(const T& v) {
 		if (v != _value) {
 			_value = std::max (_lower, std::min (_upper, v));
-			Changed (); /* EMIT SIGNAL */
+			Changed (true, PBD::Controllable::UseGroup); /* EMIT SIGNAL */
 		}
 		return *this;
 	}
@@ -127,9 +127,9 @@ public:
 
 	bool display_to_user() const;
 
-	void run (BufferSet& /*bufs*/, framepos_t /*start_frame*/, framepos_t /*end_frame*/, pframes_t /*nframes*/, bool /*result_required*/);
+	void run (BufferSet& /*bufs*/, samplepos_t /*start_sample*/, samplepos_t /*end_sample*/, double /*speed*/, pframes_t /*nframes*/, bool /*result_required*/);
 
-	XMLNode& state (bool full);
+	XMLNode& state ();
 	int set_state (const XMLNode&, int /* version */);
 
 	bool configure_io (ChanCount in, ChanCount out);
@@ -195,6 +195,7 @@ private:
 		MPControl<bool>&   soloed;
 
 		ChannelRecord (uint32_t);
+		~ChannelRecord ();
 	};
 
 	std::vector<ChannelRecord*> _channels;

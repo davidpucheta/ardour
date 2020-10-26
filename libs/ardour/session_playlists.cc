@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2016 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <vector>
 
 #include "ardour/debug.h"
@@ -23,7 +27,7 @@
 #include "ardour/playlist_factory.h"
 #include "ardour/session_playlists.h"
 #include "ardour/track.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 #include "pbd/compose.h"
 #include "pbd/xml++.h"
 
@@ -111,6 +115,30 @@ SessionPlaylists::remove (boost::shared_ptr<Playlist> playlist)
 	}
 }
 
+void
+SessionPlaylists::update_tracking ()
+{
+	/* This is intended to be called during session-load, after loading
+	 * playlists and re-assigning them to tracks (refcnt is up to date).
+	 * Check playlist refcnt, move unused playlist to unused_playlists
+	 * array (which may be the case when loading old sessions)
+	 */
+	for (List::iterator i = playlists.begin(); i != playlists.end(); ) {
+		if ((*i)->hidden () || (*i)->used ()) {
+			++i;
+			continue;
+		}
+
+		warning << _("Session State: Unused playlist was listed as used.") << endmsg;
+
+		assert (unused_playlists.find (*i) == unused_playlists.end());
+		unused_playlists.insert (*i);
+
+		List::iterator rm = i;
+		++i;
+		 playlists.erase (rm);
+	}
+}
 
 void
 SessionPlaylists::track (bool inuse, boost::weak_ptr<Playlist> wpl)
@@ -217,6 +245,24 @@ SessionPlaylists::unassigned (std::list<boost::shared_ptr<Playlist> > & list)
 }
 
 void
+SessionPlaylists::update_orig_2X (PBD::ID old_orig, PBD::ID new_orig)
+{
+	Glib::Threads::Mutex::Lock lm (lock);
+
+	for (List::iterator i = playlists.begin(); i != playlists.end(); ++i) {
+		if ((*i)->get_orig_track_id() == old_orig) {
+			(*i)->set_orig_track_id (new_orig);
+		}
+	}
+
+	for (List::iterator i = unused_playlists.begin(); i != unused_playlists.end(); ++i) {
+		if ((*i)->get_orig_track_id() == old_orig) {
+			(*i)->set_orig_track_id (new_orig);
+		}
+	}
+}
+
+void
 SessionPlaylists::get (vector<boost::shared_ptr<Playlist> >& s) const
 {
 	Glib::Threads::Mutex::Lock lm (lock);
@@ -244,7 +290,6 @@ SessionPlaylists::destroy_region (boost::shared_ptr<Region> r)
 	}
 }
 
-
 void
 SessionPlaylists::find_equivalent_playlist_regions (boost::shared_ptr<Region> region, vector<boost::shared_ptr<Region> >& result)
 {
@@ -259,6 +304,10 @@ uint32_t
 SessionPlaylists::source_use_count (boost::shared_ptr<const Source> src) const
 {
 	uint32_t count = 0;
+
+	/* XXXX this can go wildly wrong in the presence of circular references
+	 * between compound regions.
+	 */
 
 	for (List::const_iterator p = playlists.begin(); p != playlists.end(); ++p) {
                 if ((*p)->uses_source (src)) {
@@ -299,28 +348,63 @@ SessionPlaylists::update_after_tempo_map_change ()
 	}
 }
 
+namespace {
+struct id_compare
+{
+	bool operator()(const boost::shared_ptr<Playlist>& p1, const boost::shared_ptr<Playlist>& p2)
+	{
+		return p1->id () < p2->id ();
+	}
+};
+
+typedef std::set<boost::shared_ptr<Playlist> > List;
+typedef std::set<boost::shared_ptr<Playlist>, id_compare> IDSortedList;
+
+static void
+get_id_sorted_playlists (const List& playlists, IDSortedList& id_sorted_playlists)
+{
+	for (List::const_iterator i = playlists.begin(); i != playlists.end(); ++i) {
+		id_sorted_playlists.insert(*i);
+	}
+}
+
+} // anonymous namespace
+
 void
-SessionPlaylists::add_state (XMLNode* node, bool full_state)
+SessionPlaylists::add_state (XMLNode* node, bool save_template, bool include_unused)
 {
 	XMLNode* child = node->add_child ("Playlists");
-	for (List::iterator i = playlists.begin(); i != playlists.end(); ++i) {
-		if (!(*i)->hidden()) {
-                        if (full_state) {
-                                child->add_child_nocopy ((*i)->get_state());
-                        } else {
-                                child->add_child_nocopy ((*i)->get_template());
-                        }
-                }
+
+	IDSortedList id_sorted_playlists;
+	get_id_sorted_playlists (playlists, id_sorted_playlists);
+
+	for (IDSortedList::iterator i = id_sorted_playlists.begin (); i != id_sorted_playlists.end (); ++i) {
+		if (!(*i)->hidden ()) {
+			if (save_template) {
+				child->add_child_nocopy ((*i)->get_template ());
+			} else {
+				child->add_child_nocopy ((*i)->get_state ());
+			}
+		}
+	}
+
+	if (!include_unused) {
+		return;
 	}
 
 	child = node->add_child ("UnusedPlaylists");
-	for (List::iterator i = unused_playlists.begin(); i != unused_playlists.end(); ++i) {
+
+	IDSortedList id_sorted_unused_playlists;
+	get_id_sorted_playlists (unused_playlists, id_sorted_unused_playlists);
+
+	for (IDSortedList::iterator i = id_sorted_unused_playlists.begin ();
+	     i != id_sorted_unused_playlists.end (); ++i) {
 		if (!(*i)->hidden()) {
 			if (!(*i)->empty()) {
-				if (full_state) {
-					child->add_child_nocopy ((*i)->get_state());
-				} else {
+				if (save_template) {
 					child->add_child_nocopy ((*i)->get_template());
+				} else {
+					child->add_child_nocopy ((*i)->get_state());
 				}
 			}
 		}
@@ -362,8 +446,8 @@ SessionPlaylists::maybe_delete_unused (boost::function<int(boost::shared_ptr<Pla
 		case 2:
 			// delete this and all later
 			delete_remaining = true;
-			// no break;
 
+			/* fallthrough */
 		case 1:
 			// delete this
 			playlists_tbd.push_back (*x);
@@ -400,6 +484,7 @@ SessionPlaylists::load (Session& session, const XMLNode& node)
 
 		if ((playlist = XMLPlaylistFactory (session, **niter)) == 0) {
 			error << _("Session: cannot create Playlist from XML description.") << endmsg;
+			return -1;
 		}
 	}
 
@@ -483,6 +568,34 @@ SessionPlaylists::region_use_count (boost::shared_ptr<Region> region) const
 	return cnt;
 }
 
+vector<boost::shared_ptr<Playlist> >
+SessionPlaylists::get_used () const
+{
+	vector<boost::shared_ptr<Playlist> > pl;
+
+	Glib::Threads::Mutex::Lock lm (lock);
+
+	for (List::const_iterator i = playlists.begin(); i != playlists.end(); ++i) {
+		pl.push_back (*i);
+	}
+
+	return pl;
+}
+
+vector<boost::shared_ptr<Playlist> >
+SessionPlaylists::get_unused () const
+{
+	vector<boost::shared_ptr<Playlist> > pl;
+
+	Glib::Threads::Mutex::Lock lm (lock);
+
+	for (List::const_iterator i = unused_playlists.begin(); i != unused_playlists.end(); ++i) {
+		pl.push_back (*i);
+	}
+
+	return pl;
+}
+
 /** @return list of Playlists that are associated with a track */
 vector<boost::shared_ptr<Playlist> >
 SessionPlaylists::playlists_for_track (boost::shared_ptr<Track> tr) const
@@ -493,10 +606,32 @@ SessionPlaylists::playlists_for_track (boost::shared_ptr<Track> tr) const
 	vector<boost::shared_ptr<Playlist> > pl_tr;
 
 	for (vector<boost::shared_ptr<Playlist> >::iterator i = pl.begin(); i != pl.end(); ++i) {
-		if (((*i)->get_orig_track_id() == tr->id()) || (tr->playlist()->id() == (*i)->id())) {
+		if ( ((*i)->get_orig_track_id() == tr->id()) ||
+			(tr->playlist()->id() == (*i)->id())    ||
+			((*i)->shared_with (tr->id())) )
+		{
 			pl_tr.push_back (*i);
 		}
 	}
 
 	return pl_tr;
+}
+
+void
+SessionPlaylists::foreach (boost::function<void(boost::shared_ptr<const Playlist>)> functor, bool incl_unused)
+{
+	Glib::Threads::Mutex::Lock lm (lock);
+	for (List::iterator i = playlists.begin(); i != playlists.end(); i++) {
+		if (!(*i)->hidden()) {
+			functor (*i);
+		}
+	}
+	if (!incl_unused) {
+		return;
+	}
+	for (List::iterator i = unused_playlists.begin(); i != unused_playlists.end(); i++) {
+		if (!(*i)->hidden()) {
+			functor (*i);
+		}
+	}
 }

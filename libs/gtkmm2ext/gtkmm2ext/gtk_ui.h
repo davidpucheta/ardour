@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 1999 Paul Barton-Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1999-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2007-2008 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2007-2013 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2009-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __pbd_gtk_ui_h__
 #define __pbd_gtk_ui_h__
@@ -100,20 +104,20 @@ struct LIBGTKMM2EXT_API UIRequest : public BaseUI::BaseRequestObject {
 
 class LIBGTKMM2EXT_API UI : public AbstractUI<UIRequest>
 {
-  private:
+private:
 	class MyReceiver : public Receiver {
-	  public:
-		MyReceiver (UI& ui) : _ui (ui) {}
-		void receive (Transmitter::Channel chn, const char *msg) {
-			_ui.receive (chn, msg);
-		}
-	  private:
-		UI& _ui;
+		public:
+			MyReceiver (UI& ui) : _ui (ui) {}
+			void receive (Transmitter::Channel chn, const char *msg) {
+				_ui.receive (chn, msg);
+			}
+		private:
+			UI& _ui;
 	};
 
 	MyReceiver _receiver;
 
-  public:
+public:
 	UI (std::string, std::string, int *argc, char **argv[]);
 	virtual ~UI ();
 
@@ -136,10 +140,11 @@ class LIBGTKMM2EXT_API UI : public AbstractUI<UIRequest>
 
 	void set_state (Gtk::Widget *w, Gtk::StateType state);
 	void popup_error (const std::string& text);
-	void flush_pending ();
+	void flush_pending (float timeout = 0);
 	void toggle_errors ();
 	void show_errors ();
-	void dump_errors (std::ostream&);
+	void dump_errors (std::ostream&, size_t limit = 0);
+	void clear_errors () { error_stack.clear (); }
 	void touch_display (Touchable *);
 	void set_tip (Gtk::Widget &w, const gchar *tip);
 	void set_tip (Gtk::Widget &w, const std::string &tip);
@@ -148,37 +153,24 @@ class LIBGTKMM2EXT_API UI : public AbstractUI<UIRequest>
 
 	Gtk::Main& main() const { return *theMain; }
 
-	template<class T> static bool idle_delete (T *obj) { delete obj; return false; }
-	template<class T> static void delete_when_idle (T *obj) {
-		Glib::signal_idle().connect (bind (slot (&UI::idle_delete<T>), obj));
-	}
-
-	template<class T> void delete_in_self (T *obj) {
-		call_slot (boost::bind (&UI::delete_in_self, this, obj));
-	}
-
-	Gdk::Color get_color (const std::string& prompt, bool& picked, const Gdk::Color *initial = 0);
-
 	/* starting is sent just before we enter the main loop,
-	   stopping just after we return from it (at the top level)
-	*/
-
-        virtual int starting() = 0;
+	 * stopping just after we return from it (at the top level)
+	 */
+	virtual int starting() = 0;
 
 	sigc::signal<void> theme_changed;
 
 	static bool just_hide_it (GdkEventAny *, Gtk::Window *);
-	static float ui_scale;
 
 	Gtkmm2ext::Bindings* global_bindings;
 
-  protected:
+protected:
 	virtual void handle_fatal (const char *);
 	virtual void display_message (const char *prefix, gint prefix_len,
 			Glib::RefPtr<Gtk::TextBuffer::Tag> ptag, Glib::RefPtr<Gtk::TextBuffer::Tag> mtag,
 			const char *msg);
 
-  private:
+private:
 	static UI *theGtkUI;
 
 	bool _active;
@@ -187,14 +179,16 @@ class LIBGTKMM2EXT_API UI : public AbstractUI<UIRequest>
 	Gtk::Tooltips *tips;
 #endif
 	TextViewer *errors;
-	Glib::RefPtr<Gtk::TextBuffer::Tag> error_ptag;
-	Glib::RefPtr<Gtk::TextBuffer::Tag> error_mtag;
 	Glib::RefPtr<Gtk::TextBuffer::Tag> fatal_ptag;
 	Glib::RefPtr<Gtk::TextBuffer::Tag> fatal_mtag;
-	Glib::RefPtr<Gtk::TextBuffer::Tag> info_ptag;
-	Glib::RefPtr<Gtk::TextBuffer::Tag> info_mtag;
+	Glib::RefPtr<Gtk::TextBuffer::Tag> error_ptag;
+	Glib::RefPtr<Gtk::TextBuffer::Tag> error_mtag;
 	Glib::RefPtr<Gtk::TextBuffer::Tag> warning_ptag;
 	Glib::RefPtr<Gtk::TextBuffer::Tag> warning_mtag;
+	Glib::RefPtr<Gtk::TextBuffer::Tag> info_ptag;
+	Glib::RefPtr<Gtk::TextBuffer::Tag> info_mtag;
+	Glib::RefPtr<Gtk::TextBuffer::Tag> debug_ptag;
+	Glib::RefPtr<Gtk::TextBuffer::Tag> debug_mtag;
 
 	static void signal_pipe_callback (void *, gint, GdkInputCondition);
 	void process_error_message (Transmitter::Channel, const char *);

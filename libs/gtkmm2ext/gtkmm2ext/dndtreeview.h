@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtkmm2ext_dndtreeview_h__
 #define __gtkmm2ext_dndtreeview_h__
@@ -45,6 +46,25 @@ class LIBGTKMM2EXT_API DnDTreeViewBase : public Gtk::TreeView
 	DnDTreeViewBase ();
 	~DnDTreeViewBase() {}
 
+	struct BoolAccumulator {
+		typedef bool result_type;
+		template <class U>
+			result_type operator () (U first, U last) {
+				while (first != last) {
+					if (!*first) {
+						/* break on first slot that returns false */
+						return false;
+					}
+					++first;
+				}
+				/* no connected slots -> return true */
+				return true;
+			}
+	};
+
+
+	sigc::signal4<bool, const Glib::RefPtr<Gdk::DragContext>&, int, int, guint, BoolAccumulator> signal_motion;
+
 	void add_drop_targets (std::list<Gtk::TargetEntry>&);
 	void add_object_drag (int column, std::string type_name);
 
@@ -58,15 +78,11 @@ class LIBGTKMM2EXT_API DnDTreeViewBase : public Gtk::TreeView
 	}
 
 	void on_drag_leave(const Glib::RefPtr<Gdk::DragContext>& context, guint time) {
-		suggested_action = context->get_suggested_action();
 		TreeView::on_drag_leave (context, time);
-	}
-
-	bool on_drag_motion(const Glib::RefPtr<Gdk::DragContext>& context, int x, int y, guint time) {
 		suggested_action = context->get_suggested_action();
-		return TreeView::on_drag_motion (context, x, y, time);
 	}
 
+	bool on_drag_motion(const Glib::RefPtr<Gdk::DragContext>& context, int x, int y, guint time);
 	bool on_drag_drop(const Glib::RefPtr<Gdk::DragContext>& context, int x, int y, guint time);
 
 	void set_drag_column (int c) {
@@ -142,11 +158,16 @@ class /*LIBGTKMM2EXT_API*/ DnDTreeView : public DnDTreeViewBase
 
 		if (selection_data.get_target() == "GTK_TREE_MODEL_ROW") {
 			TreeView::on_drag_data_received (context, x, y, selection_data, info, time);
-		} else if (selection_data.get_target() == object_type) {
-			signal_drop (context, selection_data);
-			context->drag_finish (true, false, time);
 		} else {
-			/* some kind of target type added by the app, which will be handled by a signal handler */
+			/* some kind of target type, usually 'object_type' added by the app,
+			 * which will be handled by a signal handler */
+			for (std::list<Gtk::TargetEntry>::const_iterator i = draggable.begin(); i != draggable.end (); ++i) {
+				if (selection_data.get_target() == (*i).get_target()) {
+					signal_drop (context, selection_data);
+					context->drag_finish (true, false, time);
+					break;
+				}
+			}
 		}
 	}
 

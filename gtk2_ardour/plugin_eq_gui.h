@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sampo Savolainen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2009 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2018-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_plugin_eq_gui_h
 #define __ardour_plugin_eq_gui_h
@@ -28,6 +30,7 @@
 #include <gtkmm/table.h>
 #include <gtkmm/drawingarea.h>
 #include <gtkmm/combobox.h>
+#include <gtkmm/comboboxtext.h>
 #include <gtkmm/liststore.h>
 
 namespace ARDOUR {
@@ -36,7 +39,7 @@ namespace ARDOUR {
 }
 
 namespace GTKArdour {
-        class FFT;
+	class FFT;
 }
 
 class PluginEqGui : public Gtk::Table
@@ -44,9 +47,6 @@ class PluginEqGui : public Gtk::Table
 public:
 	PluginEqGui (boost::shared_ptr<ARDOUR::PluginInsert>);
 	~PluginEqGui ();
-
-	void start_listening ();
-	void stop_listening ();
 
 private:
 	// Setup
@@ -65,6 +65,9 @@ private:
 	void stop_updating ();
 	void start_updating ();
 
+	void start_listening ();
+	void stop_listening ();
+
 	void resize_analysis_area (Gtk::Allocation&);
 	void redraw_analysis_area ();
 
@@ -78,6 +81,10 @@ private:
 	void plot_impulse_phase (Gtk::Widget *,cairo_t *);
 
 	void plot_signal_amplitude_difference (Gtk::Widget *,cairo_t *);
+
+	void update_pointer_info(float);
+	bool analysis_area_mouseover(GdkEventMotion *);
+	bool analysis_area_mouseexit(GdkEventCrossing *);
 
 	// Helpers
 	bool timeout_callback ();
@@ -95,28 +102,31 @@ private:
 	float _log_coeff;
 	float _log_max;
 
-	ARDOUR::framecnt_t _buffer_size;
-	ARDOUR::framecnt_t _signal_buffer_size;
+	ARDOUR::samplecnt_t _block_size;
+	ARDOUR::samplecnt_t _buffer_size;
+	ARDOUR::samplecnt_t _signal_buffer_size;
 
 	// buffers
 	ARDOUR::BufferSet _bufferset;
 	ARDOUR::BufferSet _collect_bufferset;
-
 
 	// dimensions
 	float _analysis_width;
 	float _analysis_height;
 
 	// My objects
-        GTKArdour::FFT *_impulse_fft;
-        GTKArdour::FFT *_signal_input_fft;
-        GTKArdour::FFT *_signal_output_fft;
+	GTKArdour::FFT *_impulse_fft;
+	GTKArdour::FFT *_signal_input_fft;
+	GTKArdour::FFT *_signal_output_fft;
 	boost::shared_ptr<ARDOUR::Plugin> _plugin;
 	boost::shared_ptr<ARDOUR::PluginInsert> _plugin_insert;
 
 	// gui objects
 	Gtk::DrawingArea *_analysis_area;
 	cairo_surface_t *_analysis_scale_surface;
+	Gtk::Label *_pointer_info;
+	int _pointer_in_area_xpos;
+	int _pointer_in_area_freq;
 
 	// dB scale selection:
 	class dBSelectionColumns : public Gtk::TreeModel::ColumnRecord
@@ -136,6 +146,8 @@ private:
 	Gtk::ComboBox *dBScaleCombo;
 	Glib::RefPtr<Gtk::ListStore> dBScaleModel;
 
+	Gtk::ComboBoxText* _live_signal_combo;
+
 	Gtk::CheckButton *_phase_button;
 
 	// signals and connections
@@ -147,4 +159,3 @@ private:
 };
 
 #endif
-

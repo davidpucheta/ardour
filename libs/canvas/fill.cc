@@ -1,25 +1,24 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2014 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cairomm/cairomm.h>
-
-#include "ardour/utils.h"
 
 #include "pbd/compose.h"
 #include "pbd/convert.h"
@@ -27,8 +26,6 @@
 #include "canvas/fill.h"
 #include "canvas/item.h"
 #include "canvas/types.h"
-#include "canvas/utils.h"
-#include "canvas/colors.h"
 
 using namespace std;
 using namespace ArdourCanvas;
@@ -42,14 +39,14 @@ Fill::Fill (Item& self)
 }
 
 void
-Fill::set_fill_color (Color color)
+Fill::set_fill_color (Gtkmm2ext::Color color)
 {
 	if (_fill_color != color) {
 		_self.begin_visual_change ();
 		_fill_color = color;
 
 		double r, g, b, a;
-		color_to_rgba (color, r, g, b, a);
+		Gtkmm2ext::color_to_rgba (color, r, g, b, a);
 		if (a == 0.0) {
 			_transparent = true;
 		} else {
@@ -76,7 +73,7 @@ Fill::setup_fill_context (Cairo::RefPtr<Cairo::Context> context) const
         if (_pattern) {
                 context->set_source (_pattern);
         } else {
-                set_source_rgba (context, _fill_color);
+					Gtkmm2ext::set_source_rgba (context, _fill_color);
         }
 }
 
@@ -93,7 +90,7 @@ Fill::setup_gradient_context (Cairo::RefPtr<Cairo::Context> context, Rect const 
 
 	for (StopList::const_iterator s = _stops.begin(); s != _stops.end(); ++s) {
 		double r, g, b, a;
-		color_to_rgba (s->second, r, g, b, a);
+		Gtkmm2ext::color_to_rgba (s->second, r, g, b, a);
 		_gradient->add_color_stop_rgba (s->first, r, g, b, a);
 	}
 

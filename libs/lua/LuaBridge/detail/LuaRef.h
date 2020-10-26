@@ -62,6 +62,7 @@ private:
       when returning objects, to avoid an explicit temporary variable, since
       the destructor executes after the return statement. For example:
 
+      \code
           template <class U>
           U cast (lua_State* L)
           {
@@ -69,6 +70,7 @@ private:
             ...
             return U (); // dtor called after this line
           }
+      \endcode
 
       @note The `StackPop` object must always be a named local variable.
   */
@@ -77,6 +79,7 @@ private:
   public:
     /** Create a StackPop object.
 
+        @param L the LuaState to modify
         @param count The number of stack entries to pop on destruction.
     */
     StackPop (lua_State* L, int count)
@@ -180,6 +183,11 @@ private:
       return *this;
     }
 
+    // the implementation needs UserdataPtr, which
+    // is not yet defined here.
+    // -> libs/ardour/lua_api.cc
+    Proxy& clone_instance (const void* key, void* p);
+
     //--------------------------------------------------------------------------
     /**
         Assign a new value to this table key.
@@ -272,6 +280,7 @@ private:
         http://social.msdn.microsoft.com/Forums/en-US/vcgeneral/thread/e30b2664-a92d-445c-9db2-e8e0fbde2014
         https://connect.microsoft.com/VisualStudio/feedback/details/771509/correct-code-doesnt-compile
 
+        \code
             // This code snippet fails to compile in vs2010,vs2012
             struct S {
               template <class T> inline operator T () const { return T (); }
@@ -280,6 +289,7 @@ private:
               S () || false;
               return 0;
             }
+        \endcode
     */
     template <class T>
     inline operator T () const
@@ -845,6 +855,7 @@ public:
   //inline bool isNone () const { return m_ref == LUA_NOREF; }
 
   inline bool isNil () const { return type () == LUA_TNIL; }
+  inline bool isBoolean () const { return type () == LUA_TBOOLEAN; }
   inline bool isNumber () const { return type () == LUA_TNUMBER; }
   inline bool isString () const { return type () == LUA_TSTRING; }
   inline bool isTable () const { return type () == LUA_TTABLE; }
@@ -880,6 +891,7 @@ public:
       http://social.msdn.microsoft.com/Forums/en-US/vcgeneral/thread/e30b2664-a92d-445c-9db2-e8e0fbde2014
       https://connect.microsoft.com/VisualStudio/feedback/details/771509/correct-code-doesnt-compile
 
+      \code
           // This code snippet fails to compile in vs2010,vs2012
           struct S {
             template <class T> inline operator T () const { return T (); }
@@ -888,6 +900,7 @@ public:
             S () || false;
             return 0;
           }
+      \endcode
   */
   template <class T>
   inline operator T () const

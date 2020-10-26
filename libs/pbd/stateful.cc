@@ -1,22 +1,25 @@
 /*
-    Copyright (C) 2000-2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-    $Id: stateful.cc 629 2006-06-21 23:01:03Z paul $
-*/
+ * Copyright (C) 2000-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2007-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2008-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef COMPILER_MSVC
 #include <io.h>      // Microsoft's nearest equivalent to <unistd.h>
@@ -29,13 +32,14 @@
 
 #include "pbd/debug.h"
 #include "pbd/stateful.h"
+#include "pbd/types_convert.h"
 #include "pbd/property_list.h"
 #include "pbd/properties.h"
 #include "pbd/destructible.h"
 #include "pbd/xml++.h"
 #include "pbd/error.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 
@@ -382,7 +386,6 @@ Stateful::clear_owned_changes ()
 bool
 Stateful::set_id (const XMLNode& node)
 {
-	const XMLProperty* prop;
 	bool* regen = _regenerate_xml_or_string_ids.get();
 
 	if (regen && *regen) {
@@ -390,8 +393,7 @@ Stateful::set_id (const XMLNode& node)
 		return true;
 	}
 
-	if ((prop = node.property ("id")) != 0) {
-		_id = prop->value ();
+	if (node.get_property ("id", _id)) {
 		return true;
 	}
 

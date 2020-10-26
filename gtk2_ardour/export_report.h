@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <cairo/cairo.h>
@@ -46,12 +46,12 @@ protected:
 
 	virtual void overlay (cairo_t* cr, cairo_rectangle_t* r) {}
 
-	virtual void render (cairo_t* cr, cairo_rectangle_t* r)
+	virtual void render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_t* r)
 	{
-		cairo_rectangle (cr, r->x, r->y, r->width, r->height);
-		cairo_clip (cr);
-		background (cr, r);
-		overlay (cr, r);
+		ctx->rectangle (r->x, r->y, r->width, r->height);
+		ctx->clip ();
+		background (ctx->cobj(), r);
+		overlay (ctx->cobj(), r);
 	}
 
 	Cairo::RefPtr<Cairo::ImageSurface> _surface;
@@ -189,6 +189,10 @@ public:
 	ExportReport (const std::string & title, const ARDOUR::AnalysisResults & ar);
 	int run ();
 
+	void on_response (int response_id) {
+		Gtk::Dialog::on_response (response_id);
+	}
+
 private:
 	void init (const ARDOUR::AnalysisResults &, bool);
 	void draw_waveform (Cairo::RefPtr<Cairo::ImageSurface>& wave,
@@ -200,7 +204,7 @@ private:
 	void play_audition ();
 	void audition_active (bool);
 	void audition_seek (int, float);
-	void audition_progress (ARDOUR::framecnt_t, ARDOUR::framecnt_t);
+	void audition_progress (ARDOUR::samplecnt_t, ARDOUR::samplecnt_t);
 	void on_switch_page (GtkNotebookPage*, guint page_num);
 	void on_logscale_toggled (Gtk::ToggleButton*);
 	void on_rectivied_toggled (Gtk::ToggleButton*);

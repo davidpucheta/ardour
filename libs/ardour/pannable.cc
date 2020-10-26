@@ -1,27 +1,29 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/error.h"
-#include "pbd/convert.h"
 #include "pbd/compose.h"
-#include "pbd/boost_debug.h"
 
+#include "ardour/boost_debug.h"
 #include "ardour/debug.h"
 #include "ardour/automation_control.h"
 #include "ardour/automation_list.h"
@@ -29,8 +31,9 @@
 #include "ardour/panner.h"
 #include "ardour/pan_controllable.h"
 #include "ardour/session.h"
+#include "ardour/value_as_string.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -45,11 +48,12 @@ Pannable::Pannable (Session& s)
 	, pan_frontback_control (new PanControllable (s, "", this, PanFrontBackAutomation))
 	, pan_lfe_control (new PanControllable (s, "", this, PanLFEAutomation))
 	, _auto_state (Off)
-	, _auto_style (Absolute)
 	, _has_state (false)
 	, _responding_to_control_auto_state_change (0)
 {
 	//boost_debug_shared_ptr_mark_interesting (this, "pannable");
+
+	g_atomic_int_set (&_touching, 0);
 
 	add_control (pan_azimuth_control);
 	add_control (pan_elevation_control);
@@ -104,9 +108,25 @@ Pannable::set_panner (boost::shared_ptr<Panner> p)
 	_panner = p;
 }
 
+const std::set<Evoral::Parameter>&
+Pannable::what_can_be_automated() const
+{
+	boost::shared_ptr<Panner> const panner = _panner.lock();
+	if (panner) {
+		return panner->what_can_be_automated ();
+	}
+	return Automatable::what_can_be_automated ();
+}
+
 void
 Pannable::value_changed ()
 {
+	if (!has_state ()) {
+		// prevent the GUI from resetting panners
+		// e.g. when switching to aux-sends and back.
+		_has_state = true;
+	}
+
 	_session.set_dirty ();
 }
 
@@ -125,28 +145,8 @@ Pannable::set_automation_state (AutoState state)
 			}
 		}
 
-		session().set_dirty ();
+		_session.set_dirty ();
 		automation_state_changed (_auto_state);
-	}
-}
-
-void
-Pannable::set_automation_style (AutoStyle style)
-{
-	if (style != _auto_style) {
-		_auto_style = style;
-
-		const Controls& c (controls());
-
-		for (Controls::const_iterator ci = c.begin(); ci != c.end(); ++ci) {
-			boost::shared_ptr<AutomationControl> ac = boost::dynamic_pointer_cast<AutomationControl>(ci->second);
-			if (ac) {
-				ac->alist()->set_automation_style (style);
-			}
-		}
-
-		session().set_dirty ();
-		automation_style_changed ();
 	}
 }
 
@@ -165,14 +165,14 @@ Pannable::start_touch (double when)
 }
 
 void
-Pannable::stop_touch (bool mark, double when)
+Pannable::stop_touch (double when)
 {
 	const Controls& c (controls());
 
 	for (Controls::const_iterator ci = c.begin(); ci != c.end(); ++ci) {
 		boost::shared_ptr<AutomationControl> ac = boost::dynamic_pointer_cast<AutomationControl>(ci->second);
 		if (ac) {
-			ac->alist()->stop_touch (mark, when);
+			ac->alist()->stop_touch (when);
 		}
 	}
 	g_atomic_int_set (&_touching, 0);
@@ -181,11 +181,11 @@ Pannable::stop_touch (bool mark, double when)
 XMLNode&
 Pannable::get_state ()
 {
-	return state (true);
+	return state ();
 }
 
 XMLNode&
-Pannable::state (bool /*full*/)
+Pannable::state ()
 {
 	XMLNode* node = new XMLNode (X_("Pannable"));
 
@@ -213,21 +213,21 @@ Pannable::set_state (const XMLNode& root, int version)
 
 	for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
 		if ((*niter)->name() == Controllable::xml_node_name) {
-			const XMLProperty* prop = (*niter)->property (X_("name"));
+			std::string control_name;
 
-			if (!prop) {
+			if (!(*niter)->get_property (X_("name"), control_name)) {
 				continue;
 			}
 
-			if (prop->value() == pan_azimuth_control->name()) {
+			if (control_name == pan_azimuth_control->name()) {
 				pan_azimuth_control->set_state (**niter, version);
-			} else if (prop->value() == pan_width_control->name()) {
+			} else if (control_name == pan_width_control->name()) {
 				pan_width_control->set_state (**niter, version);
-			} else if (prop->value() == pan_elevation_control->name()) {
+			} else if (control_name == pan_elevation_control->name()) {
 				pan_elevation_control->set_state (**niter, version);
-			} else if (prop->value() == pan_frontback_control->name()) {
+			} else if (control_name == pan_frontback_control->name()) {
 				pan_frontback_control->set_state (**niter, version);
-			} else if (prop->value() == pan_lfe_control->name()) {
+			} else if (control_name == pan_lfe_control->name()) {
 				pan_lfe_control->set_state (**niter, version);
 			}
 
@@ -235,34 +235,28 @@ Pannable::set_state (const XMLNode& root, int version)
 			set_automation_xml_state (**niter, PanAzimuthAutomation);
 
 		} else {
-			const XMLProperty* prop;
-
 			/* old school (alpha1-6) XML info */
 
+			float val;
 			if ((*niter)->name() == X_("azimuth")) {
-				prop = (*niter)->property (X_("value"));
-				if (prop) {
-					pan_azimuth_control->set_value (atof (prop->value()), Controllable::NoGroup);
+				if ((*niter)->get_property (X_("value"), val)) {
+					pan_azimuth_control->set_value (val, Controllable::NoGroup);
 				}
 			} else if ((*niter)->name() == X_("width")) {
-				prop = (*niter)->property (X_("value"));
-				if (prop) {
-					pan_width_control->set_value (atof (prop->value()), Controllable::NoGroup);
+				if ((*niter)->get_property (X_("value"), val)) {
+					pan_width_control->set_value (val, Controllable::NoGroup);
 				}
 			} else if ((*niter)->name() == X_("elevation")) {
-				prop = (*niter)->property (X_("value"));
-				if (prop) {
-					pan_elevation_control->set_value (atof (prop->value()), Controllable::NoGroup);
+				if ((*niter)->get_property (X_("value"), val)) {
+					pan_elevation_control->set_value (val, Controllable::NoGroup);
 				}
 			} else if ((*niter)->name() == X_("frontback")) {
-				prop = (*niter)->property (X_("value"));
-				if (prop) {
-					pan_frontback_control->set_value (atof (prop->value()), Controllable::NoGroup);
+				if ((*niter)->get_property (X_("value"), val)) {
+					pan_frontback_control->set_value (val, Controllable::NoGroup);
 				}
 			} else if ((*niter)->name() == X_("lfe")) {
-				prop = (*niter)->property (X_("value"));
-				if (prop) {
-					pan_lfe_control->set_value (atof (prop->value()), Controllable::NoGroup);
+				if ((*niter)->get_property (X_("value"), val)) {
+					pan_lfe_control->set_value (val, Controllable::NoGroup);
 				}
 			}
 		}
@@ -271,16 +265,4 @@ Pannable::set_state (const XMLNode& root, int version)
 	_has_state = true;
 
 	return 0;
-}
-
-string
-Pannable::value_as_string (boost::shared_ptr<AutomationControl> ac) const
-{
-	boost::shared_ptr<Panner> p = panner ();
-
-	if (p) {
-		return p->value_as_string (ac);
-	}
-
-	return Automatable::value_as_string (ac);
 }

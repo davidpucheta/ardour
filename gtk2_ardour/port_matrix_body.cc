@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2002-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 #include "ardour/bundle.h"
@@ -27,8 +28,9 @@
 #include "port_matrix_column_labels.h"
 #include "port_matrix_row_labels.h"
 #include "port_matrix_grid.h"
+#include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 
@@ -43,7 +45,7 @@ PortMatrixBody::PortMatrixBody (PortMatrix* p)
 	  _ignore_component_size_changed (false)
 {
 	_column_labels = new PortMatrixColumnLabels (p, this);
-	_row_labels = new PortMatrixRowLabels (p, this);
+	_row_labels = new PortMatrixRowLabels (p, this, *_column_labels);
 	_grid = new PortMatrixGrid (p, this);
 
 	_components.push_back (_column_labels);
@@ -72,6 +74,7 @@ PortMatrixBody::on_expose_event (GdkEventExpose* event)
 		/* nothing to connect */
 
 		cairo_t* cr = gdk_cairo_create (get_window()->gobj());
+		cairo_set_font_size (cr, UIConfiguration::instance().get_ui_scale() * 10);
 
 		cairo_set_source_rgb (cr, 0, 0, 0);
 		cairo_rectangle (cr, 0, 0, _alloc_width, _alloc_height);
@@ -129,6 +132,7 @@ PortMatrixBody::on_expose_event (GdkEventExpose* event)
 	}
 
 	cairo_t* cr = gdk_cairo_create (get_window()->gobj());
+	cairo_set_font_size (cr, UIConfiguration::instance().get_ui_scale() * 10);
 
 	for (list<PortMatrixComponent*>::iterator i = _components.begin(); i != _components.end(); ++i) {
 		cairo_save (cr);
@@ -471,7 +475,7 @@ PortMatrixBody::highlight_associated_channels (int dim, ARDOUR::BundleChannel h)
 	PortGroup::BundleList const b = _matrix->visible_ports(1 - dim)->bundles ();
 
 	for (PortGroup::BundleList::const_iterator i = b.begin(); i != b.end(); ++i) {
-	        for (uint32_t j = 0; j < (*i)->bundle->nchannels().n_total(); ++j) {
+		for (uint32_t j = 0; j < (*i)->bundle->nchannels().n_total(); ++j) {
 
 			if (!_matrix->should_show ((*i)->bundle->channel_type(j))) {
 				continue;

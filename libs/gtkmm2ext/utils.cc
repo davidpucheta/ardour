@@ -1,25 +1,30 @@
 /*
-    Copyright (C) 1999 Paul Barton-Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-    $Id$
-*/
+ * Copyright (C) 1999-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005-2008 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2016 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Julien "_FrnchFrgg_" RIVAUD <frnchfrgg@free.fr>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <map>
 #include <algorithm>
+#include <iostream>
 
 #include <gtk/gtkpaned.h>
 #include <gtk/gtk.h>
@@ -31,18 +36,19 @@
 #include <gtkmm/label.h>
 #include <gtkmm/comboboxtext.h>
 #include <gtkmm/tooltip.h>
+#include <gtkmm/menuitem.h>
 
 #include "gtkmm2ext/utils.h"
 #include "gtkmm2ext/persistent_tooltip.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 
 void
 Gtkmm2ext::init (const char* localedir)
 {
-#ifdef ENABLE_NLS
+#if ENABLE_NLS
 	(void) bindtextdomain(PACKAGE, localedir);
 	(void) bind_textdomain_codeset (PACKAGE, "UTF-8");
 #endif
@@ -79,7 +85,7 @@ Gtkmm2ext::set_size_request_to_display_given_text (Gtk::Widget &w, const gchar *
 }
 
 /** Set width request to display given text, and height to display anything.
-    This is useful for setting many widgets to the same height for consistency. */
+ * This is useful for setting many widgets to the same height for consistency. */
 void
 Gtkmm2ext::set_size_request_to_display_given_text_width (Gtk::Widget& w,
                                                          const gchar* htext,
@@ -132,25 +138,25 @@ Gtkmm2ext::set_size_request_to_display_given_text (Gtk::Widget &w,
 	int width_max = 0;
 	int height_max = 0;
 	w.ensure_style ();
-        vector<string> copy;
-        const vector<string>* to_use;
-        vector<string>::const_iterator i;
+	vector<string> copy;
+	const vector<string>* to_use;
+	vector<string>::const_iterator i;
 
-        for (i = strings.begin(); i != strings.end(); ++i) {
-                if ((*i).find_first_of ("gy") != string::npos) {
-                        /* contains a descender */
-                        break;
-                }
-        }
+	for (i = strings.begin(); i != strings.end(); ++i) {
+		if ((*i).find_first_of ("gy") != string::npos) {
+			/* contains a descender */
+			break;
+		}
+	}
 
-        if (i == strings.end()) {
-                /* make a copy of the strings then add one that has a descender */
-                copy = strings;
-                copy.push_back ("g");
-                to_use = &copy;
-        } else {
-                to_use = &strings;
-        }
+	if (i == strings.end()) {
+		/* make a copy of the strings then add one that has a descender */
+		copy = strings;
+		copy.push_back ("g");
+		to_use = &copy;
+	} else {
+		to_use = &strings;
+	}
 
 	for (vector<string>::const_iterator i = to_use->begin(); i != to_use->end(); ++i) {
 		get_pixel_size (w.create_pango_layout (*i), width, height);
@@ -162,8 +168,9 @@ Gtkmm2ext::set_size_request_to_display_given_text (Gtk::Widget &w,
 }
 
 /** This version specifies horizontal padding in text to avoid assumptions
-    about font size.  Should be used anywhere padding is used to avoid text,
-    like combo boxes. */
+ * about font size.  Should be used anywhere padding is used to avoid text,
+ * like combo boxes.
+ */
 void
 Gtkmm2ext::set_size_request_to_display_given_text (Gtk::Widget&                    w,
                                                    const std::vector<std::string>& strings,
@@ -192,15 +199,15 @@ static inline guint8
 demultiply_alpha (guint8 src,
                   guint8 alpha)
 {
-        /* cairo pixel buffer data contains RGB values with the alpha
-           values premultiplied.
-
-           GdkPixbuf pixel buffer data contains RGB values without the
-           alpha value applied.
-
-           this removes the alpha component from the cairo version and
-           returns the GdkPixbuf version.
-        */
+	/* cairo pixel buffer data contains RGB values with the alpha
+	 * values premultiplied.
+	 *
+	 * GdkPixbuf pixel buffer data contains RGB values without the
+	 * alpha value applied.
+	 *
+	 * this removes the alpha component from the cairo version and
+	 * returns the GdkPixbuf version.
+	 */
 	return alpha ? ((guint (src) << 8) - src) / alpha : 0;
 }
 
@@ -213,50 +220,50 @@ Gtkmm2ext::convert_bgra_to_rgba (guint8 const* src,
 	guint8 const* src_pixel = src;
 	guint8*       dst_pixel = dst;
 
-        /* cairo pixel data is endian-dependent ARGB with A in the most significant 8 bits,
-           with premultipled alpha values (see preceding function)
-
-           GdkPixbuf pixel data is non-endian-dependent RGBA with R in the lowest addressable
-           8 bits, and non-premultiplied alpha values.
-
-           convert from the cairo values to the GdkPixbuf ones.
-        */
+	/* cairo pixel data is endian-dependent ARGB with A in the most significant 8 bits,
+	 * with premultipled alpha values (see preceding function)
+	 *
+	 * GdkPixbuf pixel data is non-endian-dependent RGBA with R in the lowest addressable
+	 * 8 bits, and non-premultiplied alpha values.
+	 *
+	 * convert from the cairo values to the GdkPixbuf ones.
+	 */
 
 	for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
+		for (int x = 0; x < width; x++) {
 #if G_BYTE_ORDER == G_LITTLE_ENDIAN
-                        /* Cairo [ B G R A ] is actually  [ B G R A ] in memory SOURCE
-                                                            0 1 2 3
-                           Pixbuf [ R G B A ] is actually [ R G B A ] in memory DEST
-                        */
-                        dst_pixel[0] = demultiply_alpha (src_pixel[2],
-                                                         src_pixel[3]); // R [0] <= [ 2 ]
-                        dst_pixel[1] = demultiply_alpha (src_pixel[1],
-                                                         src_pixel[3]); // G [1] <= [ 1 ]
-                        dst_pixel[2] = demultiply_alpha (src_pixel[0],
-                                                         src_pixel[3]); // B [2] <= [ 0 ]
-                        dst_pixel[3] = src_pixel[3]; // alpha
+			/* Cairo [ B G R A ] is actually  [ B G R A ] in memory SOURCE
+				 0 1 2 3
+				 Pixbuf [ R G B A ] is actually [ R G B A ] in memory DEST
+				 */
+			dst_pixel[0] = demultiply_alpha (src_pixel[2],
+					src_pixel[3]); // R [0] <= [ 2 ]
+			dst_pixel[1] = demultiply_alpha (src_pixel[1],
+					src_pixel[3]); // G [1] <= [ 1 ]
+			dst_pixel[2] = demultiply_alpha (src_pixel[0],
+					src_pixel[3]); // B [2] <= [ 0 ]
+			dst_pixel[3] = src_pixel[3]; // alpha
 
 #elif G_BYTE_ORDER == G_BIG_ENDIAN
-                        /* Cairo [ B G R A ] is actually  [ A R G B ] in memory SOURCE
-                                                            0 1 2 3
-                           Pixbuf [ R G B A ] is actually [ R G B A ] in memory DEST
-                        */
-                        dst_pixel[0] = demultiply_alpha (src_pixel[1],
-                                                         src_pixel[0]); // R [0] <= [ 1 ]
-                        dst_pixel[1] = demultiply_alpha (src_pixel[2],
-                                                         src_pixel[0]); // G [1] <= [ 2 ]
-                        dst_pixel[2] = demultiply_alpha (src_pixel[3],
-                                                         src_pixel[0]); // B [2] <= [ 3 ]
-                        dst_pixel[3] = src_pixel[0]; // alpha
+			/* Cairo [ B G R A ] is actually  [ A R G B ] in memory SOURCE
+				 0 1 2 3
+				 Pixbuf [ R G B A ] is actually [ R G B A ] in memory DEST
+				 */
+			dst_pixel[0] = demultiply_alpha (src_pixel[1],
+					src_pixel[0]); // R [0] <= [ 1 ]
+			dst_pixel[1] = demultiply_alpha (src_pixel[2],
+					src_pixel[0]); // G [1] <= [ 2 ]
+			dst_pixel[2] = demultiply_alpha (src_pixel[3],
+					src_pixel[0]); // B [2] <= [ 3 ]
+			dst_pixel[3] = src_pixel[0]; // alpha
 
 #else
 #error ardour does not currently support PDP-endianess
 #endif
 
-                        dst_pixel += 4;
-                        src_pixel += 4;
-                }
+			dst_pixel += 4;
+			src_pixel += 4;
+		}
 	}
 }
 
@@ -306,6 +313,159 @@ Gtkmm2ext::pixbuf_from_string(const string& name, const Pango::FontDescription& 
 	cairo_surface_destroy(surface);
 
 	return buf;
+}
+
+static void
+_position_menu_anchored (int& x, int& y, bool& push_in,
+                                   Gtk::Menu* const menu,
+                                   Gtk::Widget* const anchor,
+                                   const std::string& selected)
+{
+	using namespace Gtk;
+	using namespace Gtk::Menu_Helpers;
+
+	 /* TODO: lacks support for rotated dropdown buttons */
+
+	if (!anchor->has_screen () || !anchor->get_has_window ()) {
+		return;
+	}
+
+	Gdk::Rectangle monitor;
+	{
+		const int monitor_num = anchor->get_screen ()->get_monitor_at_window (
+				anchor->get_window ());
+		anchor->get_screen ()->get_monitor_geometry (
+				(monitor_num < 0) ? 0 : monitor_num, monitor);
+	}
+
+	const Requisition menu_req = menu->size_request();
+	const Gdk::Rectangle allocation = anchor->get_allocation();
+
+	/* The x and y position are handled separately.
+	 *
+	 * For the x position if the direction is LTR (or RTL), then we try in order:
+	 *  a) align the left (right) of the menu with the left (right) of the button
+	 *     if there's enough room until the right (left) border of the screen;
+	 *  b) align the right (left) of the menu with the right (left) of the button
+	 *     if there's enough room until the left (right) border of the screen;
+	 *  c) align the right (left) border of the menu with the right (left) border
+	 *     of the screen if there's enough space;
+	 *  d) align the left (right) border of the menu with the left (right) border
+	 *     of the screen, with the rightmost (leftmost) part of the menu that
+	 *     overflows the screen.
+	 *     XXX We always align left regardless of the direction because if x is
+	 *     left of the current monitor, the menu popup code after us notices it
+	 *     and enforces that the menu stays in the monitor that's at the left...*/
+
+	anchor->get_window ()->get_origin (x, y);
+
+	if (anchor->get_direction() == TEXT_DIR_RTL) {
+		if (monitor.get_x() <= x + allocation.get_width() - menu_req.width) {
+			/* a) align menu right and button right */
+			x += allocation.get_width() - menu_req.width;
+		} else if (x + menu_req.width <= monitor.get_x() + monitor.get_width()) {
+			/* b) align menu left and button left: nothing to do*/
+		} else if (menu_req.width <= monitor.get_width()) {
+			/* c) align menu left and screen left, guaranteed to fit */
+			x = monitor.get_x();
+		} else {
+			/* d) XXX align left or the menu might change monitors */
+			x = monitor.get_x();
+		}
+	} else { /* LTR */
+		if (x + menu_req.width <= monitor.get_x() + monitor.get_width()) {
+			/* a) align menu left and button left: nothing to do*/
+		} else if (monitor.get_x() <= x + allocation.get_width() - menu_req.width) {
+			/* b) align menu right and button right */
+			x += allocation.get_width() - menu_req.width;
+		} else if (menu_req.width <= monitor.get_width()) {
+			/* c) align menu right and screen right, guaranteed to fit */
+			x = monitor.get_x() + monitor.get_width() - menu_req.width;
+		} else {
+			/* d) align left */
+			x = monitor.get_x();
+		}
+	}
+
+	/* For the y position, try in order:
+	 *  a) if there is a menu item with the same text as the button, align it
+	 *     with the button, unless that makes the menu overflow the monitor.
+	 *  b) align the top of the menu with the bottom of the button if there is
+	 *     enough room below the button;
+	 *  c) align the bottom of the menu with the top of the button if there is
+	 *     enough room above the button;
+	 *  d) try aligning the selected menu item again, this time with scrollbars;
+	 *  e) if there is no selected menu item, align the menu above the button or
+	 *     below the button, depending on where there is more space.
+	 * For the d) and e) cases, the menu contents will be aligned as told, but
+	 * the menu itself will be bigger than that to accomodate the menu items
+	 * that are scrolled out of view, thanks to |push_in = true|.
+	 */
+
+	const MenuList& items = menu->items ();
+	int offset = 0;
+
+	MenuList::const_iterator i = items.begin();
+	for ( ; i != items.end(); ++i) {
+		const Label* label_widget = dynamic_cast<const Label*>(i->get_child());
+		if (label_widget && selected == ((std::string) label_widget->get_label())) {
+			offset += (i->size_request().height - allocation.get_height()) / 2;
+			menu->select_item(*i);
+			break;
+		}
+		offset += i->size_request().height;
+	}
+	if (i != items.end() &&
+	    y - offset >= monitor.get_y() &&
+	    y - offset + menu_req.height <= monitor.get_y() + monitor.get_height()) {
+		y -= offset; /* a) */
+	} else if (y + allocation.get_height() + menu_req.height <= monitor.get_y() + monitor.get_height()) {
+		y += allocation.get_height(); /* b) */
+	} else if ((y - menu_req.height) >= monitor.get_y()) {
+		y -= menu_req.height; /* c) */
+	} else if (i != items.end()) {
+		y -= offset; /* d) */
+		menu->gobj()->upper_arrow_visible = 1; /* work around a gtk bug for the first show */
+	} else if (monitor.get_height() - allocation.get_height() >= 2*(y - monitor.get_y())) {
+		y += allocation.get_height(); /* e), more space below */
+		menu->gobj()->upper_arrow_visible = 1; /* work around a gtk bug for the first show */
+	} else {
+		y -= menu_req.height; /* e), more space above */
+		menu->gobj()->upper_arrow_visible = 1; /* work around a gtk bug for the first show */
+	}
+
+	/* Workaround a bug in GTK where they don't tweak the scroll offset by the arrow height
+	 * if the scroll offset is negative. See the condition at:
+	 * https://gitlab.gnome.org/GNOME/gtk/blob/2.24.32/gtk/gtkmenu.c#L4395
+	 * and the computation of scroll_offset at:
+	 * https://gitlab.gnome.org/GNOME/gtk/blob/2.24.32/gtk/gtkmenu.c#L4360
+	 * */
+	int arrow_height;
+	GtkArrowPlacement arrow_placement;
+	gtk_widget_style_get (GTK_WIDGET (menu->gobj()),
+	        "scroll-arrow-vlength", &arrow_height,
+	        "arrow_placement", &arrow_placement,
+	        NULL);
+	int scroll_tweak = menu_req.height - monitor.get_height();
+	int scroll_offset = scroll_tweak + monitor.get_y() + monitor.get_height() - y - menu_req.height;
+	if (arrow_placement != GTK_ARROWS_END && scroll_tweak > 0 && scroll_offset < 0) {
+		y -= arrow_height;
+	}
+
+	push_in = true;
+}
+
+void
+Gtkmm2ext::anchored_menu_popup (Gtk::Menu* const menu,
+                                Gtk::Widget* const anchor,
+                                const std::string& selected,
+                                guint button, guint32 time)
+{
+	menu->popup(
+		sigc::bind (sigc::ptr_fun(&_position_menu_anchored),
+		            menu, anchor, selected),
+		button,
+		time);
 }
 
 void
@@ -479,40 +639,41 @@ Gtkmm2ext::possibly_translate_legal_accelerator_to_real_key (uint32_t keyval)
 int
 Gtkmm2ext::physical_screen_height (Glib::RefPtr<Gdk::Window> win)
 {
-        GdkScreen* scr = gdk_screen_get_default();
+	GdkScreen* scr = gdk_screen_get_default();
 
-        if (win) {
-                GdkRectangle r;
-                gint monitor = gdk_screen_get_monitor_at_window (scr, win->gobj());
-                gdk_screen_get_monitor_geometry (scr, monitor, &r);
-                return r.height;
-        } else {
-                return gdk_screen_get_height (scr);
-        }
+	if (win) {
+		GdkRectangle r;
+		gint monitor = gdk_screen_get_monitor_at_window (scr, win->gobj());
+		gdk_screen_get_monitor_geometry (scr, monitor, &r);
+		return r.height;
+	} else {
+		return gdk_screen_get_height (scr);
+	}
 }
 
 int
 Gtkmm2ext::physical_screen_width (Glib::RefPtr<Gdk::Window> win)
 {
-        GdkScreen* scr = gdk_screen_get_default();
+	GdkScreen* scr = gdk_screen_get_default();
 
-        if (win) {
-                GdkRectangle r;
-                gint monitor = gdk_screen_get_monitor_at_window (scr, win->gobj());
-                gdk_screen_get_monitor_geometry (scr, monitor, &r);
-                return r.width;
-        } else {
-                return gdk_screen_get_width (scr);
-        }
+	if (win) {
+		GdkRectangle r;
+		gint monitor = gdk_screen_get_monitor_at_window (scr, win->gobj());
+		gdk_screen_get_monitor_geometry (scr, monitor, &r);
+		return r.width;
+	} else {
+		return gdk_screen_get_width (scr);
+	}
 }
 
 void
 Gtkmm2ext::container_clear (Gtk::Container& c)
 {
-        list<Gtk::Widget*> children = c.get_children();
-        for (list<Gtk::Widget*>::iterator child = children.begin(); child != children.end(); ++child) {
-                c.remove (**child);
-        }
+	list<Gtk::Widget*> children = c.get_children();
+	for (list<Gtk::Widget*>::iterator child = children.begin(); child != children.end(); ++child) {
+		(*child)->hide ();
+		c.remove (**child);
+	}
 }
 
 void
@@ -561,7 +722,11 @@ Gtkmm2ext::rounded_right_half_rectangle (Cairo::RefPtr<Cairo::Context> context, 
 void
 Gtkmm2ext::rounded_rectangle (cairo_t* cr, double x, double y, double w, double h, double r)
 {
-	double degrees = M_PI / 180.0;
+	static const double degrees = M_PI / 180.0;
+	if (r < 1) {
+		cairo_rectangle (cr, x, y, w, h);
+		return;
+	}
 
 	cairo_new_sub_path (cr);
 	cairo_arc (cr, x + w - r, y + r, r, -90 * degrees, 0 * degrees);  //tr
@@ -574,7 +739,7 @@ Gtkmm2ext::rounded_rectangle (cairo_t* cr, double x, double y, double w, double 
 void
 Gtkmm2ext::rounded_left_half_rectangle (cairo_t* cr, double x, double y, double w, double h, double r)
 {
-	double degrees = M_PI / 180.0;
+	static const double degrees = M_PI / 180.0;
 
 	cairo_new_sub_path (cr);
 	cairo_line_to (cr, x+w, y); // tr
@@ -587,7 +752,7 @@ Gtkmm2ext::rounded_left_half_rectangle (cairo_t* cr, double x, double y, double 
 void
 Gtkmm2ext::rounded_right_half_rectangle (cairo_t* cr, double x, double y, double w, double h, double r)
 {
-	double degrees = M_PI / 180.0;
+	static const double degrees = M_PI / 180.0;
 
 	cairo_new_sub_path (cr);
 	cairo_arc (cr, x + w - r, y + r, r, -90 * degrees, 0 * degrees);  //tr
@@ -600,7 +765,7 @@ Gtkmm2ext::rounded_right_half_rectangle (cairo_t* cr, double x, double y, double
 void
 Gtkmm2ext::rounded_top_half_rectangle (cairo_t* cr, double x, double y, double w, double h, double r)
 {
-	double degrees = M_PI / 180.0;
+	static const double degrees = M_PI / 180.0;
 
 	cairo_new_sub_path (cr);
 	cairo_move_to (cr, x+w, y+h);
@@ -613,7 +778,7 @@ Gtkmm2ext::rounded_top_half_rectangle (cairo_t* cr, double x, double y, double w
 void
 Gtkmm2ext::rounded_bottom_half_rectangle (cairo_t* cr, double x, double y, double w, double h, double r)
 {
-	double degrees = M_PI / 180.0;
+	static const double degrees = M_PI / 180.0;
 
 	cairo_new_sub_path (cr);
 	cairo_move_to (cr, x, y);
@@ -627,7 +792,7 @@ Gtkmm2ext::rounded_bottom_half_rectangle (cairo_t* cr, double x, double y, doubl
 void
 Gtkmm2ext::rounded_top_rectangle (cairo_t* cr, double x, double y, double w, double h, double r)
 {
-	double degrees = M_PI / 180.0;
+	static const double degrees = M_PI / 180.0;
 
 	cairo_new_sub_path (cr);
 	cairo_move_to (cr, x+w, y+h);
@@ -669,6 +834,19 @@ Gtkmm2ext::rounded_top_right_rectangle (cairo_t* cr, double x, double y, double 
 	cairo_line_to (cr, x+w,y+h); // Move to E
 	cairo_line_to (cr, x,y+h); // Line to F
 	cairo_line_to (cr, x,y); // Line to A
+}
+
+void
+Gtkmm2ext::add_reflection (cairo_t* cr, double w, double h)
+{
+	cairo_pattern_t* convex_pattern = cairo_pattern_create_linear (0.0, 0, 0.3, h * 0.7);
+	cairo_pattern_add_color_stop_rgba (convex_pattern, 0.0,  1, 1, 1, 0.10);
+	cairo_pattern_add_color_stop_rgba (convex_pattern, 0.79, 1, 1, 1, 0.03);
+	cairo_pattern_add_color_stop_rgba (convex_pattern, 1.0,  1, 1, 1, 0.0);
+	cairo_set_source (cr, convex_pattern);
+	Gtkmm2ext::rounded_rectangle (cr, 2, 2, w - 4, h - 4, 4);
+	cairo_fill (cr);
+	cairo_pattern_destroy(convex_pattern);
 }
 
 Glib::RefPtr<Gdk::Window>
@@ -753,9 +931,8 @@ Gtkmm2ext::fit_to_pixels (const string& str, int pixel_width, Pango::FontDescrip
 	line = layout->get_line (0);
 
 	/* XXX: might need special care to get the ellipsis character, not sure
-           how that works
-	*/
-
+	 * how that works
+	 */
 	string s = string (layout->get_text ().substr(line->get_start_index(), line->get_length()));
 
 	cerr << "fit to pixels of " << str << " returns " << s << endl;
@@ -770,7 +947,6 @@ Gtkmm2ext::fit_to_pixels (const string& str, int pixel_width, Pango::FontDescrip
  *  @param avail Available horizontal space.
  *  @return (Text, possibly ellipsized) and (horizontal size of text)
  */
-
 std::pair<std::string, double>
 Gtkmm2ext::fit_to_pixels (cairo_t* cr, std::string name, double avail)
 {
@@ -850,28 +1026,28 @@ Gtkmm2ext::disable_tooltips ()
 bool
 Gtkmm2ext::event_inside_widget_window (Gtk::Widget& widget, GdkEvent* ev)
 {
-        gdouble evx, evy;
+	gdouble evx, evy;
 
-        if (!gdk_event_get_root_coords (ev, &evx, &evy)) {
-                return false;
-        }
+	if (!gdk_event_get_root_coords (ev, &evx, &evy)) {
+		return false;
+	}
 
-        gint wx;
-        gint wy;
-        gint width, height, depth;
-        gint x, y;
+	gint wx;
+	gint wy;
+	gint width, height, depth;
+	gint x, y;
 
-        Glib::RefPtr<Gdk::Window> widget_window = widget.get_window();
+	Glib::RefPtr<Gdk::Window> widget_window = widget.get_window();
 
-        widget_window->get_geometry (x, y, width, height, depth);
-        widget_window->get_root_origin (wx, wy);
+	widget_window->get_geometry (x, y, width, height, depth);
+	widget_window->get_root_origin (wx, wy);
 
-        if ((evx >= wx && evx < wx + width) &&
-            (evy >= wy && evy < wy + height)) {
-                return true;
-        }
+	if ((evx >= wx && evx < wx + width) &&
+			(evy >= wy && evy < wy + height)) {
+		return true;
+	}
 
-        return false;
+	return false;
 }
 
 const char*
@@ -987,8 +1163,86 @@ Gtkmm2ext::add_volume_shortcuts (Gtk::FileChooser& c)
 			}
 		}
 	}
-	catch (Glib::FileError& e) {
+	catch (Glib::FileError const& e) {
 		std::cerr << "listing /Volumnes failed: " << e.what() << std::endl;
 	}
 #endif
+}
+
+float
+Gtkmm2ext::paned_position_as_fraction (Gtk::Paned& paned, bool h)
+{
+	const guint pos = gtk_paned_get_position (const_cast<GtkPaned*>(static_cast<const Gtk::Paned*>(&paned)->gobj()));
+	return (double) pos / (h ? paned.get_allocation().get_height() : paned.get_allocation().get_width());
+}
+
+void
+Gtkmm2ext::paned_set_position_as_fraction (Gtk::Paned& paned, float fraction, bool h)
+{
+	gint v = (h ? paned.get_allocation().get_height() : paned.get_allocation().get_width());
+
+	if (v < 1) {
+		return;
+	}
+
+	paned.set_position ((guint) floor (fraction * v));
+}
+
+string
+Gtkmm2ext::show_gdk_event_state (int state)
+{
+	string s;
+	if (state & GDK_SHIFT_MASK) {
+		s += "+SHIFT";
+	}
+	if (state & GDK_LOCK_MASK) {
+		s += "+LOCK";
+	}
+	if (state & GDK_CONTROL_MASK) {
+		s += "+CONTROL";
+	}
+	if (state & GDK_MOD1_MASK) {
+		s += "+MOD1";
+	}
+	if (state & GDK_MOD2_MASK) {
+		s += "+MOD2";
+	}
+	if (state & GDK_MOD3_MASK) {
+		s += "+MOD3";
+	}
+	if (state & GDK_MOD4_MASK) {
+		s += "+MOD4";
+	}
+	if (state & GDK_MOD5_MASK) {
+		s += "+MOD5";
+	}
+	if (state & GDK_BUTTON1_MASK) {
+		s += "+BUTTON1";
+	}
+	if (state & GDK_BUTTON2_MASK) {
+		s += "+BUTTON2";
+	}
+	if (state & GDK_BUTTON3_MASK) {
+		s += "+BUTTON3";
+	}
+	if (state & GDK_BUTTON4_MASK) {
+		s += "+BUTTON4";
+	}
+	if (state & GDK_BUTTON5_MASK) {
+		s += "+BUTTON5";
+	}
+	if (state & GDK_SUPER_MASK) {
+		s += "+SUPER";
+	}
+	if (state & GDK_HYPER_MASK) {
+		s += "+HYPER";
+	}
+	if (state & GDK_META_MASK) {
+		s += "+META";
+	}
+	if (state & GDK_RELEASE_MASK) {
+		s += "+RELEASE";
+	}
+
+	return s;
 }

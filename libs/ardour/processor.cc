@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "libardour-config.h"
@@ -24,9 +27,11 @@
 #include <string>
 
 #include "pbd/xml++.h"
+#include "pbd/types_convert.h"
 
 #include "ardour/automatable.h"
 #include "ardour/chan_count.h"
+#include "ardour/debug.h"
 #include "ardour/processor.h"
 #include "ardour/types.h"
 
@@ -42,7 +47,7 @@
 #include "ardour/session.h"
 #include "ardour/types.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -66,6 +71,11 @@ Processor::Processor(Session& session, const string& name)
 	, _window_proxy (0)
 	, _pinmgr_proxy (0)
 	, _owner (0)
+	, _input_latency (0)
+	, _output_latency (0)
+	, _capture_offset (0)
+	, _playback_offset (0)
+	, _loop_location (0)
 {
 }
 
@@ -84,13 +94,23 @@ Processor::Processor (const Processor& other)
 	, _window_proxy (0)
 	, _pinmgr_proxy (0)
 	, _owner (0)
+	, _input_latency (0)
+	, _output_latency (0)
+	, _capture_offset (0)
+	, _playback_offset (0)
+	, _loop_location (other._loop_location)
 {
+}
+
+Processor::~Processor ()
+{
+	DEBUG_TRACE (DEBUG::Destruction, string_compose ("processor %1 destructor\n", _name));
 }
 
 XMLNode&
 Processor::get_state (void)
 {
-	return state (true);
+	return state ();
 }
 
 /* NODE STRUCTURE
@@ -108,21 +128,19 @@ Processor::get_state (void)
 */
 
 XMLNode&
-Processor::state (bool full_state)
+Processor::state ()
 {
 	XMLNode* node = new XMLNode (state_node_name);
-	char buf[64];
 
-	id().print (buf, sizeof (buf));
-	node->add_property("id", buf);
-	node->add_property("name", _name);
-	node->add_property("active", active() ? "yes" : "no");
+	node->set_property("id", id());
+	node->set_property("name", name());
+	node->set_property("active", active());
 
 	if (_extra_xml){
 		node->add_child_copy (*_extra_xml);
 	}
 
-	if (full_state) {
+	if (!skip_saving_automation) {
 		XMLNode& automation = Automatable::get_automation_xml_state();
 		if (!automation.children().empty() || !automation.properties().empty()) {
 			node->add_child_nocopy (automation);
@@ -131,8 +149,7 @@ Processor::state (bool full_state)
 		}
 	}
 
-	snprintf (buf, sizeof (buf), "%" PRId64, _user_latency);
-	node->add_property("user-latency", buf);
+	Latent::add_state (node);
 
 	return *node;
 }
@@ -180,17 +197,16 @@ Processor::set_state (const XMLNode& node, int version)
 		return set_state_2X (node, version);
 	}
 
-	const XMLProperty *prop;
-	const XMLProperty *legacy_active = 0;
-	bool leave_name_alone = (node.property ("ignore-name") != 0);
-
-	if (!leave_name_alone) {
+	bool ignore_name;
+	// Only testing for the presence of the property not value
+	if (!node.get_property("ignore-name", ignore_name)) {
+		string name;
 		// may not exist for legacy 3.0 sessions
-		if ((prop = node.property ("name")) != 0) {
+		if (node.get_property ("name", name)) {
 			/* don't let derived classes have a crack at set_name,
 			   as some (like Send) will screw with the one we suggest.
 			*/
-			Processor::set_name (prop->value());
+			Processor::set_name (name);
 		}
 
 		set_id (node);
@@ -201,11 +217,12 @@ Processor::set_state (const XMLNode& node, int version)
 
 	Stateful::save_extra_xml (node);
 
+	XMLProperty const * prop = 0;
+	XMLProperty const * legacy_active = 0;
+
 	for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
 
 		if ((*niter)->name() == X_("Automation")) {
-
-			XMLProperty *prop;
 
 			if ((prop = (*niter)->property ("path")) != 0) {
 				old_set_automation_state (*(*niter));
@@ -229,7 +246,7 @@ Processor::set_state (const XMLNode& node, int version)
 		}
 	}
 
-	bool const a = string_is_affirmative (prop->value ()) && !_session.get_bypass_all_loaded_plugins();
+	bool const a = string_to<bool> (prop->value ()) && !_session.get_bypass_all_loaded_plugins();
 	if (_active != a) {
 		if (a) {
 			activate ();
@@ -238,9 +255,7 @@ Processor::set_state (const XMLNode& node, int version)
 		}
 	}
 
-	if ((prop = node.property ("user-latency")) != 0) {
-		_user_latency = atoi (prop->value ());
-	}
+	Latent::set_state (node, version);
 
 	return 0;
 }
@@ -253,13 +268,44 @@ Processor::configure_io (ChanCount in, ChanCount out)
 	   Derived classes must override and set _configured_output appropriately
 	   if this is not the case
 	*/
+	bool changed = _configured_input != in || _configured_output != out;
 
 	_configured_input = in;
 	_configured_output = out;
 	_configured = true;
 
-	ConfigurationChanged (in, out); /* EMIT SIGNAL */
+	if (changed) {
+		ConfigurationChanged (in, out); /* EMIT SIGNAL */
+	}
 
+	return true;
+}
+
+bool
+Processor::map_loop_range (samplepos_t& start, samplepos_t& end) const
+{
+	if (!_loop_location) {
+		return false;
+	}
+	if (start >= end) {
+		/* no backwards looping */
+		return false;
+	}
+
+	const samplepos_t loop_end = _loop_location->end ();
+	if (start < loop_end) {
+		return false;
+	}
+
+	const samplepos_t loop_start   = _loop_location->start ();
+	const samplecnt_t looplen      = loop_end - loop_start;
+	const sampleoffset_t start_off = (start - loop_start) % looplen;
+	const samplepos_t start_pos    = loop_start + start_off;
+
+	assert (start >= start_pos);
+	end -= start - start_pos;
+	start = start_pos;
+	assert (end > start);
 	return true;
 }
 
@@ -273,12 +319,6 @@ void
 Processor::set_pre_fader (bool p)
 {
 	_pre_fader = p;
-}
-
-void
-Processor::set_ui (void* p)
-{
-	_ui_pointer = p;
 }
 
 void

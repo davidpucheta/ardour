@@ -7,13 +7,33 @@
 #define LV2_SUPPORT   1
 #define HAVE_SUIL     1
 #define HAVE_LV2      1
-#define HAVE_LV2_1_2_0 1
 /* Comment out the above lines to build Mixbus without LV2 support */
 #endif
 
 #ifndef WINDOWS_VST_SUPPORT
 #define WINDOWS_VST_SUPPORT
 /* Comment out the above line to build Mixbus without VST support */
+#endif
+
+#if defined (WINDOWS_VST_SUPPORT) && !defined (VST3_SUPPORT)
+#define VST3_SUPPORT
+/* Comment out the above line to build Mixbus without VST3 support */
+#endif
+
+#ifndef PROGRAM_NAME
+#ifdef  MIXBUS
+#define PROGRAM_NAME "Mixbus"
+#else
+#define PROGRAM_NAME "Ardour"
+#endif
+#endif
+
+#ifndef CURRENT_SESSION_FILE_VERSION
+#ifdef  MIXBUS
+#define CURRENT_SESSION_FILE_VERSION 6000
+#else
+#define CURRENT_SESSION_FILE_VERSION 6000
+#endif
 #endif
 
 #ifndef JACK_32_64
@@ -34,6 +54,7 @@
 #define RDC_BUILD 1
 #endif
 
+#if (defined (_MSC_VER) && (_MSC_VER == 1400))
 #ifndef __midl
 #if defined(_DEBUG) || defined (DEBUG)
 /* Experimental - link to the lowest DebugCRT so we can run on another system */
@@ -56,6 +77,7 @@ __declspec(selectany) int _forceMFCManifestRTM;
 __declspec(selectany) int _forceAtlDllManifestRTM;
 #ifdef __cplusplus
 }
+#endif
 #endif
 #endif
 

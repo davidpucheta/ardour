@@ -50,7 +50,7 @@
 #include <glib.h>
 #include "pbd/gstdio_compat.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include "ardour/audio_library.h"
 #include "ardour/rc_configuration.h"
@@ -106,7 +106,7 @@ void Mootcher::ensureWorkingDir ()
 size_t Mootcher::WriteMemoryCallback(void *ptr, size_t size, size_t nmemb, void *data)
 {
 	int realsize = (int)(size * nmemb);
-	struct MemoryStruct *mem = (struct MemoryStruct *)data;
+	struct SfdbMemoryStruct *mem = (struct SfdbMemoryStruct *)data;
 
 	mem->memory = (char *)realloc(mem->memory, mem->size + realsize + 1);
 
@@ -127,23 +127,21 @@ std::string Mootcher::sortMethodString(enum sortMethod sort)
 // sort the results in the requested way.
 
 	switch (sort) {
-		case sort_duration_desc:	return "duration_desc";
-		case sort_duration_asc: 	return "duration_asc";
-		case sort_created_desc:		return "created_desc";
-		case sort_created_asc:		return "created_asc";
-		case sort_downloads_desc:	return "downloads_desc";
-		case sort_downloads_asc:	return "downloads_asc";
-		case sort_rating_desc:		return "rating_desc";
-		case sort_rating_asc:		return "rating_asc";
-		default:			return "";
+		case sort_duration_desc:  return "duration_desc";
+		case sort_duration_asc:   return "duration_asc";
+		case sort_created_desc:   return "created_desc";
+		case sort_created_asc:    return "created_asc";
+		case sort_downloads_desc: return "downloads_desc";
+		case sort_downloads_asc:  return "downloads_asc";
+		case sort_rating_desc:    return "rating_desc";
+		case sort_rating_asc:     return "rating_asc";
+		default:                  return "";
 	}
 }
 
 //------------------------------------------------------------------------
 void Mootcher::setcUrlOptions()
 {
-	// basic init for curl
-	curl_global_init(CURL_GLOBAL_ALL);
 	// some servers don't like requests that are made without a user-agent field, so we provide one
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, "libcurl-agent/1.0");
 	// setup curl error buffer
@@ -161,7 +159,7 @@ void Mootcher::setcUrlOptions()
 std::string Mootcher::doRequest(std::string uri, std::string params)
 {
 	std::string result;
-	struct MemoryStruct xml_page;
+	struct SfdbMemoryStruct xml_page;
 	xml_page.memory = NULL;
 	xml_page.size = 0;
 

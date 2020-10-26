@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstring>
 
@@ -33,7 +35,7 @@
 
 #include <cstring>
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Vamp;
@@ -107,8 +109,8 @@ AudioAnalyser::analyse (const string& path, Readable* src, uint32_t channel)
 	int ret = -1;
 	bool done = false;
 	Sample* data = 0;
-	framecnt_t len = src->readable_length();
-	framepos_t pos = 0;
+	samplecnt_t len = src->readable_length();
+	samplepos_t pos = 0;
 	float* bufs[1] = { 0 };
 
 	data = new Sample[bufsize];
@@ -116,11 +118,11 @@ AudioAnalyser::analyse (const string& path, Readable* src, uint32_t channel)
 
 	while (!done) {
 
-		framecnt_t to_read;
+		samplecnt_t to_read;
 
 		/* read from source */
 
-		to_read = min ((len - pos), (framecnt_t) bufsize);
+		to_read = min ((len - pos), (samplecnt_t) bufsize);
 
 		if (src->read (data, pos, to_read, channel) != to_read) {
 			goto out;

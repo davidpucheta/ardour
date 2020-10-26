@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #ifndef __libbackend_portaudio_pcmio_h__
@@ -58,9 +58,9 @@ public:
 
 #ifdef WITH_ASIO
 	bool get_asio_buffer_properties (int device_id,
-	                                 long& min_size_frames,
-	                                 long& max_size_frames,
-	                                 long& preferred_size_frames,
+	                                 long& min_size_samples,
+	                                 long& max_size_samples,
+	                                 long& preferred_size_samples,
 	                                 long& granularity);
 
 	bool get_asio_buffer_sizes(int device_id,

@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007-2009 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_editing_h__
 #define __gtk_ardour_editing_h__
@@ -26,7 +27,7 @@
 
 // This involves some cpp magic. --taybin
 
-#define SNAPTYPE(a) /*empty*/
+#define GRIDTYPE(a) /*empty*/
 #define SNAPMODE(a) /*empty*/
 #define REGIONLISTSORTTYPE(a) /*empty*/
 #define MOUSEMODE(a) /*empty*/
@@ -43,19 +44,19 @@
 
 namespace Editing {
 
-// SNAPTYPE
-#undef SNAPTYPE
-#define SNAPTYPE(a) a,
-enum SnapType {
+// GRIDTYPE
+#undef GRIDTYPE
+#define GRIDTYPE(a) a,
+enum GridType {
 	#include "editing_syms.h"
 };
 
-extern const char *snaptypestrs[];
-inline const char* enum2str(SnapType m) {return snaptypestrs[m];}
-SnapType str2snaptype(const std::string &);
+extern const char *gridtypestrs[];
+inline const char* enum2str(GridType m) {return gridtypestrs[m];}
+GridType str2gridtype(const std::string &);
 
-#undef SNAPTYPE
-#define SNAPTYPE(a) /*empty*/
+#undef GRIDTYPE
+#define GRIDTYPE(a) /*empty*/
 
 // SNAPMODE
 #undef SNAPMODE
@@ -213,6 +214,19 @@ enum EditIgnoreOption {
 	EDIT_IGNORE_PHEAD,
 	EDIT_IGNORE_MOUSE,
 	EDIT_IGNORE_MARKER
+};
+
+enum ZoomAxis {
+	Vertical,
+	Horizontal,
+	Both
+};
+
+enum RegionActionTarget {
+	SelectedRegions = 0x1,
+	EnteredRegions = 0x2,
+	EditPointRegions = 0x4,
+	ListSelection = 0x8
 };
 
 } // namespace Editing

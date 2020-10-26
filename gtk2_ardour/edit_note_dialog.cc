@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2016-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/stock.h>
 #include <gtkmm/table.h>
@@ -26,7 +28,7 @@
 #include "midi_region_view.h"
 #include "note_base.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -93,7 +95,8 @@ EditNoteDialog::EditNoteDialog (MidiRegionView* rv, set<NoteBase*> n)
 
 	_time_clock.set_session (_region_view->get_time_axis_view().session ());
 	_time_clock.set_mode (AudioClock::BBT);
-	_time_clock.set (_region_view->source_relative_time_converter().to ((*_events.begin())->note()->time ()), true);
+	_time_clock.set (_region_view->source_relative_time_converter().to
+			 ((*_events.begin())->note()->time()) + (_region_view->region()->position() - _region_view->region()->start()), true);
 
 	l = manage (left_aligned_label (_("Length")));
 	table->attach (*l, 0, 1, r, r + 1);
@@ -103,7 +106,10 @@ EditNoteDialog::EditNoteDialog (MidiRegionView* rv, set<NoteBase*> n)
 
 	_length_clock.set_session (_region_view->get_time_axis_view().session ());
 	_length_clock.set_mode (AudioClock::BBT);
-	_length_clock.set (_region_view->region_relative_time_converter().to ((*_events.begin())->note()->length ()), true);
+	_length_clock.set (
+		_region_view->region_relative_time_converter().to ((*_events.begin())->note()->end_time ()) + _region_view->region()->position(),
+		true,
+		_region_view->region_relative_time_converter().to ((*_events.begin())->note()->time ()) + _region_view->region()->position());
 
 	/* Set up `set all notes...' buttons' sensitivity */
 
@@ -116,8 +122,8 @@ EditNoteDialog::EditNoteDialog (MidiRegionView* rv, set<NoteBase*> n)
 	int test_channel = (*_events.begin())->note()->channel ();
 	int test_pitch = (*_events.begin())->note()->note ();
 	int test_velocity = (*_events.begin())->note()->velocity ();
-	Evoral::Beats test_time = (*_events.begin())->note()->time ();
-	Evoral::Beats test_length = (*_events.begin())->note()->length ();
+	Temporal::Beats test_time = (*_events.begin())->note()->time ();
+	Temporal::Beats test_length = (*_events.begin())->note()->length ();
 
 	for (set<NoteBase*>::iterator i = _events.begin(); i != _events.end(); ++i) {
 		if ((*i)->note()->channel() != test_channel) {
@@ -152,7 +158,7 @@ void
 EditNoteDialog::done (int r)
 {
 	if (r != RESPONSE_ACCEPT) {
-                return;
+		return;
 	}
 
 	/* These calls mean that if a value is entered using the keyboard
@@ -193,7 +199,8 @@ EditNoteDialog::done (int r)
 		}
 	}
 
-	Evoral::Beats const t = _region_view->source_relative_time_converter().from (_time_clock.current_time ());
+	samplecnt_t const region_samples = _time_clock.current_time() - (_region_view->region()->position() - _region_view->region()->start());
+	Temporal::Beats const t = _region_view->source_relative_time_converter().from (region_samples);
 
 	if (!_time_all.get_sensitive() || _time_all.get_active ()) {
 		for (set<NoteBase*>::iterator i = _events.begin(); i != _events.end(); ++i) {
@@ -204,10 +211,10 @@ EditNoteDialog::done (int r)
 		}
 	}
 
-	Evoral::Beats const d = _region_view->region_relative_time_converter().from (_length_clock.current_duration ());
-
 	if (!_length_all.get_sensitive() || _length_all.get_active ()) {
 		for (set<NoteBase*>::iterator i = _events.begin(); i != _events.end(); ++i) {
+			samplepos_t const note_end_sample = region_samples + _length_clock.current_duration (_time_clock.current_time());
+			Temporal::Beats const d = _region_view->source_relative_time_converter().from (note_end_sample) - (*i)->note()->time();
 			if (d != (*i)->note()->length()) {
 				_region_view->change_note_length (*i, d);
 				had_change = true;
@@ -221,7 +228,10 @@ EditNoteDialog::done (int r)
 
 	_region_view->apply_diff ();
 
+	list<Evoral::event_id_t> notes;
 	for (set<NoteBase*>::iterator i = _events.begin(); i != _events.end(); ++i) {
-		(*i)->set_selected ((*i)->selected()); // change color
+		notes.push_back ((*i)->note()->id());
 	}
+
+	_region_view->select_notes (notes, true);
 }

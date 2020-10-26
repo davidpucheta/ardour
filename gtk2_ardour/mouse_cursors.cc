@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2000-2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gdkmm/cursor.h>
 
@@ -44,7 +45,6 @@ MouseCursors::MouseCursors ()
 	, selector (0)
 	, grabber (0)
 	, grabber_note (0)
-	, grabber_edit_point (0)
 	, zoom_in (0)
 	, zoom_out (0)
 	, time_fx (0)
@@ -72,6 +72,11 @@ MouseCursors::MouseCursors ()
 {
 }
 
+MouseCursors::~MouseCursors ()
+{
+	drop_all ();
+}
+
 void
 MouseCursors::drop_all ()
 {
@@ -89,7 +94,6 @@ MouseCursors::drop_all ()
 	delete selector; selector = 0;
 	delete grabber; grabber = 0;
 	delete grabber_note; grabber_note = 0;
-	delete grabber_edit_point; grabber_edit_point = 0;
 	delete zoom_in; zoom_in = 0;
 	delete zoom_out; zoom_out = 0;
 	delete time_fx; time_fx = 0;
@@ -159,7 +163,6 @@ MouseCursors::set_cursor_set (const std::string& name)
 	scissors = make_cursor ("scissors", 5, 0);
 	grabber = make_cursor ("grabber", 5, 0);
 	grabber_note = make_cursor ("grabber_note", 5, 10);
-	grabber_edit_point = make_cursor ("grabber_edit_point", 5, 17);
 	left_side_trim = make_cursor ("trim_left_cursor", 5, 11);
 	anchored_left_side_trim = make_cursor ("anchored_trim_left_cursor", 5, 11);
 	right_side_trim = make_cursor ("trim_right_cursor", 23, 11);

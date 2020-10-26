@@ -1,28 +1,35 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2015 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 
 #include <gtkmm/listviewtext.h>
+#include <gtkmm/stock.h>
 
 #include "pbd/memento_command.h"
 #include "pbd/stateful_diff_command.h"
+
+#include "widgets/tooltips.h"
 
 #include "ardour/region.h"
 #include "ardour/session.h"
@@ -34,42 +41,42 @@
 #include "gui_thread.h"
 #include "region_editor.h"
 #include "public_editor.h"
-#include "tooltips.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
 using namespace std;
 using namespace Gtkmm2ext;
-using namespace ARDOUR_UI_UTILS;
 
 RegionEditor::RegionEditor (Session* s, boost::shared_ptr<Region> r)
 	: ArdourDialog (_("Region"))
-        , _table (9, 2)
-        , _table_row (0)
-        , _region (r)
-        , name_label (_("Name:"))
-        , audition_button (_("Audition"))
-        , _clock_group (new ClockGroup)
-        , position_clock (X_("regionposition"), true, "", true, false)
-        , end_clock (X_("regionend"), true, "", true, false)
-        , length_clock (X_("regionlength"), true, "", true, false, true)
-        , sync_offset_relative_clock (X_("regionsyncoffsetrelative"), true, "", true, false)
-        , sync_offset_absolute_clock (X_("regionsyncoffsetabsolute"), true, "", true, false)
-          /* XXX cannot file start yet */
-        , start_clock (X_("regionstart"), true, "", false, false)
-        , _sources (1)
+	, _table (9, 2)
+	, _table_row (0)
+	, _region (r)
+	, name_label (_("Name:"))
+	, audition_button (_("Audition"))
+	, _clock_group (new ClockGroup)
+	, position_clock (X_("regionposition"), true, "", true, false)
+	, end_clock (X_("regionend"), true, "", true, false)
+	, length_clock (X_("regionlength"), true, "", true, false, true)
+	, sync_offset_relative_clock (X_("regionsyncoffsetrelative"), true, "", true, false)
+	, sync_offset_absolute_clock (X_("regionsyncoffsetabsolute"), true, "", true, false)
+	  /* XXX cannot file start yet */
+	, start_clock (X_("regionstart"), true, "", false, false)
+	, _sources (1)
 {
 	set_session (s);
 
-        _clock_group->set_clock_mode (ARDOUR_UI::instance()->secondary_clock->mode());
-        _clock_group->add (position_clock);
-        _clock_group->add (end_clock);
-        _clock_group->add (length_clock);
-        _clock_group->add (sync_offset_relative_clock);
-        _clock_group->add (sync_offset_absolute_clock);
-        _clock_group->add (start_clock);
+	_clock_group->set_clock_mode (ARDOUR_UI::instance()->primary_clock->mode());
+	ARDOUR_UI::instance()->primary_clock->mode_changed.connect (sigc::mem_fun (*this, &RegionEditor::set_clock_mode_from_primary));
+
+	_clock_group->add (position_clock);
+	_clock_group->add (end_clock);
+	_clock_group->add (length_clock);
+	_clock_group->add (sync_offset_relative_clock);
+	_clock_group->add (sync_offset_absolute_clock);
+	_clock_group->add (start_clock);
 
 	position_clock.set_session (_session);
 	end_clock.set_session (_session);
@@ -78,7 +85,7 @@ RegionEditor::RegionEditor (Session* s, boost::shared_ptr<Region> r)
 	sync_offset_absolute_clock.set_session (_session);
 	start_clock.set_session (_session);
 
-	set_tooltip (audition_button, _("audition this region"));
+	ArdourWidgets::set_tooltip (audition_button, _("audition this region"));
 
 	audition_button.unset_flags (Gtk::CAN_FOCUS);
 
@@ -132,24 +139,24 @@ RegionEditor::RegionEditor (Session* s, boost::shared_ptr<Region> r)
 	_table.attach (position_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
- 	_table.attach (end_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
+	_table.attach (end_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
 	_table.attach (end_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
- 	_table.attach (length_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
+	_table.attach (length_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
 	_table.attach (length_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
- 	_table.attach (sync_relative_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
- 	_table.attach (sync_offset_relative_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
+	_table.attach (sync_relative_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
+	_table.attach (sync_offset_relative_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
- 	_table.attach (sync_absolute_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
- 	_table.attach (sync_offset_absolute_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
+	_table.attach (sync_absolute_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
+	_table.attach (sync_offset_absolute_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
- 	_table.attach (start_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
- 	_table.attach (start_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
+	_table.attach (start_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
+	_table.attach (start_clock, 1, 2, _table_row, _table_row + 1, Gtk::FILL | Gtk::EXPAND, Gtk::FILL);
 	++_table_row;
 
 	_table.attach (_sources_label, 0, 1, _table_row, _table_row + 1, Gtk::FILL, Gtk::FILL);
@@ -198,7 +205,13 @@ RegionEditor::RegionEditor (Session* s, boost::shared_ptr<Region> r)
 
 RegionEditor::~RegionEditor ()
 {
-        delete _clock_group;
+	delete _clock_group;
+}
+
+void
+RegionEditor::set_clock_mode_from_primary ()
+{
+	_clock_group->set_clock_mode (ARDOUR_UI::instance()->primary_clock->mode());
 }
 
 void
@@ -299,7 +312,7 @@ RegionEditor::end_clock_changed ()
 		PublicEditor::instance().begin_reversible_command (_("change region end position"));
 		in_command = true;
 
-                _region->clear_changes ();
+		_region->clear_changes ();
 		_region->trim_end (end_clock.current_time());
 		_session->add_command(new StatefulDiffCommand (_region));
 	}
@@ -314,7 +327,7 @@ RegionEditor::end_clock_changed ()
 void
 RegionEditor::length_clock_changed ()
 {
-	framecnt_t frames = length_clock.current_time();
+	samplecnt_t samples = length_clock.current_time();
 	bool in_command = false;
 	boost::shared_ptr<Playlist> pl = _region->playlist();
 
@@ -323,7 +336,7 @@ RegionEditor::length_clock_changed ()
 		in_command = true;
 
 		_region->clear_changes ();
-		_region->trim_end (_region->position() + frames - 1);
+		_region->trim_end (_region->position() + samples - 1);
 		_session->add_command(new StatefulDiffCommand (_region));
 	}
 
@@ -369,7 +382,7 @@ RegionEditor::bounds_changed (const PropertyChange& what_changed)
 
 	if (what_changed.contains (ARDOUR::Properties::sync_position) || what_changed.contains (ARDOUR::Properties::position)) {
 		int dir;
-		frameoffset_t off = _region->sync_offset (dir);
+		sampleoffset_t off = _region->sync_offset (dir);
 		if (dir == -1) {
 			off = -off;
 		}
@@ -415,7 +428,7 @@ RegionEditor::sync_offset_absolute_clock_changed ()
 {
 	PublicEditor::instance().begin_reversible_command (_("change region sync point"));
 
-        _region->clear_changes ();
+	_region->clear_changes ();
 	_region->set_sync_position (sync_offset_absolute_clock.current_time());
 	_session->add_command (new StatefulDiffCommand (_region));
 
@@ -427,7 +440,7 @@ RegionEditor::sync_offset_relative_clock_changed ()
 {
 	PublicEditor::instance().begin_reversible_command (_("change region sync point"));
 
-        _region->clear_changes ();
+	_region->clear_changes ();
 	_region->set_sync_position (sync_offset_relative_clock.current_time() + _region->position ());
 	_session->add_command (new StatefulDiffCommand (_region));
 

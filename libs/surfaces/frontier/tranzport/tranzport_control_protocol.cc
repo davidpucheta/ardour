@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /* Design notes: The tranzport is a unique device, basically a
    20 lcd gui with 22 shift keys and 8 blinking lights.
@@ -67,7 +68,7 @@ using namespace std;
 using namespace sigc;
 using namespace PBD;
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include "pbd/abstract_ui.cc"
 
@@ -110,7 +111,7 @@ TranzportControlProtocol::TranzportControlProtocol (Session& s)
 	_device_status = STATUS_OFFLINE;
 	udev = 0;
 	current_track_id = 0;
-	last_where = max_frames;
+	last_where = max_samples;
 	wheel_mode = WheelTimeline;
 	wheel_shift_mode = WheelShiftGain;
 	wheel_increment = WheelIncrScreen;
@@ -555,7 +556,7 @@ TranzportControlProtocol::show_meter ()
 }
 
 void
-TranzportControlProtocol::show_bbt (framepos_t where)
+TranzportControlProtocol::show_bbt (samplepos_t where)
 {
 	if ((where != last_where) || lcd_isdamaged(1,9,8)) {
 		char buf[16];
@@ -591,11 +592,11 @@ TranzportControlProtocol::show_bbt (framepos_t where)
 void
 TranzportControlProtocol::show_transport_time ()
 {
-	show_bbt (session->transport_frame ());
+	show_bbt (session->transport_sample ());
 }
 
 void
-TranzportControlProtocol::show_smpte (framepos_t where)
+TranzportControlProtocol::show_smpte (samplepos_t where)
 {
 	if ((where != last_where) || lcd_isdamaged(1,9,10)) {
 
@@ -617,7 +618,7 @@ TranzportControlProtocol::show_smpte (framepos_t where)
 		sprintf (buf, "%02" PRIu32 ":", smpte.seconds);
 		print (1, 15, buf);
 
-		sprintf (buf, "%02" PRIu32, smpte.frames);
+		sprintf (buf, "%02" PRIu32, smpte.samples);
 		print_noretry (1, 18, buf);
 
 		last_where = where;
@@ -1705,16 +1706,16 @@ void
 TranzportControlProtocol::shuttle ()
 {
 	if (_datawheel < WheelDirectionThreshold) {
-		if (session->transport_speed() < 0) {
+		if (get_transport_speed() < 0) {
 			session->request_transport_speed (1.0);
 		} else {
-			session->request_transport_speed_nonzero (session->transport_speed() + 0.1);
+			session->request_transport_speed_nonzero (get_transport_speed() + 0.1);
 		}
 	} else {
-		if (session->transport_speed() > 0) {
+		if (get_transport_speed() > 0) {
 			session->request_transport_speed (-1.0);
 		} else {
-			session->request_transport_speed_nonzero (session->transport_speed() - 0.1);
+			session->request_transport_speed_nonzero (get_transport_speed() - 0.1);
 		}
 	}
 }

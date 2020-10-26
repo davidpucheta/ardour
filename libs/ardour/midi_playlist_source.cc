@@ -1,20 +1,22 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2011-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "libardour-config.h"
@@ -25,7 +27,7 @@
 #include "ardour/midi_playlist.h"
 #include "ardour/midi_playlist_source.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -54,7 +56,7 @@ on other ways to approach this issue.
 ********************************************************************************/
 
 MidiPlaylistSource::MidiPlaylistSource (Session& s, const ID& orig, const std::string& name, boost::shared_ptr<MidiPlaylist> p,
-					uint32_t /*chn*/, frameoffset_t begin, framecnt_t len, Source::Flag flags)
+					uint32_t /*chn*/, sampleoffset_t begin, samplecnt_t len, Source::Flag flags)
 	: Source (s, DataType::MIDI, name)
 	, MidiSource (s, name, flags)
 	, PlaylistSource (s, orig, name, p, DataType::MIDI, begin, len, flags)
@@ -66,8 +68,8 @@ MidiPlaylistSource::MidiPlaylistSource (Session& s, const XMLNode& node)
 	, MidiSource (s, node)
 	, PlaylistSource (s, node)
 {
-	/* PlaylistSources are never writable, renameable, removable or destructive */
-	_flags = Flag (_flags & ~(Writable|CanRename|Removable|RemovableIfEmpty|RemoveAtDestroy|Destructive));
+	/* PlaylistSources are never writable, renameable or removable */
+	_flags = Flag (_flags & ~(Writable|CanRename|Removable|RemovableIfEmpty|RemoveAtDestroy));
 
 	/* ancestors have already called ::set_state() in their XML-based
 	   constructors.
@@ -114,20 +116,22 @@ MidiPlaylistSource::set_state (const XMLNode& node, int version, bool with_desce
 	return 0;
 }
 
-framecnt_t
-MidiPlaylistSource::length (framepos_t)  const
+samplecnt_t
+MidiPlaylistSource::length (samplepos_t)  const
 {
-	pair<framepos_t,framepos_t> extent = _playlist->get_extent();
+	pair<samplepos_t,samplepos_t> extent = _playlist->get_extent();
 	return extent.second - extent.first;
 }
 
-framecnt_t
+samplecnt_t
 MidiPlaylistSource::read_unlocked (const Lock& lock,
-				   Evoral::EventSink<framepos_t>& dst,
-				   framepos_t /*position*/,
-				   framepos_t start, framecnt_t cnt,
-				   MidiStateTracker*,
-				   MidiChannelFilter*) const
+                                   Evoral::EventSink<samplepos_t>& dst,
+                                   samplepos_t /*position*/,
+                                   samplepos_t start,
+                                   samplecnt_t cnt,
+                                   Evoral::Range<samplepos_t>* loop_range,
+                                   MidiStateTracker*,
+                                   MidiChannelFilter*) const
 {
 	boost::shared_ptr<MidiPlaylist> mp = boost::dynamic_pointer_cast<MidiPlaylist> (_playlist);
 
@@ -135,14 +139,26 @@ MidiPlaylistSource::read_unlocked (const Lock& lock,
 		return 0;
 	}
 
-	return mp->read (dst, start, cnt);
+	/* XXX paul says on Oct 26 2019:
+
+	   rgareus: so to clarify now that i have better perspective: the API i want to get rid of is MidiPlaylist::read() ; everything that used it (i.e. the DiskReader) should use MidiPlaylist::rendered()->read()
+	   rgareus: but a "read" operation is also a "write" operation: you have to put the data somewhere
+	   rgareus: the only other user of MidiPlaylist::read() was MidiPlaylistSource (unsurprisingly), which as I noted is not even (really) used
+	   rgareus: ::rendered() returns a ptr-to-RT_MidiBuffer, which has a read method which expects to write into a MidiBuffer, using push_back()
+	   rgareus: but MidiPlaylistSource::read() is given an EventSink<samplepos_t> as the destination, and this does not (currently) have ::push_back(), only ::write() (which is willing to deal with inserts rather than appends)
+	   rgareus: so, this is the API "mess" I'm trying to clean up. simple solution: since we don't use MidiPlaylistSource just comment out the line and forget about it for now, then remove MidiPlaylist::read() and move on
+
+	   This represents that decision, for now.
+	*/
+
+	return cnt; // mp->read (dst, start, cnt, loop_range);
 }
 
-framecnt_t
+samplecnt_t
 MidiPlaylistSource::write_unlocked (const Lock&,
-                                    MidiRingBuffer<framepos_t>&,
-                                    framepos_t,
-                                    framecnt_t)
+                                    MidiRingBuffer<samplepos_t>&,
+                                    samplepos_t,
+                                    samplecnt_t)
 {
 	fatal << string_compose (_("programming error: %1"), "MidiPlaylistSource::write_unlocked() called - should be impossible") << endmsg;
 	abort(); /*NOTREACHED*/
@@ -150,16 +166,16 @@ MidiPlaylistSource::write_unlocked (const Lock&,
 }
 
 void
-MidiPlaylistSource::append_event_beats(const Glib::Threads::Mutex::Lock& /*lock*/, const Evoral::Event<Evoral::Beats>& /*ev*/)
+MidiPlaylistSource::append_event_beats(const Glib::Threads::Mutex::Lock& /*lock*/, const Evoral::Event<Temporal::Beats>& /*ev*/)
 {
 	fatal << string_compose (_("programming error: %1"), "MidiPlaylistSource::append_event_beats() called - should be impossible") << endmsg;
 	abort(); /*NOTREACHED*/
 }
 
 void
-MidiPlaylistSource::append_event_frames(const Glib::Threads::Mutex::Lock& /*lock*/, const Evoral::Event<framepos_t>& /* ev */, framepos_t /*source_start*/)
+MidiPlaylistSource::append_event_samples(const Glib::Threads::Mutex::Lock& /*lock*/, const Evoral::Event<samplepos_t>& /* ev */, samplepos_t /*source_start*/)
 {
-	fatal << string_compose (_("programming error: %1"), "MidiPlaylistSource::append_event_frames() called - should be impossible") << endmsg;
+	fatal << string_compose (_("programming error: %1"), "MidiPlaylistSource::append_event_samples() called - should be impossible") << endmsg;
 	abort(); /*NOTREACHED*/
 }
 
@@ -186,4 +202,3 @@ MidiPlaylistSource::empty () const
 {
 	return !_playlist || _playlist->empty();
 }
-

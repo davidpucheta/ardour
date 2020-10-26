@@ -19,7 +19,7 @@
 			OutputDirectory="$(ProjectDir)\$(ConfigurationName)\bin"
 			IntermediateDirectory="$(ProjectDir)\$(ConfigurationName)\obj\$(ProjectName)"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus3.vsprops"
+			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus5.vsprops"
 			CharacterSet="2"
 			>
 			<Tool
@@ -43,8 +43,8 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions="/FI$(TargetSxsFolder)\targetsxs.h"
 				Optimization="0"
-				AdditionalIncludeDirectories="..;..\..\glibmm2;&quot;$(GenericIncludeFolder)\libsndfile&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;;&quot;$(GenericLibraryFolder)\glib-$(GlibApiVersion)\include&quot;;&quot;$(GenericIncludeFolder)\boost&quot;;."
-				PreprocessorDefinitions="UINTSDEFINED=1;PLATFORM_WINDOWS;COMPILER_MSVC;BUILDING_PBD;BUILDING_GETOPT;LIBPBD_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;USE_CAIRO_IMAGE_SURFACE;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;NO_POSIX_MEMALIGN;WIN32;_WIN32;_DEBUG;DEBUG=&quot;Debug&quot;;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libpbd4\&quot;&quot;;PROGRAM_NAME=&quot;\&quot;Mixbus3\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TIMECODE=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;;CURRENT_SESSION_FILE_VERSION=3001"
+				AdditionalIncludeDirectories="..;..\..\glibmm2;&quot;$(GenericIncludeFolder)\libsndfile&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;;&quot;$(GenericLibraryFolder)\glib-$(GlibApiVersion)\include&quot;;&quot;$(GenericIncludeFolder)\boost&quot;;&quot;$(GenericIncludeFolder)\libarchive&quot;;."
+				PreprocessorDefinitions="UINTSDEFINED=1;PLATFORM_WINDOWS;COMPILER_MSVC;BUILDING_PBD;BUILDING_GETOPT;LIBPBD_DLL_EXPORTS;LIBARCHIVE_STATIC;INCLUDE_ARDOUR_MISCELLANEOUS=1;USE_CAIRO_IMAGE_SURFACE;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;BOOST_ATOMIC_NO_LIB;NOMINMAX;NO_POSIX_MEMALIGN;WIN32;_WIN32;_DEBUG;DEBUG=&quot;Debug&quot;;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libpbd4\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TEMPORAL=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;"
 				MinimalRebuild="true"
 				RuntimeLibrary="3"
 				WarningLevel="3"
@@ -62,7 +62,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="$(DllPrefix)giomm32$(GlibmmDllSuffix)D.lib $(DllPrefix)glibmm32$(GlibmmDllSuffix)D.lib pthreadVCE2.lib $(DllPrefix)gio32$(GlibDllSuffix)D.lib $(DllPrefix)glib32$(GlibDllSuffix)D.lib $(DllPrefix)gobject32$(GlibDllSuffix)D.lib $(DllPrefix)sigc++32-2.0D.lib libxml2D.lib libsndfile-1D.lib intlD.lib winmm.lib ws2_32.lib dbghelp.lib"
+				AdditionalDependencies="boost-regex32D.lib $(DllPrefix)giomm32$(GlibmmDllSuffix)D.lib $(DllPrefix)glibmm32$(GlibmmDllSuffix)D.lib pthreadVCE2.lib archive_static32D.lib $(DllPrefix)gio32$(GlibDllSuffix)D.lib $(DllPrefix)glib32$(GlibDllSuffix)D.lib $(DllPrefix)gobject32$(GlibDllSuffix)D.lib $(DllPrefix)sigc++32-2.0D.lib $(DllPrefix)curlD.lib libxml2D.lib libsndfile-1D.lib iconvD.lib zlib1D.lib intlD.lib winmm.lib ws2_32.lib dbghelp.lib"
 				OutputFile="$(OutDir)\$(DllPrefix)$(ProjectName)32D.dll"
 				AdditionalLibraryDirectories="F:\pthread-win32\Pre-built.2\lib"
 				GenerateDebugInformation="true"
@@ -99,7 +99,7 @@
 			OutputDirectory="$(ProjectDir)\$(ConfigurationName)\bin"
 			IntermediateDirectory="$(ProjectDir)\$(ConfigurationName)\obj\$(ProjectName)"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus3.vsprops"
+			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus5.vsprops"
 			CharacterSet="2"
 			WholeProgramOptimization="1"
 			>
@@ -125,8 +125,8 @@
 				AdditionalOptions="/FI$(TargetSxsFolder)\targetsxs.h"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="..;..\..\glibmm2;&quot;$(GenericIncludeFolder)\libsndfile&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;;&quot;$(GenericLibraryFolder)\glib-$(GlibApiVersion)\include&quot;;&quot;$(GenericIncludeFolder)\boost&quot;;."
-				PreprocessorDefinitions="UINTSDEFINED=1;_SECURE_SCL=0;PLATFORM_WINDOWS;COMPILER_MSVC;BUILDING_PBD;BUILDING_GETOPT;LIBPBD_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;USE_CAIRO_IMAGE_SURFACE;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;NO_POSIX_MEMALIGN;_WIN32;WIN32;NDEBUG;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libpbd4\&quot;&quot;;PROGRAM_NAME=&quot;\&quot;Mixbus3\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TIMECODE=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;;CURRENT_SESSION_FILE_VERSION=3001"
+				AdditionalIncludeDirectories="..;..\..\glibmm2;&quot;$(GenericIncludeFolder)\libsndfile&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;;&quot;$(GenericLibraryFolder)\glib-$(GlibApiVersion)\include&quot;;&quot;$(GenericIncludeFolder)\boost&quot;;&quot;$(GenericIncludeFolder)\libarchive&quot;;."
+				PreprocessorDefinitions="UINTSDEFINED=1;_SECURE_SCL=0;PLATFORM_WINDOWS;COMPILER_MSVC;BUILDING_PBD;BUILDING_GETOPT;LIBPBD_DLL_EXPORTS;LIBARCHIVE_STATIC;INCLUDE_ARDOUR_MISCELLANEOUS=1;USE_CAIRO_IMAGE_SURFACE;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;BOOST_ATOMIC_NO_LIB;NOMINMAX;NO_POSIX_MEMALIGN;_WIN32;WIN32;NDEBUG;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libpbd4\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TEMPORAL=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;"
 				StringPooling="false"
 				RuntimeLibrary="2"
 				EnableEnhancedInstructionSet="1"
@@ -143,7 +143,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="$(DllPrefix)giomm32$(GlibmmDllSuffix).lib $(DllPrefix)glibmm32$(GlibmmDllSuffix).lib pthreadVCE2.lib $(DllPrefix)gio32$(GlibDllSuffix).lib $(DllPrefix)glib32$(GlibDllSuffix).lib $(DllPrefix)gobject32$(GlibDllSuffix).lib $(DllPrefix)sigc++32-2.0.lib libxml2.lib libsndfile-1.lib intl.lib winmm.lib ws2_32.lib"
+				AdditionalDependencies="boost-regex32.lib $(DllPrefix)giomm32$(GlibmmDllSuffix).lib $(DllPrefix)glibmm32$(GlibmmDllSuffix).lib pthreadVCE2.lib archive_static32.lib $(DllPrefix)gio32$(GlibDllSuffix).lib $(DllPrefix)glib32$(GlibDllSuffix).lib $(DllPrefix)gobject32$(GlibDllSuffix).lib $(DllPrefix)sigc++32-2.0.lib $(DllPrefix)curl.lib libxml2.lib libsndfile-1.lib iconv.lib zlib1.lib intl.lib winmm.lib ws2_32.lib"
 				OutputFile="$(OutDir)\$(DllPrefix)$(ProjectName)32.dll"
 				AdditionalLibraryDirectories="F:\pthread-win32\Pre-built.2\lib"
 				SubSystem="2"
@@ -180,14 +180,14 @@
 			OutputDirectory="$(ProjectDir)\$(ConfigurationName)\bin"
 			IntermediateDirectory="$(ProjectDir)\$(ConfigurationName)\obj\$(ProjectName)"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus3.vsprops"
+			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus5.vsprops"
 			CharacterSet="2"
 			WholeProgramOptimization="0"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
 				Description="Prepare configuration file(s)"
-				CommandLine="python &quot;../../../libs/pbd/pbd/signals.py&quot; &quot;../../../libs/pbd/pbd/signals_generated.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\ptw32\pthread.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\ptw32\pthread.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\sys\targetsxs.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\sys\targetsxs.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\sys\time.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\sys\time.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\float_cast.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\float_cast.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\libcharset.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\libcharset.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\localcharset.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\localcharset.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\misc.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\misc.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\pthread.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\pthread.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\sched.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\sched.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\semaphore.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\semaphore.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\unistd.h.input&quot; &quot;$(GenericIncludeFolder)\unistd.h&quot;&#x0D;&#x0A;cd ..\..\..&#x0D;&#x0A;perl msvc32-fixup.pl&#x0D;&#x0A;"
+				CommandLine="python &quot;../../../libs/pbd/pbd/signals.py&quot; &quot;../../../libs/pbd/pbd/signals_generated.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\ptw32\pthread.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\ptw32\pthread.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\sys\targetsxs.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\sys\targetsxs.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\sys\time.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\sys\time.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\float_cast.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\float_cast.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\libcharset.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\libcharset.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\localcharset.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\localcharset.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\misc.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\misc.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\pthread.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\pthread.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\sched.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\sched.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\ardourext\semaphore.h.input&quot; &quot;$(GenericIncludeFolder)\ardourext\semaphore.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\immintrin.h.input&quot; &quot;$(GenericIncludeFolder)\immintrin.h&quot;&#x0D;&#x0A;copy /Y &quot;..\..\..\msvc_extra_headers\unistd.h.input&quot; &quot;$(GenericIncludeFolder)\unistd.h&quot;&#x0D;&#x0A;cd ..\..\..&#x0D;&#x0A;perl msvc32-fixup.pl&#x0D;&#x0A;"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
@@ -205,8 +205,8 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions="/FI$(TargetSxsFolder)\targetsxs.h"
 				Optimization="0"
-				AdditionalIncludeDirectories="..;..\..\glibmm2;&quot;$(GenericIncludeFolder)\libsndfile&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;;&quot;$(GenericLibraryFolder)\glib-$(GlibApiVersion)\include&quot;;&quot;$(GenericIncludeFolder)\boost&quot;;."
-				PreprocessorDefinitions="UINTSDEFINED=1;_SECURE_SCL=0;PLATFORM_WINDOWS;COMPILER_MSVC;BUILDING_PBD;BUILDING_GETOPT;LIBPBD_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;USE_CAIRO_IMAGE_SURFACE;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;NO_POSIX_MEMALIGN;WIN32;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libpbd4\&quot;&quot;;PROGRAM_NAME=&quot;\&quot;Mixbus3\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TIMECODE=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;;CURRENT_SESSION_FILE_VERSION=3001"
+				AdditionalIncludeDirectories="..;..\..\glibmm2;&quot;$(GenericIncludeFolder)\libsndfile&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;;&quot;$(GenericLibraryFolder)\glib-$(GlibApiVersion)\include&quot;;&quot;$(GenericIncludeFolder)\boost&quot;;&quot;$(GenericIncludeFolder)\libarchive&quot;;."
+				PreprocessorDefinitions="UINTSDEFINED=1;_SECURE_SCL=0;PLATFORM_WINDOWS;COMPILER_MSVC;BUILDING_PBD;BUILDING_GETOPT;LIBPBD_DLL_EXPORTS;LIBARCHIVE_STATIC;INCLUDE_ARDOUR_MISCELLANEOUS=1;USE_CAIRO_IMAGE_SURFACE;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;BOOST_ATOMIC_NO_LIB;NOMINMAX;NO_POSIX_MEMALIGN;WIN32;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libpbd4\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TEMPORAL=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;"
 				StringPooling="false"
 				RuntimeLibrary="2"
 				EnableEnhancedInstructionSet="1"
@@ -225,7 +225,7 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalDependencies="$(DllPrefix)giomm32$(GlibmmDllSuffix)RDC.lib $(DllPrefix)glibmm32$(GlibmmDllSuffix)RDC.lib pthreadVCE2.lib $(DllPrefix)gio32$(GlibDllSuffix)RDC.lib $(DllPrefix)glib32$(GlibDllSuffix)RDC.lib $(DllPrefix)gobject32$(GlibDllSuffix)RDC.lib $(DllPrefix)sigc++32-2.0RDC.lib libxml2RDC.lib libsndfile-1.lib intlRDC.lib winmm.lib ws2_32.lib"
+				AdditionalDependencies="boost-regex32RDC.lib $(DllPrefix)giomm32$(GlibmmDllSuffix)RDC.lib $(DllPrefix)glibmm32$(GlibmmDllSuffix)RDC.lib pthreadVCE2.lib archive_static32RDC.lib $(DllPrefix)gio32$(GlibDllSuffix)RDC.lib $(DllPrefix)glib32$(GlibDllSuffix)RDC.lib $(DllPrefix)gobject32$(GlibDllSuffix)RDC.lib $(DllPrefix)sigc++32-2.0RDC.lib $(DllPrefix)curlRDC.lib libxml2RDC.lib libsndfile-1.lib iconvRDC.lib zlib1RDC.lib intlRDC.lib winmm.lib ws2_32.lib"
 				OutputFile="$(OutDir)\$(DllPrefix)$(ProjectName)32RDC.dll"
 				AdditionalLibraryDirectories="F:\pthread-win32\Pre-built.2\lib"
 				GenerateDebugInformation="true"
@@ -295,10 +295,6 @@
 				>
 			</File>
 			<File
-				RelativePath="..\controllable_descriptor.cc"
-				>
-			</File>
-			<File
 				RelativePath="..\convert.cc"
 				>
 			</File>
@@ -340,6 +336,10 @@
 			</File>
 			<File
 				RelativePath="..\ffs.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\file_archive.cc"
 				>
 			</File>
 			<File
@@ -427,6 +427,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\spinlock.cc"
+				>
+			</File>
+			<File
 				RelativePath="..\stacktrace.cc"
 				>
 			</File>
@@ -436,6 +440,10 @@
 			</File>
 			<File
 				RelativePath="..\stateful_diff_command.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\string_convert.cc"
 				>
 			</File>
 			<File
@@ -460,6 +468,10 @@
 			</File>
 			<File
 				RelativePath="..\timing.cc"
+				>
+			</File>
+			<File
+				RelativePath="..\tlsf.cc"
 				>
 			</File>
 			<File
@@ -613,10 +625,6 @@
 						/>
 					</FileConfiguration>
 				</File>
-				<File
-					RelativePath="..\msvc\msvc_poll.cc"
-					>
-				</File>
 			</Filter>
 		</Filter>
 		<Filter
@@ -653,6 +661,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\pbd\control_math.h"
+				>
+			</File>
+			<File
 				RelativePath="..\pbd\crossthread.h"
 				>
 			</File>
@@ -665,7 +677,15 @@
 				>
 			</File>
 			<File
+				RelativePath="..\pbd\enum_convert.h"
+				>
+			</File>
+			<File
 				RelativePath="..\pbd\ffs.h"
+				>
+			</File>
+			<File
+				RelativePath="..\pbd\file_archive.h"
 				>
 			</File>
 			<File
@@ -705,11 +725,19 @@
 				>
 			</File>
 			<File
+				RelativePath="..\pbd\natsort.h"
+				>
+			</File>
+			<File
 				RelativePath="..\pbd\pathexpand.h"
 				>
 			</File>
 			<File
 				RelativePath="..\pbd\pbd.h"
+				>
+			</File>
+			<File
+				RelativePath="..\pbd\playback_buffer.h"
 				>
 			</File>
 			<File
@@ -773,6 +801,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\pbd\spinlock.h"
+				>
+			</File>
+			<File
 				RelativePath="..\pbd\stacktrace.h"
 				>
 			</File>
@@ -782,6 +814,10 @@
 			</File>
 			<File
 				RelativePath="..\pbd\stl_delete.h"
+				>
+			</File>
+			<File
+				RelativePath="..\pbd\string_convert.h"
 				>
 			</File>
 			<File
@@ -801,6 +837,10 @@
 				>
 			</File>
 			<File
+				RelativePath="..\pbd\tlsf.h"
+				>
+			</File>
+			<File
 				RelativePath="..\pbd\tokenizer.h"
 				>
 			</File>
@@ -810,6 +850,10 @@
 			</File>
 			<File
 				RelativePath="..\pbd\transmitter.h"
+				>
+			</File>
+			<File
+				RelativePath="..\pbd\types_convert.h"
 				>
 			</File>
 			<File
@@ -839,7 +883,7 @@
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
 			<File
-				RelativePath="..\..\..\icons\win32\msvc_resources.rc"
+				RelativePath="..\..\..\gtk2_ardour\win32\msvc_resources.rc"
 				>
 			</File>
 		</Filter>

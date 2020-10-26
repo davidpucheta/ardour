@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2014 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2018 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <unistd.h>
@@ -21,10 +21,10 @@
 #include <glibmm.h>
 
 #include "alsa_midi.h"
-#include "rt_thread.h"
 
 #include "pbd/error.h"
-#include "i18n.h"
+#include "pbd/pthread_utils.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -50,7 +50,7 @@ AlsaMidiIO::AlsaMidiIO ()
 	// worst case here is  8192 SPP and 8KSPS for which we'd need
 	// 4000 bytes sans MidiEventHeader.
 	// since we're not always in sync, let's use 4096.
-	_rb = new RingBuffer<uint8_t>(4096 + 4096 * sizeof(MidiEventHeader));
+	_rb = new PBD::RingBuffer<uint8_t>(4096 + 4096 * sizeof(MidiEventHeader));
 }
 
 AlsaMidiIO::~AlsaMidiIO ()
@@ -64,6 +64,7 @@ AlsaMidiIO::~AlsaMidiIO ()
 static void * pthread_process (void *arg)
 {
 	AlsaMidiIO *d = static_cast<AlsaMidiIO *>(arg);
+	pthread_set_name ("AlsaMidiIO");
 	d->main_process_thread ();
 	pthread_exit (0);
 	return 0;
@@ -72,10 +73,10 @@ static void * pthread_process (void *arg)
 int
 AlsaMidiIO::start ()
 {
-	if (_realtime_pthread_create (SCHED_FIFO, -21, 100000,
+	if (pbd_realtime_pthread_create (PBD_SCHED_FIFO, PBD_RT_PRI_MIDI, PBD_RT_STACKSIZE_HELP,
 				&_main_thread, pthread_process, this))
 	{
-		if (pthread_create (&_main_thread, NULL, pthread_process, this)) {
+		if (pbd_pthread_create (PBD_RT_STACKSIZE_HELP, &_main_thread, pthread_process, this)) {
 			PBD::error << _("AlsaMidiIO: Failed to create process thread.") << endmsg;
 			return -1;
 		} else {
@@ -178,7 +179,7 @@ AlsaMidiIn::recv_event (pframes_t &time, uint8_t *data, size_t &size)
 		return 0;
 	}
 
-	RingBuffer<uint8_t>::rw_vector vector;
+	PBD::RingBuffer<uint8_t>::rw_vector vector;
 	_rb->get_read_vector(&vector);
 	if (vector.len[0] >= sizeof(MidiEventHeader)) {
 		memcpy((uint8_t*)&h, vector.buf[0], sizeof(MidiEventHeader));
@@ -186,7 +187,7 @@ AlsaMidiIn::recv_event (pframes_t &time, uint8_t *data, size_t &size)
 		if (vector.len[0] > 0) {
 			memcpy ((uint8_t*)&h, vector.buf[0], vector.len[0]);
 		}
-		assert(vector.buf[1] || vector.len[0] == sizeof(MidiEventHeader));
+		assert(vector.buf[1]);
 		memcpy (((uint8_t*)&h) + vector.len[0], vector.buf[1], sizeof(MidiEventHeader) - vector.len[0]);
 	}
 

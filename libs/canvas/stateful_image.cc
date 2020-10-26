@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2014-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #include <string>
 
 #include <pangomm/fontdescription.h>
@@ -9,9 +28,8 @@
 #include "pbd/xml++.h"
 
 #include "canvas/stateful_image.h"
-#include "canvas/utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ArdourCanvas;
 using PBD::error;
@@ -45,7 +63,7 @@ StatefulImage::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 	ImageHandle image = _states[_state].image;
 	Rect self = item_to_window (Rect (0, 0, image->get_width(), image->get_height()));
 
-	boost::optional<Rect> draw = self.intersection (area);
+	Rect draw = self.intersection (area);
 
 	if (!draw) {
 		return;
@@ -55,7 +73,7 @@ StatefulImage::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 	   ("window" coordinates) and render it.
 	*/
 	context->set_source (image, self.x0, self.y0);
-	context->rectangle (draw->x0, draw->y0, draw->width(), draw->height());
+	context->rectangle (draw.x0, draw.y0, draw.width(), draw.height());
 	context->fill ();
 
 	if (!_text.empty()) {
@@ -68,7 +86,7 @@ StatefulImage::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 		}
 
 		// layout->set_alignment (_alignment);
-		set_source_rgba (context, _text_color);
+		Gtkmm2ext::set_source_rgba (context, _text_color);
 		context->move_to (_text_x, _text_y);
 		layout->show_in_cairo_context (context);
 	}
@@ -108,7 +126,7 @@ StatefulImage::load_states (const XMLNode& node)
 			continue;
 		}
 
-		if ((s.image = find_image (prop->value())) == 0) {
+		if (!(s.image = find_image (prop->value()))) {
 			error << string_compose (_("image %1 not found for state"), prop->value()) << endmsg;
 			continue;
 		}

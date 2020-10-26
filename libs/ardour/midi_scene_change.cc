@@ -1,29 +1,29 @@
 /*
-    Copyright (C) 2014 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014-2016 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/error.h"
 #include "pbd/compose.h"
+#include "pbd/types_convert.h"
 
 #include "ardour/midi_port.h"
 #include "ardour/midi_scene_change.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 using namespace ARDOUR;
@@ -98,20 +98,14 @@ MIDISceneChange::get_program_message (uint8_t* buf, size_t size) const
 XMLNode&
 MIDISceneChange::get_state ()
 {
-	char buf[32];
 	XMLNode* node = new XMLNode (SceneChange::xml_node_name);
 
-	node->add_property (X_("type"), X_("MIDI"));
-	snprintf (buf, sizeof (buf), "%d", (int) _program);
-	node->add_property (X_("id"), id().to_s());
-	snprintf (buf, sizeof (buf), "%d", (int) _program);
-	node->add_property (X_("program"), buf);
-	snprintf (buf, sizeof (buf), "%d", (int) _bank);
-	node->add_property (X_("bank"), buf);
-	snprintf (buf, sizeof (buf), "%d", (int) _channel);
-	node->add_property (X_("channel"), buf);
-	snprintf (buf, sizeof (buf), "%u", _color);
-	node->add_property (X_("color"), buf);
+	node->set_property (X_("type"), X_("MIDI"));
+	node->set_property (X_("id"), id());
+	node->set_property (X_("program"), _program);
+	node->set_property (X_("bank"), _bank);
+	node->set_property (X_("channel"), _channel);
+	node->set_property (X_("color"), _color);
 
 	return *node;
 }
@@ -123,26 +117,12 @@ MIDISceneChange::set_state (const XMLNode& node, int /* version-ignored */)
 		return -1;
 	}
 
-	const XMLProperty* prop;
-
-	if ((prop = node.property (X_("program"))) == 0) {
+	if (!node.get_property (X_("program"), _program) || !node.get_property (X_("bank"), _bank) ||
+	    !node.get_property (X_("channel"), _channel)) {
 		return -1;
 	}
-	_program = atoi (prop->value());
 
-	if ((prop = node.property (X_("bank"))) == 0) {
-		return -1;
-	}
-	_bank = atoi (prop->value());
-
-	if ((prop = node.property (X_("channel"))) == 0) {
-		return -1;
-	}
-	_channel = atoi (prop->value());
-
-	if ((prop = node.property (X_("color"))) != 0) {
-		_color = atoi (prop->value());
-	} else {
+	if (!node.get_property (X_("color"), _color)) {
 		_color = out_of_bound_color;
 	}
 

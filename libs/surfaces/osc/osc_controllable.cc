@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 Carl Hetherington <carl@carlh.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstdio> /* for sprintf, sigh */
 #include <climits>
@@ -27,7 +27,6 @@
 #include "osc.h"
 #include "osc_controllable.h"
 
-using namespace sigc;
 using namespace PBD;
 using namespace ARDOUR;
 using namespace ArdourSurface;
@@ -90,7 +89,9 @@ OSCRouteControllable::send_change_message ()
 {
 	lo_message msg = lo_message_new ();
 
-	lo_message_add_int32 (msg, _route->remote_control_id());
+	/* Can only send ID part of RID at present */
+
+	lo_message_add_int32 (msg, _route->presentation_info().order());
 	lo_message_add_float (msg, (float) controllable->get_value());
 
 	/* XXX thread issues */

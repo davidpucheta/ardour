@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2009-2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/property_list.h"
 
@@ -32,7 +34,7 @@ using namespace ARDOUR;
  *  @param fade_length Length of fade in/out to apply to trimmed regions, in samples.
  */
 
-StripSilence::StripSilence (Session & s, const AudioIntervalMap& sm, framecnt_t fade_length)
+StripSilence::StripSilence (Session & s, const AudioIntervalMap& sm, samplecnt_t fade_length)
 	: Filter (s)
         , _smap (sm)
         , _fade_length (fade_length)
@@ -98,7 +100,7 @@ StripSilence::run (boost::shared_ptr<Region> r, Progress* progress)
 	AudioIntervalResult::const_iterator last_silence = silence.end ();
 	--last_silence;
 
-	frameoffset_t const end_of_region = r->start() + r->length();
+	sampleoffset_t const end_of_region = r->start() + r->length();
 
 	if (last_silence->second < end_of_region - 1) {
 		audible.push_back (std::make_pair (last_silence->second, end_of_region - 1));
@@ -116,12 +118,12 @@ StripSilence::run (boost::shared_ptr<Region> r, Progress* progress)
 		plist.add (Properties::position, r->position() + (i->first - r->start()));
 
 		copy = boost::dynamic_pointer_cast<AudioRegion> (
-			RegionFactory::create (region, (i->first - r->start()), plist)
+			RegionFactory::create (region, MusicSample (i->first - r->start(), 0), plist)
 			);
 
 		copy->set_name (RegionFactory::new_region_name (region->name ()));
 
-		framecnt_t const f = std::min (_fade_length, (i->second - i->first) / 2);
+		samplecnt_t const f = std::min (_fade_length, (i->second - i->first) / 2);
 
 		if (f > 0) {
 			copy->set_fade_in_active (true);

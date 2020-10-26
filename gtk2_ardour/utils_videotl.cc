@@ -1,34 +1,38 @@
 /*
-    Copyright (C) 2010-2013 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 André Nusser <andre.nusser@googlemail.com>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cstdio>
 #include <string>
 #include <cerrno>
 #include <gtkmm.h>
-#include <curl/curl.h>
 
 #include "pbd/error.h"
+#include "pbd/string_convert.h"
+
 #include "ardour/ardour.h"
 #include "ardour/session_directory.h"
-#include "video_image_frame.h"
-#include "utils_videotl.h"
+
+#include "ardour_http.h"
 #include "utils.h"
+#include "utils_videotl.h"
+#include "video_image_frame.h"
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-version.h"
@@ -37,13 +41,15 @@
 #ifndef ARDOUR_CURL_TIMEOUT
 #define ARDOUR_CURL_TIMEOUT (60)
 #endif
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace std;
 using namespace PBD;
 using namespace ARDOUR;
 using namespace VideoUtils;
+
+unsigned int VideoUtils::harvid_version = 0x0;
 
 bool
 VideoUtils::confirm_video_outfn (Gtk::Window& parent, std::string outfn, std::string docroot)
@@ -64,7 +70,12 @@ VideoUtils::confirm_video_outfn (Gtk::Window& parent, std::string outfn, std::st
 		confirm.add_button (Gtk::Stock::CANCEL, Gtk::RESPONSE_CANCEL);
 		confirm.add_button (_("Continue"), Gtk::RESPONSE_ACCEPT);
 		confirm.show_all ();
-		if (confirm.run() == RESPONSE_CANCEL) { return false; }
+		switch (confirm.run ()) {
+			case Gtk::RESPONSE_ACCEPT:
+				break;
+			default:
+				return false;
+		}
 	}
 
 	if (Glib::file_test(outfn, Glib::FILE_TEST_EXISTS)) {
@@ -109,7 +120,11 @@ VideoUtils::video_get_docroot (ARDOUR::RCConfiguration* config)
 #ifndef PLATFORM_WINDOWS
 	return X_("/");
 #else
-	return X_("C:\\");
+	if (harvid_version >= 0x000802) { // 0.8.2
+		return X_("");
+	} else {
+		return X_("C:\\");
+	}
 #endif
 }
 
@@ -264,23 +279,28 @@ VideoUtils::video_query_info (
 			, video_server_url.c_str()
 			, (video_server_url.length()>0 && video_server_url.at(video_server_url.length()-1) == '/')?"":"/"
 			, filepath.c_str());
-	char *res = a3_curl_http_get(url, NULL);
-	if (!res) {
+	std::string res = ArdourCurl::http_get (url, false);
+	if (res.empty ()) {
 		return false;
 	}
 
 	std::vector<std::vector<std::string> > lines;
-	ParseCSV(std::string(res), lines);
-	free(res);
+	ParseCSV(res, lines);
 
 	if (lines.empty() || lines.at(0).empty() || lines.at(0).size() != 6) {
 		return false;
 	}
 	if (atoi(lines.at(0).at(0)) != 1) return false; // version
 	video_start_offset = 0.0;
-	video_aspect_ratio = atof (lines.at(0).at(3));
-	video_file_fps = atof (lines.at(0).at(4));
-	video_duration = atoll(lines.at(0).at(5));
+	video_aspect_ratio = string_to<double>(lines.at(0).at(3));
+	video_file_fps = string_to<double>(lines.at(0).at(4));
+	video_duration = string_to<int64_t>(lines.at(0).at(5));
+
+	if (video_aspect_ratio < 0.01 || video_file_fps < 0.01) {
+		/* catch errors early, aspect == 0 or fps == 0 will
+		 * wreak havoc down the road */
+		return false;
+	}
 	return true;
 }
 
@@ -308,70 +328,3 @@ VideoUtils::video_draw_cross (Glib::RefPtr<Gdk::Pixbuf> img)
 	}
 }
 
-
-extern "C" {
-#include <curl/curl.h>
-
-	struct A3MemoryStruct {
-		char *data;
-		size_t size;
-	};
-
-	static size_t
-	WriteMemoryCallback(void *ptr, size_t size, size_t nmemb, void *data) {
-		size_t realsize = size * nmemb;
-		struct A3MemoryStruct *mem = (struct A3MemoryStruct *)data;
-
-		mem->data = (char *)realloc(mem->data, mem->size + realsize + 1);
-		if (mem->data) {
-			memcpy(&(mem->data[mem->size]), ptr, realsize);
-			mem->size += realsize;
-			mem->data[mem->size] = 0;
-		}
-		return realsize;
-	}
-
-	char *a3_curl_http_get (const char *u, int *status) {
-		CURL *curl;
-		CURLcode res;
-		struct A3MemoryStruct chunk;
-		long int httpstatus;
-		if (status) *status = 0;
-		//Glib::usleep(500000); return NULL; // TEST & DEBUG
-		if (strncmp("http://", u, 7)) return NULL;
-
-		chunk.data=NULL;
-		chunk.size=0;
-
-		curl = curl_easy_init();
-		if(!curl) return NULL;
-		curl_easy_setopt(curl, CURLOPT_URL, u);
-
-		curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)&chunk);
-		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteMemoryCallback);
-		curl_easy_setopt(curl, CURLOPT_USERAGENT, PROGRAM_NAME VERSIONSTRING);
-		curl_easy_setopt(curl, CURLOPT_TIMEOUT, ARDOUR_CURL_TIMEOUT);
-		curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1);
-#ifdef CURLERRORDEBUG
-		char curlerror[CURL_ERROR_SIZE] = "";
-		curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, curlerror);
-#endif
-
-		res = curl_easy_perform(curl);
-		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpstatus);
-		curl_easy_cleanup(curl);
-		if (status) *status = httpstatus;
-		if (res) {
-#ifdef CURLERRORDEBUG
-			printf("a3_curl_http_get() failed: %s\n", curlerror);
-#endif
-			return NULL;
-		}
-		if (httpstatus != 200) {
-			free (chunk.data);
-			chunk.data = NULL;
-		}
-		return (chunk.data);
-	}
-
-} /* end extern "C" */

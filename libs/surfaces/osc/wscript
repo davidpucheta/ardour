@@ -18,6 +18,9 @@ def build(bld):
             osc.cc
             osc_controllable.cc
             osc_route_observer.cc
+            osc_select_observer.cc
+            osc_global_observer.cc
+            osc_cue_observer.cc
             interface.cc
             osc_gui.cc
     '''
@@ -27,7 +30,7 @@ def build(bld):
     obj.includes     = ['.', './osc']
     obj.name         = 'libardour_osc'
     obj.target       = 'ardour_osc'
-    obj.uselib       = 'LO GTKMM GTK GDK'
+    obj.uselib       = 'LO GTKMM GTK GDK XML OSX'
     obj.use          = 'libardour libardour_cp libgtkmm2ext libpbd'
     obj.install_path = os.path.join(bld.env['LIBDIR'], 'surfaces')
 

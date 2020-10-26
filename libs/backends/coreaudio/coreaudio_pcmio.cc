@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <glibmm.h>
@@ -184,11 +184,11 @@ static OSStatus render_callback_ptr (
 		AudioUnitRenderActionFlags* ioActionFlags,
 		const AudioTimeStamp* inTimeStamp,
 		UInt32 inBusNumber,
-		UInt32 inNumberFrames,
+		UInt32 inNumberSamples,
 		AudioBufferList* ioData)
 {
 	CoreAudioPCM * d = static_cast<CoreAudioPCM*> (inRefCon);
-	return d->render_callback(ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, ioData);
+	return d->render_callback(ioActionFlags, inTimeStamp, inBusNumber, inNumberSamples, ioData);
 }
 
 
@@ -474,7 +474,9 @@ CoreAudioPCM::get_latency(uint32_t device_id, bool input)
 	for (size_t i = 0; i < stream_latencies.size(); ++i) {
 		max_stream_latency = std::max(max_stream_latency, stream_latencies[i]);
 	}
+#if 0
 	latency += max_stream_latency;
+#endif
 
 	return latency;
 }
@@ -1067,7 +1069,7 @@ CoreAudioPCM::cache_port_names(AudioDeviceID id, bool input)
 
 		ss << (c + 1);
 
-		if (cstr_name && decoded && (0 != std::strlen(cstr_name) ) ) {
+		if (cstr_name && decoded && (0 != ::strlen(cstr_name) ) ) {
 			ss << " - " <<  cstr_name;
 		}
 #if 0
@@ -1111,19 +1113,19 @@ CoreAudioPCM::render_callback (
 		AudioUnitRenderActionFlags* ioActionFlags,
 		const AudioTimeStamp* inTimeStamp,
 		UInt32 inBusNumber,
-		UInt32 inNumberFrames,
+		UInt32 inNumberSamples,
 		AudioBufferList* ioData)
 {
 	OSStatus retVal = kAudioHardwareNoError;
 
-	if (_samples_per_period < inNumberFrames) {
+	if (_samples_per_period < inNumberSamples) {
 #ifndef NDEBUG
 		printf("samples per period exceeds configured value, cycle skipped (%u < %u)\n",
-				(unsigned int)_samples_per_period, (unsigned int)inNumberFrames);
+				(unsigned int)_samples_per_period, (unsigned int)inNumberSamples);
 #endif
 		for (uint32_t i = 0; _playback_channels > 0 && i < ioData->mNumberBuffers; ++i) {
 			float* ob = (float*) ioData->mBuffers[i].mData;
-			memset(ob, 0, sizeof(float) * inNumberFrames);
+			memset(ob, 0, sizeof(float) * inNumberSamples);
 		}
 		return noErr;
 	}
@@ -1131,17 +1133,17 @@ CoreAudioPCM::render_callback (
 	assert(_playback_channels == 0 || ioData->mNumberBuffers == _playback_channels);
 
 	UInt64 cur_cycle_start = AudioGetCurrentHostTime ();
-	_cur_samples_per_period = inNumberFrames;
+	_cur_samples_per_period = inNumberSamples;
 
 	if (_capture_channels > 0) {
 		_input_audio_buffer_list->mNumberBuffers = _capture_channels;
 		for (uint32_t i = 0; i < _capture_channels; ++i) {
 			_input_audio_buffer_list->mBuffers[i].mNumberChannels = 1;
-			_input_audio_buffer_list->mBuffers[i].mDataByteSize = inNumberFrames * sizeof(float);
+			_input_audio_buffer_list->mBuffers[i].mDataByteSize = inNumberSamples * sizeof(float);
 			_input_audio_buffer_list->mBuffers[i].mData = NULL;
 		}
 
-		retVal = AudioUnitRender(_auhal, ioActionFlags, inTimeStamp, AUHAL_INPUT_ELEMENT, inNumberFrames, _input_audio_buffer_list);
+		retVal = AudioUnitRender(_auhal, ioActionFlags, inTimeStamp, AUHAL_INPUT_ELEMENT, inNumberSamples, _input_audio_buffer_list);
 	}
 
 	if (retVal != kAudioHardwareNoError) {
@@ -1162,7 +1164,7 @@ CoreAudioPCM::render_callback (
 	int rv = -1;
 
 	if (_process_callback) {
-		rv = _process_callback(_process_arg, inNumberFrames, cur_cycle_start);
+		rv = _process_callback(_process_arg, inNumberSamples, cur_cycle_start);
 	}
 
 	_in_process = false;
@@ -1171,7 +1173,7 @@ CoreAudioPCM::render_callback (
 		// clear output
 		for (uint32_t i = 0; i < ioData->mNumberBuffers; ++i) {
 			float* ob = (float*) ioData->mBuffers[i].mData;
-			memset(ob, 0, sizeof(float) * inNumberFrames);
+			memset(ob, 0, sizeof(float) * inNumberSamples);
 		}
 	}
 	return noErr;

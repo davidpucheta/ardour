@@ -1,28 +1,30 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 
 #include "ardour/readable.h"
 #include "ardour/transient_detector.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Vamp;
 using namespace ARDOUR;
@@ -72,7 +74,7 @@ TransientDetector::use_features (Plugin::FeatureSet& features, ostream* out)
 				(*out) << (*f).timestamp.toString() << endl;
 			}
 
-			current_results->push_back (RealTime::realTime2Frame (f->timestamp, (framecnt_t) floor(sample_rate)));
+			current_results->push_back (RealTime::realTime2Frame (f->timestamp, (samplecnt_t) floor(sample_rate)));
 		}
 	}
 
@@ -86,11 +88,15 @@ TransientDetector::set_threshold (float val)
 }
 
 void
-TransientDetector::set_sensitivity (float val)
+TransientDetector::set_sensitivity (uint32_t mode, float val)
 {
 	if (plugin) {
-		plugin->selectProgram ("Percussive onsets");
-		plugin->setParameter ("sensitivity", val);
+		// see libs/vamp-plugins/OnsetDetect.cpp
+		//plugin->selectProgram ("General purpose"); // dftype = 3, sensitivity = 50, whiten = 0 (default)
+		//plugin->selectProgram ("Percussive onsets"); // dftype = 4, sensitivity = 40, whiten = 0
+		plugin->setParameter ("dftype", mode);
+		plugin->setParameter ("sensitivity", std::min (100.f, std::max (0.f, val)));
+		plugin->setParameter ("whiten", 0);
 	}
 }
 
@@ -107,7 +113,7 @@ TransientDetector::cleanup_transients (AnalysisFeatureList& t, float sr, float g
 
 	AnalysisFeatureList::iterator i = t.begin();
 	AnalysisFeatureList::iterator f, b;
-	const framecnt_t gap_frames = (framecnt_t) floor (gap_msecs * (sr / 1000.0));
+	const samplecnt_t gap_samples = (samplecnt_t) floor (gap_msecs * (sr / 1000.0));
 
 	while (i != t.end()) {
 
@@ -119,7 +125,7 @@ TransientDetector::cleanup_transients (AnalysisFeatureList& t, float sr, float g
 
 		// move f until we find a new value that is far enough away
 
-		while ((f != t.end()) && gap_frames > 0 && (((*f) - (*i)) < gap_frames)) {
+		while ((f != t.end()) && gap_samples > 0 && (((*f) - (*i)) < gap_samples)) {
 			++f;
 		}
 
@@ -146,7 +152,7 @@ TransientDetector::update_positions (Readable* src, uint32_t channel, AnalysisFe
 	while (i != positions.end()) {
 
 		/* read from source */
-		framecnt_t const to_read = buff_size;
+		samplecnt_t const to_read = buff_size;
 
 		if (src->read (data, (*i) - buff_size, to_read, channel) != to_read) {
 			break;

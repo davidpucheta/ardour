@@ -1,20 +1,25 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 
@@ -87,6 +92,16 @@ bool RegionSelection::contains (RegionView* rv) const
 	return find (begin(), end(), rv) != end();
 }
 
+bool RegionSelection::contains (boost::shared_ptr<ARDOUR::Region> region) const
+{
+	for (const_iterator r = begin (); r != end (); ++r) {
+		if ((*r)->region () == region) {
+			return true;
+		}
+	}
+	return false;
+}
+
 /** Add a region to the selection.
  *  @param rv Region to add.
  *  @return false if we already had the region or if it cannot be added,
@@ -95,13 +110,13 @@ bool RegionSelection::contains (RegionView* rv) const
 bool
 RegionSelection::add (RegionView* rv)
 {
-        if (!rv->region()->playlist()) {
-                /* not attached to a playlist - selection not allowed.
-                   This happens if the user tries to select a region
-                   during a capture pass.
-                */
-                return false;
-        }
+	if (!rv->region()->playlist()) {
+		/* not attached to a playlist - selection not allowed.
+		   This happens if the user tries to select a region
+		   during a capture pass.
+		*/
+		return false;
+	}
 
 	if (contains (rv)) {
 		/* we already have it */
@@ -139,7 +154,7 @@ RegionSelection::remove (RegionView* rv)
 
 		// remove from layer sorted list
 		_bylayer.remove (rv);
-
+		pending.remove (rv->region()->id());
 		erase (r);
 		return true;
 	}
@@ -170,9 +185,9 @@ RegionSelection::add_to_layer (RegionView * rv)
 }
 
 struct RegionSortByTime {
-    bool operator() (const RegionView* a, const RegionView* b) const {
-	    return a->region()->position() < b->region()->position();
-    }
+	bool operator() (const RegionView* a, const RegionView* b) const {
+		return a->region()->position() < b->region()->position();
+	}
 };
 
 
@@ -195,16 +210,16 @@ RegionSelection::by_position (list<RegionView*>& foo) const
 }
 
 struct RegionSortByTrack {
-    bool operator() (const RegionView* a, const RegionView* b) const {
+	bool operator() (const RegionView* a, const RegionView* b) const {
 
-	    /* really, track and position */
+		/* really, track and position */
 
-	    if (a->get_time_axis_view().order() == b->get_time_axis_view().order()) {
-		    return a->region()->position() < b->region()->position();
-	    } else {
-		    return a->get_time_axis_view().order() < b->get_time_axis_view().order();
-	    }
-    }
+		if (a->get_time_axis_view().order() == b->get_time_axis_view().order()) {
+			return a->region()->position() < b->region()->position();
+		} else {
+			return a->get_time_axis_view().order() < b->get_time_axis_view().order();
+		}
+	}
 };
 
 
@@ -251,27 +266,27 @@ RegionSelection::involves (const TimeAxisView& tv) const
 	return false;
 }
 
-framepos_t
+samplepos_t
 RegionSelection::start () const
 {
-	framepos_t s = max_framepos;
+	samplepos_t s = max_samplepos;
 	for (RegionSelection::const_iterator i = begin(); i != end(); ++i) {
 		s = min (s, (*i)->region()->position ());
 	}
 
-	if (s == max_framepos) {
+	if (s == max_samplepos) {
 		return 0;
 	}
 
 	return s;
 }
 
-framepos_t
-RegionSelection::end_frame () const
+samplepos_t
+RegionSelection::end_sample () const
 {
-	framepos_t e = 0;
+	samplepos_t e = 0;
 	for (RegionSelection::const_iterator i = begin(); i != end(); ++i) {
-		e = max (e, (*i)->region()->last_frame ());
+		e = max (e, (*i)->region()->last_sample ());
 	}
 
 	return e;

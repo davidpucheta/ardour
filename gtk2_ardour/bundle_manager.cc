@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/stock.h>
 #include <gtkmm/button.h>
@@ -29,7 +31,7 @@
 #include "ardour/user_bundle.h"
 #include "bundle_manager.h"
 #include "gui_thread.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 #include "utils.h"
 
 using namespace std;
@@ -203,13 +205,13 @@ BundleEditor::BundleEditor (Session* session, boost::shared_ptr<UserBundle> bund
 	a = new Gtk::Alignment (0, 0.5, 0, 1);
 	a->add (_input_or_output);
 	t->attach (*Gtk::manage (a), 1, 2, 1, 2);
-	_input_or_output.append_text (_("Input"));
-	_input_or_output.append_text (_("Output"));
+	_input_or_output.append_text (_("Destination"));
+	_input_or_output.append_text (_("Source"));
 
 	if (bundle->ports_are_inputs()) {
-		_input_or_output.set_active_text (_("Input"));
+		_input_or_output.set_active_text (_("Source"));
 	} else {
-		_input_or_output.set_active_text (_("Output"));
+		_input_or_output.set_active_text (_("Destination"));
 	}
 
 	_input_or_output.signal_changed().connect (sigc::mem_fun (*this, &BundleEditor::input_or_output_changed));
@@ -218,7 +220,6 @@ BundleEditor::BundleEditor (Session* session, boost::shared_ptr<UserBundle> bund
 	get_vbox()->pack_start (_matrix);
 	get_vbox()->set_spacing (4);
 
-	add_button (Gtk::Stock::CLOSE, Gtk::RESPONSE_ACCEPT);
 	show_all ();
 
 	signal_key_press_event().connect (sigc::mem_fun (_matrix, &BundleEditorMatrix::key_press));
@@ -243,7 +244,7 @@ BundleEditor::input_or_output_changed ()
 {
 	_bundle->remove_ports_from_channels ();
 
-	if (_input_or_output.get_active_text() == _("Output")) {
+	if (_input_or_output.get_active_text() == _("Source")) {
 		_bundle->set_ports_are_outputs ();
 	} else {
 		_bundle->set_ports_are_inputs ();
@@ -310,9 +311,6 @@ BundleManager::BundleManager (Session* session)
 		sigc::mem_fun (*this, &BundleManager::row_activated)
 		);
 
-	Gtk::Button* close_but = add_button (Gtk::Stock::CLOSE, Gtk::RESPONSE_ACCEPT);
-	close_but->signal_clicked ().connect (sigc::mem_fun (*this, &Gtk::Window::hide));
-
 	set_button_sensitivity ();
 
 	show_all ();
@@ -377,13 +375,14 @@ BundleManager::add_bundle (boost::shared_ptr<Bundle> b)
 	(*i)[_list_model_columns.name] = u->name ();
 	(*i)[_list_model_columns.bundle] = u;
 
-	u->Changed.connect (bundle_connections, invalidator (*this), boost::bind (&BundleManager::bundle_changed, this, _1, u), gui_context());
+	u->Changed.connect (bundle_connections, invalidator (*this), boost::bind (&BundleManager::bundle_changed, this, _1, boost::weak_ptr<UserBundle> (u)), gui_context());
 }
 
 void
-BundleManager::bundle_changed (Bundle::Change c, boost::shared_ptr<UserBundle> b)
+BundleManager::bundle_changed (Bundle::Change c, boost::weak_ptr<UserBundle> wb)
 {
-	if ((c & Bundle::NameChanged) == 0) {
+	boost::shared_ptr<UserBundle> b = wb.lock ();
+	if (!b || 0 == (c & Bundle::NameChanged)) {
 		return;
 	}
 

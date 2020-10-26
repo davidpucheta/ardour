@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2017-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/pannable.h"
 #include "ardour/panner.h"
@@ -23,60 +23,49 @@
 
 using namespace ARDOUR;
 
-double
-PanControllable::lower () const
-{
-        switch (parameter().type()) {
-        case PanWidthAutomation:
-                return -1.0;
-        default:
-                return 0.0;
-        }
-}
-
 void
-PanControllable::set_value (double v, PBD::Controllable::GroupControlDisposition group_override)
+PanControllable::actually_set_value (double v, Controllable::GroupControlDisposition group_override)
 {
-	if (writable()) {
-		_set_value (v, group_override);
+	v = std::min (upper (), std::max (lower (), v));
+
+	if (!owner || !owner->panner()) {
+		/* no panner: just do it */
+		AutomationControl::actually_set_value (v, group_override);
+		return;
 	}
-}
-void
-PanControllable::set_value_unchecked (double v)
-{
-	/* used only automation playback */
-	_set_value (v, Controllable::NoGroup);
-}
 
-void
-PanControllable::_set_value (double v, Controllable::GroupControlDisposition group_override)
-{
 	boost::shared_ptr<Panner> p = owner->panner();
 
-        if (!p) {
-                /* no panner: just do it */
-	        AutomationControl::set_value (v, group_override);
-                return;
-        }
+	bool can_set = false;
 
-        bool can_set = false;
+	switch (parameter().type()) {
+		case PanWidthAutomation:
+			can_set = p->clamp_width (v);
+			break;
+		case PanAzimuthAutomation:
+			can_set = p->clamp_position (v);
+			break;
+		case PanElevationAutomation:
+			can_set = p->clamp_elevation (v);
+			break;
+		default:
+			break;
+	}
 
-        switch (parameter().type()) {
-        case PanWidthAutomation:
-                can_set = p->clamp_width (v);
-                break;
-        case PanAzimuthAutomation:
-                can_set = p->clamp_position (v);
-                break;
-        case PanElevationAutomation:
-                can_set = p->clamp_elevation (v);
-                break;
-        default:
-                break;
-        }
-
-        if (can_set) {
-	        AutomationControl::set_value (v, group_override);
-        }
+	if (can_set) {
+		AutomationControl::actually_set_value (v, group_override);
+	}
 }
 
+std::string
+PanControllable::get_user_string () const
+{
+	if (!owner || !owner->panner()) {
+		/* assume PanAzimuthAutomation, 0..1 */
+		float v = get_value ();
+		char buf[32];
+		snprintf(buf, sizeof(buf), "%.0f%%", 100.f * v);
+		return buf;
+	}
+	return owner->panner()->value_as_string (boost::dynamic_pointer_cast<const AutomationControl>(shared_from_this()));
+}

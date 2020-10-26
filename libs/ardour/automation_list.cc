@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2002 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2012-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <set>
 #include <climits>
@@ -24,14 +28,19 @@
 #include <sstream>
 #include <algorithm>
 #include "ardour/automation_list.h"
+#include "ardour/beats_samples_converter.h"
 #include "ardour/event_type_map.h"
 #include "ardour/parameter_descriptor.h"
-#include "evoral/Curve.hpp"
+#include "ardour/parameter_types.h"
+#include "ardour/evoral_types_convert.h"
+#include "ardour/types_convert.h"
+#include "evoral/Curve.h"
 #include "pbd/memento_command.h"
 #include "pbd/stacktrace.h"
 #include "pbd/enumwriter.h"
+#include "pbd/types_convert.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -54,8 +63,8 @@ AutomationList::AutomationList (const Evoral::Parameter& id, const Evoral::Param
 	, _before (0)
 {
 	_state = Off;
-	_style = Absolute;
 	g_atomic_int_set (&_touching, 0);
+	_interpolation = default_interpolation ();
 
 	create_curve_if_necessary();
 
@@ -68,8 +77,8 @@ AutomationList::AutomationList (const Evoral::Parameter& id)
 	, _before (0)
 {
 	_state = Off;
-	_style = Absolute;
 	g_atomic_int_set (&_touching, 0);
+	_interpolation = default_interpolation ();
 
 	create_curve_if_necessary();
 
@@ -78,11 +87,10 @@ AutomationList::AutomationList (const Evoral::Parameter& id)
 }
 
 AutomationList::AutomationList (const AutomationList& other)
-	: StatefulDestructible()
-	, ControlList(other)
+	: ControlList(other)
+	, StatefulDestructible()
 	, _before (0)
 {
-	_style = other._style;
 	_state = other._state;
 	g_atomic_int_set (&_touching, other.touching());
 
@@ -96,7 +104,6 @@ AutomationList::AutomationList (const AutomationList& other, double start, doubl
 	: ControlList(other, start, end)
 	, _before (0)
 {
-	_style = other._style;
 	_state = other._state;
 	g_atomic_int_set (&_touching, other.touching());
 
@@ -114,8 +121,8 @@ AutomationList::AutomationList (const XMLNode& node, Evoral::Parameter id)
 	, _before (0)
 {
 	g_atomic_int_set (&_touching, 0);
+	_interpolation = default_interpolation ();
 	_state = Off;
-	_style = Absolute;
 
 	set_state (node, Stateful::loading_state_version);
 
@@ -146,6 +153,7 @@ AutomationList::create_curve_if_necessary()
 {
 	switch (_parameter.type()) {
 	case GainAutomation:
+	case BusSendLevel:
 	case TrimAutomation:
 	case PanAzimuthAutomation:
 	case PanElevationAutomation:
@@ -158,21 +166,22 @@ AutomationList::create_curve_if_necessary()
 	default:
 		break;
 	}
+
+	WritePassStarted.connect_same_thread (_writepass_connection, boost::bind (&AutomationList::snapshot_history, this, false));
 }
 
 AutomationList&
 AutomationList::operator= (const AutomationList& other)
 {
 	if (this != &other) {
-
-
+		ControlList::freeze ();
+		/* ControlList::operator= calls copy_events() which calls
+		 * mark_dirty() and maybe_signal_changed()
+		 */
 		ControlList::operator= (other);
 		_state = other._state;
-		_style = other._style;
 		_touching = other._touching;
-
-		mark_dirty ();
-		maybe_signal_changed ();
+		ControlList::thaw ();
 	}
 
 	return *this;
@@ -188,39 +197,55 @@ AutomationList::maybe_signal_changed ()
 	}
 }
 
-void
-AutomationList::set_automation_state (AutoState s)
+AutoState
+AutomationList::automation_state() const
 {
-	if (s != _state) {
-		_state = s;
-		delete _before;
-		if (s == Write && _desc.toggled) {
-			_before = &get_state ();
-		} else {
-			_before = 0;
-		}
-		automation_state_changed (s); /* EMIT SIGNAL */
-	}
+	Glib::Threads::RWLock::ReaderLock lm (Evoral::ControlList::_lock);
+	return _state;
 }
 
 void
-AutomationList::set_automation_style (AutoStyle s)
+AutomationList::set_automation_state (AutoState s)
 {
-	if (s != _style) {
-		_style = s;
-		automation_style_changed (); /* EMIT SIGNAL */
+	{
+		Glib::Threads::RWLock::ReaderLock lm (Evoral::ControlList::_lock);
+
+		if (s == _state) {
+			return;
+		}
+		_state = s;
+		if (s == Write && _desc.toggled) {
+			snapshot_history (true);
+		}
 	}
+
+	automation_state_changed (s); /* EMIT SIGNAL */
+}
+
+Evoral::ControlList::InterpolationStyle
+AutomationList::default_interpolation () const
+{
+	switch (_parameter.type()) {
+		case GainAutomation:
+		case BusSendLevel:
+		case EnvelopeAutomation:
+			return ControlList::Exponential;
+			break;
+		case MainOutVolume:
+		case TrimAutomation:
+			return ControlList::Logarithmic;
+			break;
+		default:
+			break;
+	}
+	/* based on Evoral::ParameterDescriptor log,toggle,.. */
+	return ControlList::default_interpolation ();
 }
 
 void
 AutomationList::start_write_pass (double when)
 {
-	delete _before;
-	if (in_new_write_pass ()) {
-		_before = &get_state ();
-	} else {
-		_before = 0;
-	}
+	snapshot_history (true);
 	ControlList::start_write_pass (when);
 }
 
@@ -233,15 +258,15 @@ AutomationList::write_pass_finished (double when, double thinning_factor)
 void
 AutomationList::start_touch (double when)
 {
-        if (_state == Touch) {
+	if (_state == Touch) {
 		start_write_pass (when);
-        }
+	}
 
 	g_atomic_int_set (&_touching, 1);
 }
 
 void
-AutomationList::stop_touch (bool mark, double)
+AutomationList::stop_touch (double)
 {
 	if (g_atomic_int_get (&_touching) == 0) {
 		/* this touch has already been stopped (probably by Automatable::transport_stopped),
@@ -251,16 +276,6 @@ AutomationList::stop_touch (bool mark, double)
 	}
 
 	g_atomic_int_set (&_touching, 0);
-
-        if (_state == Touch) {
-
-                if (mark) {
-
-			/* XXX need to mark the last added point with the
-			 * current time
-			 */
-                }
-        }
 }
 
 /* _before may be owned by the undo stack,
@@ -276,6 +291,17 @@ AutomationList::clear_history ()
 }
 
 void
+AutomationList::snapshot_history (bool need_lock)
+{
+	if (!in_new_write_pass ()) {
+		return;
+	}
+	delete _before;
+	_before = &state (true, need_lock);
+}
+
+
+void
 AutomationList::thaw ()
 {
 	ControlList::thaw();
@@ -284,6 +310,31 @@ AutomationList::thaw ()
 		_changed_when_thawed = false;
 		StateChanged(); /* EMIT SIGNAL */
 	}
+}
+
+bool
+AutomationList::paste (const ControlList& alist, double pos, DoubleBeatsSamplesConverter const& bfc)
+{
+	AutomationType src_type = (AutomationType)alist.parameter().type();
+	AutomationType dst_type = (AutomationType)_parameter.type();
+
+	if (parameter_is_midi (src_type) == parameter_is_midi (dst_type)) {
+		return ControlList::paste (alist, pos);
+	}
+	bool to_sample = parameter_is_midi (src_type);
+
+	ControlList cl (alist);
+	cl.clear ();
+	for (const_iterator i = alist.begin ();i != alist.end (); ++i) {
+		double when = (*i)->when;
+		if (to_sample) {
+			when = bfc.to ((*i)->when);
+		} else {
+			when = bfc.from ((*i)->when);
+		}
+		cl.fast_simple_add (when, (*i)->value);
+	}
+	return ControlList::paste (cl, pos);
 }
 
 Command*
@@ -295,68 +346,57 @@ AutomationList::memento_command (XMLNode* before, XMLNode* after)
 XMLNode&
 AutomationList::get_state ()
 {
-	return state (true);
+	return state (true, true);
 }
 
 XMLNode&
-AutomationList::state (bool full)
+AutomationList::state (bool save_auto_state, bool need_lock)
 {
 	XMLNode* root = new XMLNode (X_("AutomationList"));
-	char buf[64];
-	LocaleGuard lg (X_("C"));
 
-	root->add_property ("automation-id", EventTypeMap::instance().to_symbol(_parameter));
+	root->set_property ("automation-id", EventTypeMap::instance().to_symbol(_parameter));
+	root->set_property ("id", id());
+	root->set_property ("interpolation-style", _interpolation);
 
-	root->add_property ("id", id().to_s());
-
-	snprintf (buf, sizeof (buf), "%.12g", _default_value);
-	root->add_property ("default", buf);
-	snprintf (buf, sizeof (buf), "%.12g", _min_yval);
-	root->add_property ("min-yval", buf);
-	snprintf (buf, sizeof (buf), "%.12g", _max_yval);
-	root->add_property ("max-yval", buf);
-
-	root->add_property ("interpolation-style", enum_2_string (_interpolation));
-
-	if (full) {
-                /* never serialize state with Write enabled - too dangerous
-                   for the user's data
-                */
-                if (_state != Write) {
-                        root->add_property ("state", auto_state_to_string (_state));
-                } else {
+	if (save_auto_state) {
+		/* never serialize state with Write enabled - too dangerous
+		   for the user's data
+		*/
+		if (_state != Write) {
+			root->set_property ("state", _state);
+		} else {
 			if (_events.empty ()) {
-				root->add_property ("state", auto_state_to_string (Off));
+				root->set_property ("state", Off);
 			} else {
-				root->add_property ("state", auto_state_to_string (Touch));
+				root->set_property ("state", Touch);
 			}
-                }
+		}
 	} else {
 		/* never save anything but Off for automation state to a template */
-		root->add_property ("state", auto_state_to_string (Off));
+		root->set_property ("state", Off);
 	}
 
-	root->add_property ("style", auto_style_to_string (_style));
-
 	if (!_events.empty()) {
-		root->add_child_nocopy (serialize_events());
+		root->add_child_nocopy (serialize_events (need_lock));
 	}
 
 	return *root;
 }
 
 XMLNode&
-AutomationList::serialize_events ()
+AutomationList::serialize_events (bool need_lock)
 {
 	XMLNode* node = new XMLNode (X_("events"));
 	stringstream str;
 
-	str.precision(15);  //10 digits is enough digits for 24 hours at 96kHz
-
+	Glib::Threads::RWLock::ReaderLock lm (Evoral::ControlList::_lock, Glib::Threads::NOT_LOCK);
+	if (need_lock) {
+		lm.acquire ();
+	}
 	for (iterator xx = _events.begin(); xx != _events.end(); ++xx) {
-		str << (double) (*xx)->when;
+		str << PBD::to_string ((*xx)->when);
 		str << ' ';
-		str <<(double) (*xx)->value;
+		str << PBD::to_string ((*xx)->value);
 		str << '\n';
 	}
 
@@ -388,20 +428,23 @@ AutomationList::deserialize_events (const XMLNode& node)
 
 	stringstream str (content_node->content());
 
+	std::string x_str;
+	std::string y_str;
 	double x;
 	double y;
 	bool ok = true;
 
 	while (str) {
-		str >> x;
-		if (!str) {
+		str >> x_str;
+		if (!str || !PBD::string_to<double> (x_str, x)) {
 			break;
 		}
-		str >> y;
-		if (!str) {
+		str >> y_str;
+		if (!str || !PBD::string_to<double> (y_str, y)) {
 			ok = false;
 			break;
 		}
+		y = std::min ((double)_desc.upper, std::max ((double)_desc.lower, y));
 		fast_simple_add (x, y);
 	}
 
@@ -421,11 +464,9 @@ AutomationList::deserialize_events (const XMLNode& node)
 int
 AutomationList::set_state (const XMLNode& node, int version)
 {
-	LocaleGuard lg (X_("C"));
 	XMLNodeList nlist = node.children();
 	XMLNode* nsos;
 	XMLNodeIterator niter;
-	const XMLProperty* prop;
 
 	if (node.name() == X_("events")) {
 		/* partial state setting*/
@@ -443,27 +484,25 @@ AutomationList::set_state (const XMLNode& node, int version)
 
 		const XMLNodeList& elist = node.children();
 		XMLNodeConstIterator i;
-		XMLProperty* prop;
-		pframes_t x;
-		double y;
 
-                ControlList::freeze ();
+		ControlList::freeze ();
 		clear ();
 
 		for (i = elist.begin(); i != elist.end(); ++i) {
 
-			if ((prop = (*i)->property ("x")) == 0) {
+			pframes_t x;
+			if (!(*i)->get_property ("x", x)) {
 				error << _("automation list: no x-coordinate stored for control point (point ignored)") << endmsg;
 				continue;
 			}
-			x = atoi (prop->value().c_str());
 
-			if ((prop = (*i)->property ("y")) == 0) {
+			double y;
+			if (!(*i)->get_property ("y", y)) {
 				error << _("automation list: no y-coordinate stored for control point (point ignored)") << endmsg;
 				continue;
 			}
-			y = atof (prop->value().c_str());
 
+			y = std::min ((double)_desc.upper, std::max ((double)_desc.lower, y));
 			fast_simple_add (x, y);
 		}
 
@@ -482,50 +521,24 @@ AutomationList::set_state (const XMLNode& node, int version)
 		AutomationListCreated(this);
 	}
 
-	if ((prop = node.property (X_("automation-id"))) != 0){
-		_parameter = EventTypeMap::instance().from_symbol(prop->value());
+	std::string value;
+	if (node.get_property (X_("automation-id"), value)) {
+		_parameter = EventTypeMap::instance().from_symbol(value);
 	} else {
 		warning << "Legacy session: automation list has no automation-id property." << endmsg;
 	}
 
-	if ((prop = node.property (X_("interpolation-style"))) != 0) {
-		_interpolation = (InterpolationStyle)string_2_enum(prop->value(), _interpolation);
-	} else {
-		_interpolation = Linear;
+	if (!node.get_property (X_("interpolation-style"), _interpolation)) {
+		_interpolation = default_interpolation ();
 	}
 
-	if ((prop = node.property (X_("default"))) != 0){
-		_default_value = atof (prop->value().c_str());
-	} else {
-		_default_value = 0.0;
-	}
-
-	if ((prop = node.property (X_("style"))) != 0) {
-		_style = string_to_auto_style (prop->value());
-	} else {
-		_style = Absolute;
-	}
-
-	if ((prop = node.property (X_("state"))) != 0) {
-		_state = string_to_auto_state (prop->value());
-                if (_state == Write) {
-                        _state = Off;
-                }
-		automation_state_changed(_state);
+	if (node.get_property (X_("state"), _state)) {
+		if (_state == Write) {
+			_state = Off;
+		}
+		automation_state_changed (_state);
 	} else {
 		_state = Off;
-	}
-
-	if ((prop = node.property (X_("min-yval"))) != 0) {
-		_min_yval = atof (prop->value ().c_str());
-	} else {
-		_min_yval = FLT_MIN;
-	}
-
-	if ((prop = node.property (X_("max-yval"))) != 0) {
-		_max_yval = atof (prop->value ().c_str());
-	} else {
-		_max_yval = FLT_MAX;
 	}
 
 	bool have_events = false;
@@ -555,7 +568,6 @@ AutomationList::operator!= (AutomationList const & other) const
 	return (
 		static_cast<ControlList const &> (*this) != static_cast<ControlList const &> (other) ||
 		_state != other._state ||
-		_style != other._style ||
 		_touching != other._touching
 		);
 }
@@ -569,4 +581,3 @@ AutomationListProperty::clone () const
 		boost::shared_ptr<AutomationList> (new AutomationList (*this->_current.get()))
 		);
 }
-

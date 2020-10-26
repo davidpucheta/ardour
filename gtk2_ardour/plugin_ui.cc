@@ -1,21 +1,27 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2006 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2009 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2006-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013-2018 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-config.h"
@@ -30,20 +36,22 @@
 #include "pbd/xml++.h"
 #include "pbd/failed_constructor.h"
 
-#include <gtkmm/widget.h>
-#include <gtkmm/box.h>
-#include <gtkmm2ext/click_box.h>
-#include <gtkmm2ext/fastmeter.h>
-#include <gtkmm2ext/barcontroller.h>
-#include <gtkmm2ext/utils.h>
-#include <gtkmm2ext/doi.h>
-#include <gtkmm2ext/slider_controller.h>
-#include <gtkmm2ext/application.h>
+#include "gtkmm/widget.h"
+#include "gtkmm/box.h"
+
+#include "gtkmm2ext/utils.h"
+#include "gtkmm2ext/doi.h"
+#include "gtkmm2ext/application.h"
+
+#include "widgets/tooltips.h"
+#include "widgets/fastmeter.h"
 
 #include "ardour/session.h"
 #include "ardour/plugin.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/ladspa_plugin.h"
+#include "ardour/lv2_plugin.h"
+#include "lv2_plugin_ui.h"
 #ifdef WINDOWS_VST_SUPPORT
 #include "ardour/windows_vst_plugin.h"
 #include "windows_vst_plugin_ui.h"
@@ -52,32 +60,47 @@
 #include "ardour/lxvst_plugin.h"
 #include "lxvst_plugin_ui.h"
 #endif
-#ifdef LV2_SUPPORT
-#include "ardour/lv2_plugin.h"
-#include "lv2_plugin_ui.h"
+#ifdef MACVST_SUPPORT
+#include "ardour/mac_vst_plugin.h"
+#include "vst_plugin_ui.h"
+#endif
+#ifdef VST3_SUPPORT
+#include "ardour/vst3_plugin.h"
+# ifdef PLATFORM_WINDOWS
+#  include "vst3_hwnd_plugin_ui.h"
+# elif defined (__APPLE__)
+#  include "vst3_plugin_ui.h"
+extern VST3PluginUI* create_mac_vst3_gui (boost::shared_ptr<ARDOUR::PluginInsert>, Gtk::VBox**);
+# else
+#  include "vst3_x11_plugin_ui.h"
+# endif
 #endif
 
 #include "ardour_window.h"
 #include "ardour_ui.h"
-#include "prompter.h"
 #include "plugin_ui.h"
 #include "utils.h"
 #include "gui_thread.h"
 #include "public_editor.h"
+#include "processor_box.h"
 #include "keyboard.h"
 #include "latency_gui.h"
+#include "plugin_dspload_ui.h"
 #include "plugin_eq_gui.h"
+#include "plugin_presets_ui.h"
+#include "timers.h"
 #include "new_plugin_preset_dialog.h"
-#include "tooltips.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
 using namespace ARDOUR_UI_UTILS;
+using namespace ArdourWidgets;
 using namespace PBD;
 using namespace Gtkmm2ext;
 using namespace Gtk;
+
 
 PluginUIWindow::PluginUIWindow (
 	boost::shared_ptr<PluginInsert> insert,
@@ -87,8 +110,8 @@ PluginUIWindow::PluginUIWindow (
 	, was_visible (false)
 	, _keyboard_focused (false)
 #ifdef AUDIOUNIT_SUPPORT
-        , pre_deactivate_x (-1)
-        , pre_deactivate_y (-1)
+	, pre_deactivate_x (-1)
+	, pre_deactivate_y (-1)
 #endif
 
 {
@@ -106,6 +129,10 @@ PluginUIWindow::PluginUIWindow (
 			have_gui = create_lxvst_editor (insert);
 			break;
 
+		case ARDOUR::MacVST:
+			have_gui = create_mac_vst_editor (insert);
+			break;
+
 		case ARDOUR::AudioUnit:
 			have_gui = create_audiounit_editor (insert);
 			break;
@@ -116,6 +143,10 @@ PluginUIWindow::PluginUIWindow (
 
 		case ARDOUR::LV2:
 			have_gui = create_lv2_editor (insert);
+			break;
+
+		case ARDOUR::VST3:
+			have_gui = create_vst3_editor (insert);
 			break;
 
 		default:
@@ -155,6 +186,7 @@ PluginUIWindow::PluginUIWindow (
 		if (h > 600) h = 600;
 	}
 
+	set_border_width (0);
 	set_default_size (w, h);
 	set_resizable (_pluginui->resizable());
 }
@@ -179,9 +211,9 @@ PluginUIWindow::on_show ()
 
 	if (_pluginui) {
 #if defined (HAVE_AUDIOUNITS) && defined(__APPLE__)
-                if (pre_deactivate_x >= 0) {
-                        move (pre_deactivate_x, pre_deactivate_y);
-                }
+		if (pre_deactivate_x >= 0) {
+			move (pre_deactivate_x, pre_deactivate_y);
+		}
 #endif
 
 		if (_pluginui->on_window_show (_title)) {
@@ -194,7 +226,7 @@ void
 PluginUIWindow::on_hide ()
 {
 #if defined (HAVE_AUDIOUNITS) && defined(__APPLE__)
-        get_position (pre_deactivate_x, pre_deactivate_y);
+	get_position (pre_deactivate_x, pre_deactivate_y);
 #endif
 
 	Window::on_hide ();
@@ -272,6 +304,70 @@ PluginUIWindow::create_lxvst_editor(boost::shared_ptr<PluginInsert>)
 }
 
 bool
+#ifdef MACVST_SUPPORT
+PluginUIWindow::create_mac_vst_editor (boost::shared_ptr<PluginInsert> insert)
+#else
+PluginUIWindow::create_mac_vst_editor (boost::shared_ptr<PluginInsert>)
+#endif
+{
+#ifndef MACVST_SUPPORT
+	return false;
+#else
+	boost::shared_ptr<MacVSTPlugin> mvst;
+	if ((mvst = boost::dynamic_pointer_cast<MacVSTPlugin> (insert->plugin())) == 0) {
+		error << string_compose (_("unknown type of editor-supplying plugin (note: no MacVST support in this version of %1)"), PROGRAM_NAME)
+		      << endmsg;
+		throw failed_constructor ();
+	}
+	VSTPluginUI* vpu = create_mac_vst_gui (insert);
+	_pluginui = vpu;
+	_pluginui->KeyboardFocused.connect (sigc::mem_fun (*this, &PluginUIWindow::keyboard_focused));
+	add (*vpu);
+	vpu->package (*this);
+
+	Application::instance()->ActivationChanged.connect (mem_fun (*this, &PluginUIWindow::app_activated));
+
+	return true;
+#endif
+}
+
+bool
+#ifdef VST3_SUPPORT
+PluginUIWindow::create_vst3_editor (boost::shared_ptr<PluginInsert> insert)
+#else
+PluginUIWindow::create_vst3_editor (boost::shared_ptr<PluginInsert>)
+#endif
+{
+#ifndef VST3_SUPPORT
+	return false;
+#else
+	boost::shared_ptr<VST3Plugin> vst3;
+	if ((vst3 = boost::dynamic_pointer_cast<VST3Plugin> (insert->plugin())) == 0) {
+		error << _("create_vst3_editor called on non-VST3 plugin") << endmsg;
+		throw failed_constructor ();
+	} else {
+#ifdef PLATFORM_WINDOWS
+		VST3HWNDPluginUI* pui = new VST3HWNDPluginUI (insert, vst3);
+		add (*pui);
+#elif defined (__APPLE__)
+		VBox* box;
+		VST3PluginUI* pui = create_mac_vst3_gui (insert, &box);
+		add (*box);
+		Application::instance()->ActivationChanged.connect (mem_fun (*this, &PluginUIWindow::app_activated));
+#else
+		VST3X11PluginUI* pui = new VST3X11PluginUI (insert, vst3);
+		add (*pui);
+#endif
+		_pluginui = pui;
+		pui->package (*this);
+		_pluginui->KeyboardFocused.connect (sigc::mem_fun (*this, &PluginUIWindow::keyboard_focused));
+	}
+	return true;
+#endif
+}
+
+
+bool
 #ifdef AUDIOUNIT_SUPPORT
 PluginUIWindow::create_audiounit_editor (boost::shared_ptr<PluginInsert> insert)
 #else
@@ -304,15 +400,15 @@ PluginUIWindow::app_activated (bool)
 		if (yn) {
 			if (was_visible) {
 				_pluginui->activate ();
-                                if (pre_deactivate_x >= 0) {
-                                        move (pre_deactivate_x, pre_deactivate_y);
-                                }
+				if (pre_deactivate_x >= 0) {
+					move (pre_deactivate_x, pre_deactivate_y);
+				}
 				present ();
 				was_visible = true;
 			}
 		} else {
 			was_visible = is_visible();
-                        get_position (pre_deactivate_x, pre_deactivate_y);
+			get_position (pre_deactivate_x, pre_deactivate_y);
 			hide ();
 			_pluginui->deactivate ();
 		}
@@ -391,13 +487,13 @@ PluginUIWindow::on_key_release_event (GdkEventKey *event)
 		if (_pluginui) {
 			if (_pluginui->non_gtk_gui()) {
 				_pluginui->forward_key_event (event);
+				return true;
 			}
-			return true;
 		}
-		return false;
 	} else {
-		return true;
+		gtk_window_propagate_key_event (GTK_WINDOW(gobj()), event);
 	}
+	return relay_key_press (event, this);
 }
 
 void
@@ -415,69 +511,99 @@ PluginUIWindow::plugin_going_away ()
 PlugUIBase::PlugUIBase (boost::shared_ptr<PluginInsert> pi)
 	: insert (pi)
 	, plugin (insert->plugin())
-	, add_button (_("Add"))
-	, save_button (_("Save"))
-	, delete_button (_("Delete"))
-	, reset_button (_("Reset"))
-	, bypass_button (ArdourButton::led_default_elements)
+	, _add_button (_("Add"))
+	, _save_button (_("Save"))
+	, _delete_button (_("Delete"))
+	, _preset_browser_button (_("Preset Browser"))
+	, _reset_button (_("Reset"))
+	, _bypass_button (ArdourButton::led_default_elements)
+	, _pin_management_button (_("Pinout"))
 	, description_expander (_("Description"))
 	, plugin_analysis_expander (_("Plugin analysis"))
+	, cpuload_expander (_("CPU Profile"))
 	, latency_gui (0)
 	, latency_dialog (0)
 	, eqgui (0)
+	, stats_gui (0)
+	, preset_gui (0)
+	, preset_dialog (0)
 {
 	_preset_modified.set_size_request (16, -1);
 	_preset_combo.set_text("(default)");
 	set_tooltip (_preset_combo, _("Presets (if any) for this plugin\n(Both factory and user-created)"));
-	set_tooltip (add_button, _("Save a new preset"));
-	set_tooltip (save_button, _("Save the current preset"));
-	set_tooltip (delete_button, _("Delete the current preset"));
-	set_tooltip (reset_button, _("Reset parameters to default (if no parameters are in automation play mode)"));
-	set_tooltip (bypass_button, _("Disable signal processing by the plugin"));
+	set_tooltip (_add_button, _("Save a new preset"));
+	set_tooltip (_save_button, _("Save the current preset"));
+	set_tooltip (_delete_button, _("Delete the current preset"));
+	set_tooltip (_preset_browser_button, _("Show Preset Browser Dialog"));
+	set_tooltip (_reset_button, _("Reset parameters to default (if no parameters are in automation play mode)"));
+	set_tooltip (_pin_management_button, _("Show Plugin Pin Management Dialog"));
+	set_tooltip (_bypass_button, _("Disable signal processing by the plugin"));
+	set_tooltip (_latency_button, _("Edit Plugin Delay/Latency Compensation"));
 	_no_load_preset = 0;
 
 	update_preset_list ();
 	update_preset ();
 
-	add_button.set_name ("generic button");
-	add_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::add_plugin_setting));
+	_latency_button.set_icon (ArdourIcon::LatencyClock);
+	_latency_button.add_elements (ArdourButton::Text);
+	_latency_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::latency_button_clicked));
+	set_latency_label ();
 
-	save_button.set_name ("generic button");
-	save_button.signal_clicked.connect(sigc::mem_fun(*this, &PlugUIBase::save_plugin_setting));
+	_add_button.set_name ("generic button");
+	_add_button.set_icon (ArdourIcon::PsetAdd);
+	_add_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::add_plugin_setting));
 
-	delete_button.set_name ("generic button");
-	delete_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::delete_plugin_setting));
+	_save_button.set_name ("generic button");
+	_save_button.set_icon (ArdourIcon::PsetSave);
+	_save_button.signal_clicked.connect(sigc::mem_fun(*this, &PlugUIBase::save_plugin_setting));
 
-	reset_button.set_name ("generic button");
-	reset_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::reset_plugin_parameters));
+	_delete_button.set_name ("generic button");
+	_delete_button.set_icon (ArdourIcon::PsetDelete);
+	_delete_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::delete_plugin_setting));
+
+	_preset_browser_button.set_name ("generic button");
+	_preset_browser_button.set_icon (ArdourIcon::PsetBrowse);
+	_preset_browser_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::browse_presets));
+
+	_reset_button.set_name ("generic button");
+	_reset_button.set_icon (ArdourIcon::PluginReset);
+	_reset_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::reset_plugin_parameters));
+
+	_pin_management_button.set_name ("generic button");
+	_pin_management_button.set_icon (ArdourIcon::PluginPinout);
+	_pin_management_button.signal_clicked.connect (sigc::mem_fun (*this, &PlugUIBase::manage_pins));
 
 
 	insert->ActiveChanged.connect (active_connection, invalidator (*this), boost::bind (&PlugUIBase::processor_active_changed, this,  boost::weak_ptr<Processor>(insert)), gui_context());
 
-	bypass_button.set_name ("plugin bypass button");
-	bypass_button.set_text (_("Bypass"));
-	bypass_button.set_active (!pi->active());
-	bypass_button.signal_button_release_event().connect (sigc::mem_fun(*this, &PlugUIBase::bypass_button_release), false);
-	focus_button.add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK);
+	_bypass_button.set_name ("plugin bypass button");
+	_bypass_button.set_text (_("Bypass"));
+	_bypass_button.set_icon (ArdourIcon::PluginBypass);
+	_bypass_button.set_active (!pi->enabled ());
+	_bypass_button.signal_button_release_event().connect (sigc::mem_fun(*this, &PlugUIBase::bypass_button_release), false);
+	_focus_button.add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK);
 
-	focus_button.signal_button_release_event().connect (sigc::mem_fun(*this, &PlugUIBase::focus_toggled));
-	focus_button.add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK);
+	_focus_button.signal_button_release_event().connect (sigc::mem_fun(*this, &PlugUIBase::focus_toggled));
+	_focus_button.add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK);
 
 	/* these images are not managed, so that we can remove them at will */
 
-	focus_out_image = new Image (get_icon (X_("computer_keyboard")));
-	focus_in_image = new Image (get_icon (X_("computer_keyboard_active")));
+	_focus_out_image = new Image (get_icon (X_("computer_keyboard")));
+	_focus_in_image = new Image (get_icon (X_("computer_keyboard_active")));
 
-	focus_button.add (*focus_out_image);
+	_focus_button.add (*_focus_out_image);
 
-	set_tooltip (focus_button, string_compose (_("Click to allow the plugin to receive keyboard events that %1 would normally use as a shortcut"), PROGRAM_NAME));
-	set_tooltip (bypass_button, _("Click to enable/disable this plugin"));
+	set_tooltip (_focus_button, string_compose (_("Click to allow the plugin to receive keyboard events that %1 would normally use as a shortcut"), PROGRAM_NAME));
+	set_tooltip (_bypass_button, _("Click to enable/disable this plugin"));
 
 	description_expander.property_expanded().signal_changed().connect( sigc::mem_fun(*this, &PlugUIBase::toggle_description));
 	description_expander.set_expanded(false);
 
 	plugin_analysis_expander.property_expanded().signal_changed().connect( sigc::mem_fun(*this, &PlugUIBase::toggle_plugin_analysis));
 	plugin_analysis_expander.set_expanded(false);
+
+	cpuload_expander.property_expanded().signal_changed().connect( sigc::mem_fun(*this, &PlugUIBase::toggle_cpuload_display));
+	cpuload_expander.set_expanded(false);
 
 	insert->DropReferences.connect (death_connection, invalidator (*this), boost::bind (&PlugUIBase::plugin_going_away, this), gui_context());
 
@@ -488,13 +614,22 @@ PlugUIBase::PlugUIBase (boost::shared_ptr<PluginInsert> pi)
 
 	insert->AutomationStateChanged.connect (*this, invalidator (*this), boost::bind (&PlugUIBase::automation_state_changed, this), gui_context());
 
+	insert->LatencyChanged.connect (*this, invalidator (*this), boost::bind (&PlugUIBase::set_latency_label, this), gui_context());
+
 	automation_state_changed();
 }
 
 PlugUIBase::~PlugUIBase()
 {
 	delete eqgui;
+	delete stats_gui;
+	delete preset_gui;
 	delete latency_gui;
+	delete latency_dialog;
+	delete preset_dialog;
+
+	delete _focus_out_image;
+	delete _focus_in_image;
 }
 
 void
@@ -506,40 +641,57 @@ PlugUIBase::plugin_going_away ()
 }
 
 void
-PlugUIBase::set_latency_label ()
+PlugUIBase::add_common_widgets (Gtk::HBox* b, bool with_focus)
 {
-	framecnt_t const l = insert->effective_latency ();
-	framecnt_t const sr = insert->session().frame_rate ();
-
-	string t;
-
-	if (l < sr / 1000) {
-		t = string_compose (P_("latency (%1 sample)", "latency (%1 samples)", l), l);
-	} else {
-		t = string_compose (_("latency (%1 ms)"), (float) l / ((float) sr / 1000.0f));
+	if (with_focus) {
+		b->pack_end (_focus_button, false, false);
 	}
 
-	latency_button.set_text (t);
+	b->pack_end (_bypass_button, false, false, with_focus ? 4 : 0);
+
+	if (insert->controls().size() > 0) {
+		b->pack_end (_reset_button, false, false, 4);
+	}
+	if (has_descriptive_presets ()) {
+		b->pack_end (_preset_browser_button, false, false);
+	}
+	b->pack_end (_delete_button, false, false);
+	b->pack_end (_save_button, false, false);
+	b->pack_end (_add_button, false, false);
+	b->pack_end (_preset_combo, false, false);
+	b->pack_end (_preset_modified, false, false);
+	b->pack_end (_pin_management_button, false, false);
+
+	b->pack_start (_latency_button, false, false, 4);
+}
+
+void
+PlugUIBase::set_latency_label ()
+{
+	samplecnt_t const l = insert->effective_latency ();
+	float const sr = insert->session().sample_rate ();
+
+	_latency_button.set_text (samples_as_time_string (l, sr, true));
 }
 
 void
 PlugUIBase::latency_button_clicked ()
 {
 	if (!latency_gui) {
-		latency_gui = new LatencyGUI (*(insert.get()), insert->session().frame_rate(), insert->session().get_block_size());
+		latency_gui = new LatencyGUI (*(insert.get()), insert->session().sample_rate(), insert->session().get_block_size());
 		latency_dialog = new ArdourWindow (_("Edit Latency"));
 		/* use both keep-above and transient for to try cover as many
 		   different WM's as possible.
 		*/
 		latency_dialog->set_keep_above (true);
-		Window* win = dynamic_cast<Window*> (bypass_button.get_toplevel ());
+		Window* win = dynamic_cast<Window*> (_bypass_button.get_toplevel ());
 		if (win) {
 			latency_dialog->set_transient_for (*win);
 		}
 		latency_dialog->add (*latency_gui);
-		latency_dialog->signal_hide().connect (sigc::mem_fun (*this, &PlugUIBase::set_latency_label));
 	}
 
+	latency_gui->refresh ();
 	latency_dialog->show_all ();
 }
 
@@ -550,7 +702,7 @@ PlugUIBase::processor_active_changed (boost::weak_ptr<Processor> weak_p)
 	boost::shared_ptr<Processor> p (weak_p.lock());
 
 	if (p) {
-		bypass_button.set_active (!p->active());
+		_bypass_button.set_active (!p->enabled ());
 	}
 }
 
@@ -568,27 +720,9 @@ PlugUIBase::preset_selected (Plugin::PresetRecord preset)
 	}
 }
 
-#ifdef NO_PLUGIN_STATE
-static bool seen_saving_message = false;
-
-static void show_no_plugin_message()
-{
-	info << string_compose (_("Plugin presets are not supported in this build of %1. Consider paying for a full version"),
-			PROGRAM_NAME)
-	     << endmsg;
-	info << _("To get full access to updates without this limitation\n"
-	          "consider becoming a subscriber for a low cost every month.")
-	     << endmsg;
-	info << X_("https://community.ardour.org/s/subscribe")
-	     << endmsg;
-	ARDOUR_UI::instance()->popup_error(_("Plugin presets are not supported in this build, see the Log window for more information."));
-}
-#endif
-
 void
 PlugUIBase::add_plugin_setting ()
 {
-#ifndef NO_PLUGIN_STATE
 	NewPluginPresetDialog d (plugin, _("New Preset"));
 
 	switch (d.run ()) {
@@ -597,59 +731,34 @@ PlugUIBase::add_plugin_setting ()
 			break;
 		}
 
-		if (d.replace ()) {
-			plugin->remove_preset (d.name ());
-		}
-
 		Plugin::PresetRecord const r = plugin->save_preset (d.name());
 		if (!r.uri.empty ()) {
-			plugin->load_preset (r);
+			plugin->Plugin::load_preset (r);
 		}
 		break;
 	}
-#else
-	if (!seen_saving_message) {
-		seen_saving_message = true;
-		show_no_plugin_message();
-	}
-#endif
 }
 
 void
 PlugUIBase::save_plugin_setting ()
 {
-#ifndef NO_PLUGIN_STATE
 	string const name = _preset_combo.get_text ();
-	plugin->remove_preset (name);
 	Plugin::PresetRecord const r = plugin->save_preset (name);
 	if (!r.uri.empty ()) {
-		plugin->load_preset (r);
+		plugin->Plugin::load_preset (r);
 	}
-#else
-	if (!seen_saving_message) {
-		seen_saving_message = true;
-		show_no_plugin_message();
-	}
-#endif
 }
 
 void
 PlugUIBase::delete_plugin_setting ()
 {
-#ifndef NO_PLUGIN_STATE
 	plugin->remove_preset (_preset_combo.get_text ());
-#else
-	if (!seen_saving_message) {
-		seen_saving_message = true;
-		show_no_plugin_message();
-	}
-#endif
 }
 
 void
 PlugUIBase::automation_state_changed ()
 {
-	reset_button.set_sensitive (insert->can_reset_all_parameters());
+	_reset_button.set_sensitive (insert->can_reset_all_parameters());
 }
 
 void
@@ -659,16 +768,57 @@ PlugUIBase::reset_plugin_parameters ()
 }
 
 bool
+PlugUIBase::has_descriptive_presets () const
+{
+	std::vector<Plugin::PresetRecord> presets = insert->plugin()->get_presets();
+	for (std::vector<Plugin::PresetRecord>::const_iterator i = presets.begin(); i != presets.end(); ++i) {
+		if (i->valid && !i->description.empty()) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void
+PlugUIBase::browse_presets ()
+{
+	if (!preset_dialog) {
+		if (preset_gui) {
+			/* Do not allow custom window, if preset_gui is used.
+			 * e.g. generic-plugin UI.
+			 */
+			return;
+		}
+		preset_dialog = new ArdourWindow (_("Select Preset"));
+		preset_dialog->set_keep_above (true);
+		Window* win = dynamic_cast<Window*> (_preset_browser_button.get_toplevel ());
+		if (win) {
+			preset_dialog->set_transient_for (*win);
+		}
+		preset_gui = new PluginPresetsUI (insert);
+		preset_dialog->add (*preset_gui);
+	}
+	preset_dialog->show_all ();
+}
+
+void
+PlugUIBase::manage_pins ()
+{
+	PluginPinWindowProxy* proxy = insert->pinmgr_proxy ();
+	if (proxy) {
+		proxy->get (true);
+		proxy->present ();
+		proxy->get ()->raise();
+	}
+}
+
+bool
 PlugUIBase::bypass_button_release (GdkEventButton*)
 {
-	bool view_says_bypassed = (bypass_button.active_state() != 0);
+	bool view_says_bypassed = (_bypass_button.active_state() != 0);
 
-	if (view_says_bypassed != insert->active()) {
-		if (view_says_bypassed) {
-			insert->activate ();
-		} else {
-			insert->deactivate ();
-		}
+	if (view_says_bypassed != insert->enabled ()) {
+		insert->enable (view_says_bypassed);
 	}
 
 	return false;
@@ -679,17 +829,17 @@ PlugUIBase::focus_toggled (GdkEventButton*)
 {
 	if (Keyboard::the_keyboard().some_magic_widget_has_focus()) {
 		Keyboard::the_keyboard().magic_widget_drop_focus();
-		focus_button.remove ();
-		focus_button.add (*focus_out_image);
-		focus_out_image->show ();
-		set_tooltip (focus_button, string_compose (_("Click to allow the plugin to receive keyboard events that %1 would normally use as a shortcut"), PROGRAM_NAME));
+		_focus_button.remove ();
+		_focus_button.add (*_focus_out_image);
+		_focus_out_image->show ();
+		set_tooltip (_focus_button, string_compose (_("Click to allow the plugin to receive keyboard events that %1 would normally use as a shortcut"), PROGRAM_NAME));
 		KeyboardFocused (false);
 	} else {
 		Keyboard::the_keyboard().magic_widget_grab_focus();
-		focus_button.remove ();
-		focus_button.add (*focus_in_image);
-		focus_in_image->show ();
-		set_tooltip (focus_button, string_compose (_("Click to allow normal use of %1 keyboard shortcuts"), PROGRAM_NAME));
+		_focus_button.remove ();
+		_focus_button.add (*_focus_in_image);
+		_focus_in_image->show ();
+		set_tooltip (_focus_button, string_compose (_("Click to allow normal use of %1 keyboard shortcuts"), PROGRAM_NAME));
 		KeyboardFocused (true);
 	}
 
@@ -714,10 +864,20 @@ PlugUIBase::toggle_description()
 	}
 
 	if (!description_expander.get_expanded()) {
+		const int child_height = description_expander.get_child ()->get_height ();
+
 		description_expander.remove();
+
+		Gtk::Window *toplevel = (Gtk::Window*) description_expander.get_ancestor (GTK_TYPE_WINDOW);
+
+		if (toplevel) {
+			Gtk::Requisition wr;
+			toplevel->get_size (wr.width, wr.height);
+			wr.height -= child_height;
+			toplevel->resize (wr.width, wr.height);
+		}
 	}
 }
-
 
 void
 PlugUIBase::toggle_plugin_analysis()
@@ -729,30 +889,57 @@ PlugUIBase::toggle_plugin_analysis()
 			eqgui = new PluginEqGui (insert);
 		}
 
-		Gtk::Window *toplevel = (Gtk::Window*) plugin_analysis_expander.get_ancestor (GTK_TYPE_WINDOW);
-
-		if (toplevel) {
-			toplevel->get_size (pre_eq_size.width, pre_eq_size.height);
-		}
-
 		plugin_analysis_expander.add (*eqgui);
 		plugin_analysis_expander.show_all ();
-		eqgui->start_listening ();
 	}
 
 	if (!plugin_analysis_expander.get_expanded()) {
 		// Hide & remove from expander
+		const int child_height = plugin_analysis_expander.get_child ()->get_height ();
 
 		eqgui->hide ();
-		eqgui->stop_listening ();
 		plugin_analysis_expander.remove();
 
 		Gtk::Window *toplevel = (Gtk::Window*) plugin_analysis_expander.get_ancestor (GTK_TYPE_WINDOW);
 
 		if (toplevel) {
-			toplevel->resize (pre_eq_size.width, pre_eq_size.height);
+			Gtk::Requisition wr;
+			toplevel->get_size (wr.width, wr.height);
+			wr.height -= child_height;
+			toplevel->resize (wr.width, wr.height);
 		}
 	}
+}
+
+void
+PlugUIBase::toggle_cpuload_display()
+{
+	if (cpuload_expander.get_expanded() && !cpuload_expander.get_child()) {
+		if (stats_gui == 0) {
+			stats_gui = new PluginLoadStatsGui (insert);
+		}
+		cpuload_expander.add (*stats_gui);
+		cpuload_expander.show_all();
+		stats_gui->start_updating ();
+	}
+
+	if (!cpuload_expander.get_expanded()) {
+		const int child_height = cpuload_expander.get_child ()->get_height ();
+
+		stats_gui->hide ();
+		stats_gui->stop_updating ();
+		cpuload_expander.remove();
+
+		Gtk::Window *toplevel = (Gtk::Window*) cpuload_expander.get_ancestor (GTK_TYPE_WINDOW);
+
+		if (toplevel) {
+			Gtk::Requisition wr;
+			toplevel->get_size (wr.width, wr.height);
+			wr.height -= child_height;
+			toplevel->resize (wr.width, wr.height);
+		}
+	}
+
 }
 
 void
@@ -792,17 +979,17 @@ PlugUIBase::update_preset ()
 	}
 	--_no_load_preset;
 
-	save_button.set_sensitive (!p.uri.empty() && p.user);
-	delete_button.set_sensitive (!p.uri.empty() && p.user);
-
+	_delete_button.set_sensitive (!p.uri.empty() && p.user);
 	update_preset_modified ();
 }
 
 void
 PlugUIBase::update_preset_modified ()
 {
+	Plugin::PresetRecord p = plugin->last_preset();
 
-	if (plugin->last_preset().uri.empty()) {
+	if (p.uri.empty()) {
+		_save_button.set_sensitive (false);
 		_preset_modified.set_text ("");
 		return;
 	}
@@ -811,6 +998,7 @@ PlugUIBase::update_preset_modified ()
 	if (_preset_modified.get_text().empty() == c) {
 		_preset_modified.set_text (c ? "*" : "");
 	}
+	_save_button.set_sensitive (c && p.user);
 }
 
 void

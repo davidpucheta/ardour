@@ -1,28 +1,29 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_vst_types_h__
 #define __ardour_vst_types_h__
 
 #include <pthread.h>
 #include "ardour/libardour_visibility.h"
-#include "ardour/vestige/aeffectx.h"
+#include "ardour/vestige/vestige.h"
 
 struct LIBARDOUR_API _VSTKey
 {
@@ -48,6 +49,7 @@ struct LIBARDOUR_API _VSTInfo
 	int    wantMidi;
 	int    wantEvents;
 	int    hasEditor;
+	int    isInstrument; // still unused
 	int    canProcessReplacing;
 
 	char** ParamNames;
@@ -67,30 +69,30 @@ struct LIBARDOUR_API _VSTHandle
 	main_entry_t main_entry;
 
 	int          plugincnt;
+#ifdef MACVST_SUPPORT
+	int32_t      res_file_id;
+#endif
 };
 
 typedef struct _VSTHandle VSTHandle;
 
 struct LIBARDOUR_API _VSTState
 {
-	AEffect* plugin;
+	AEffect*    plugin;
+	VSTHandle*  handle;
+	audioMasterCallback amc;
 
-	/* Linux */
+	void*       gtk_window_parent;
+	int         xid;                     ///< X11 XWindow (wine + lxvst)
+
+	/* LXVST/X11 */
 	int         linux_window;            ///< The plugin's parent X11 XWindow
 	int         linux_plugin_ui_window;  ///< The ID of the plugin UI window created by the plugin
+	void  (* eventProc) (void * event);  ///< X11 UI _XEventProc
 
 	/* Windows */
 	void*       windows_window;
 
-	int         xid;               ///< X11 XWindow
-
-	int         want_resize;       ///< Set to signal the plugin resized its UI
-	void*       extra_data;        ///< Pointer to any extra data
-
-	void * event_callback_thisptr;
-	void  (* eventProc) (void * event);
-
-	VSTHandle*  handle;
 
 	int width;
 	int height;
@@ -103,34 +105,43 @@ struct LIBARDOUR_API _VSTState
 	int vst_version;
 	int has_editor;
 
-	int	    program_set_without_editor;
+	int     program_set_without_editor;
+	int     want_program;
+	int     want_chunk;
+	int     n_pending_keys;
+	unsigned char* wanted_chunk;
+	int     wanted_chunk_size;
+	float*  want_params;
+	float*  set_params;
 
-	int	    want_program;
-	int 	    want_chunk;
-	int	    n_pending_keys;
-	unsigned char * wanted_chunk;
-	int 	    wanted_chunk_size;
-	float *     want_params;
-	float *     set_params;
+	VSTKey  pending_keys[16];
 
-	VSTKey	    pending_keys[16];
+	int     dispatcher_wantcall;
+	int     dispatcher_opcode;
+	int     dispatcher_index;
+	int     dispatcher_val;
+	void*   dispatcher_ptr;
+	float   dispatcher_opt;
+	int     dispatcher_retval;
 
-	int	    dispatcher_wantcall;
-	int	    dispatcher_opcode;
-	int	    dispatcher_index;
-	int	    dispatcher_val;
-	void *	    dispatcher_ptr;
-	float	    dispatcher_opt;
-	int	    dispatcher_retval;
-
-	struct _VSTState * next;
-	pthread_mutex_t    lock;
-	pthread_cond_t     window_status_change;
-	pthread_cond_t     plugin_dispatcher_called;
-	pthread_cond_t     window_created;
-	int                been_activated;
+	struct _VSTState* next;
+	pthread_mutex_t   lock;
+	pthread_mutex_t   state_lock;
+	pthread_cond_t    window_status_change;
+	pthread_cond_t    plugin_dispatcher_called;
+	pthread_cond_t    window_created;
+	int               been_activated;
 };
 
 typedef struct _VSTState VSTState;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+LIBARDOUR_API extern void vststate_init (VSTState* state);
+LIBARDOUR_API extern void vststate_maybe_set_program (VSTState* state);
+#ifdef __cplusplus
+}
+#endif
 
 #endif

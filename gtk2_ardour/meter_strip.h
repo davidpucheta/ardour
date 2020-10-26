@@ -1,54 +1,61 @@
 /*
-    Copyright (C) 2013 Paul Davis
-    Author: Robin Gareus
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_meter_strip__
 #define __ardour_meter_strip__
 
 #include <vector>
-
 #include <cmath>
+
+#include <gtkmm/alignment.h>
+#include <gtkmm/box.h>
+#include <gtkmm/drawingarea.h>
+#include <gtkmm/eventbox.h>
+#include <gtkmm/separator.h>
 
 #include "pbd/stateful.h"
 
 #include "ardour/types.h"
 #include "ardour/ardour.h"
-#include "route_ui.h"
-#include "ardour_button.h"
+
+#include "widgets/ardour_button.h"
 
 #include "level_meter.h"
+#include "route_ui.h"
 
 namespace ARDOUR {
 	class Route;
 	class RouteGroup;
 	class Session;
 }
-namespace Gtk {
-	class Window;
-	class Style;
-}
 
-class MeterStrip : public Gtk::VBox, public RouteUI
+class MeterStrip : public Gtk::VBox, public AxisView, public RouteUI
 {
-  public:
+public:
 	MeterStrip (ARDOUR::Session*, boost::shared_ptr<ARDOUR::Route>);
 	MeterStrip (int, ARDOUR::MeterType);
 	~MeterStrip ();
+
+	std::string name() const;
+	Gdk::Color color () const;
+
+	boost::shared_ptr<ARDOUR::Stripable> stripable() const { return RouteUI::stripable(); }
 
 	void set_session (ARDOUR::Session* s);
 	void fast_update ();
@@ -72,7 +79,9 @@ class MeterStrip : public Gtk::VBox, public RouteUI
 	bool is_metric_display() { return _strip_type == 0; }
 	ARDOUR::MeterType meter_type();
 
-  protected:
+	bool selected() const { return false; }
+
+protected:
 	boost::shared_ptr<ARDOUR::Route> _route;
 	PBD::ScopedConnectionList meter_route_connections;
 	PBD::ScopedConnectionList level_meter_connection;
@@ -92,7 +101,7 @@ class MeterStrip : public Gtk::VBox, public RouteUI
 	std::string state_id() const;
 	void set_button_names ();
 
-  private:
+private:
 	Gtk::VBox mtr_vbox;
 	Gtk::VBox nfo_vbox;
 	Gtk::EventBox mtr_container;
@@ -101,8 +110,8 @@ class MeterStrip : public Gtk::VBox, public RouteUI
 	Gtk::HBox spacer;
 	Gtk::HBox namebx;
 	Gtk::VBox namenumberbx;
-	ArdourButton name_label;
-	ArdourButton number_label;
+	ArdourWidgets::ArdourButton name_label;
+	ArdourWidgets::ArdourButton number_label;
 	Gtk::DrawingArea meter_metric_area;
 	Gtk::DrawingArea meter_ticks1_area;
 	Gtk::DrawingArea meter_ticks2_area;
@@ -117,12 +126,13 @@ class MeterStrip : public Gtk::VBox, public RouteUI
 	Gtk::Alignment peak_align;
 	Gtk::HBox peakbx;
 	Gtk::VBox btnbox;
-	ArdourButton peak_display;
+	ArdourWidgets::ArdourButton peak_display;
 
 	std::vector<ARDOUR::DataType> _types;
 	ARDOUR::MeterType metric_type;
 
-	float max_peak;
+	bool _clear_meters;
+	bool _meter_peaked;
 	bool _has_midi;
 	int _tick_bar;
 	int _strip_type;
@@ -130,7 +140,7 @@ class MeterStrip : public Gtk::VBox, public RouteUI
 
 	LevelMeterHBox *level_meter;
 
-	void strip_property_changed (const PBD::PropertyChange&);
+	void route_property_changed (const PBD::PropertyChange&);
 	void meter_configuration_changed (ARDOUR::ChanCount);
 	void meter_type_changed (ARDOUR::MeterType);
 	void update_background (ARDOUR::MeterType);

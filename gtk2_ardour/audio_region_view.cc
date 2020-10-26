@@ -1,20 +1,27 @@
 /*
-    Copyright (C) 2001-2006 Paul Davis
-
-    This program is free software; you can r>edistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2014-2015 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2014-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <cassert>
@@ -25,8 +32,6 @@
 
 #include <gtkmm.h>
 
-#include <gtkmm2ext/gtk_ui.h>
-
 #include "ardour/playlist.h"
 #include "ardour/audioregion.h"
 #include "ardour/audiosource.h"
@@ -36,7 +41,11 @@
 #include "pbd/memento_command.h"
 #include "pbd/stacktrace.h"
 
-#include "evoral/Curve.hpp"
+#include "evoral/Curve.h"
+
+#include "gtkmm2ext/gtk_ui.h"
+#include "gtkmm2ext/utils.h"
+#include "gtkmm2ext/colors.h"
 
 #include "canvas/rectangle.h"
 #include "canvas/polygon.h"
@@ -45,12 +54,13 @@
 #include "canvas/text.h"
 #include "canvas/xfade_curve.h"
 #include "canvas/debug.h"
-#include "canvas/utils.h"
-#include "canvas/colors.h"
+
+#include "waveview/debug.h"
 
 #include "streamview.h"
 #include "audio_region_view.h"
 #include "audio_time_axis.h"
+#include "enums_convert.h"
 #include "public_editor.h"
 #include "audio_region_editor.h"
 #include "audio_streamview.h"
@@ -62,9 +72,7 @@
 #include "gui_thread.h"
 #include "ui_config.h"
 
-#include "i18n.h"
-
-#define MUTED_ALPHA 48
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -183,7 +191,7 @@ AudioRegionView::init (bool wfd)
 	// needs to be created first, RegionView::init() calls set_height()
 	pending_peak_data = new ArdourCanvas::Rectangle (group);
 	CANVAS_DEBUG_NAME (pending_peak_data, string_compose ("pending peak rectangle for %1", region()->name()));
-	pending_peak_data->set_outline_color (ArdourCanvas::rgba_to_color (0, 0, 0, 0.0));
+	pending_peak_data->set_outline_color (Gtkmm2ext::rgba_to_color (0, 0, 0, 0.0));
 	pending_peak_data->set_pattern (pending_peak_pattern);
 	pending_peak_data->set_data ("regionview", this);
 	pending_peak_data->hide ();
@@ -197,28 +205,28 @@ AudioRegionView::init (bool wfd)
 	if (!_recregion) {
 		fade_in_handle = new ArdourCanvas::Rectangle (group);
 		CANVAS_DEBUG_NAME (fade_in_handle, string_compose ("fade in handle for %1", region()->name()));
-		fade_in_handle->set_outline_color (ArdourCanvas::rgba_to_color (0, 0, 0, 1.0));
+		fade_in_handle->set_outline_color (Gtkmm2ext::rgba_to_color (0, 0, 0, 1.0));
 		fade_in_handle->set_fill_color (UIConfiguration::instance().color ("inactive fade handle"));
 		fade_in_handle->set_data ("regionview", this);
 		fade_in_handle->hide ();
 
 		fade_out_handle = new ArdourCanvas::Rectangle (group);
 		CANVAS_DEBUG_NAME (fade_out_handle, string_compose ("fade out handle for %1", region()->name()));
-		fade_out_handle->set_outline_color (ArdourCanvas::rgba_to_color (0, 0, 0, 1.0));
+		fade_out_handle->set_outline_color (Gtkmm2ext::rgba_to_color (0, 0, 0, 1.0));
 		fade_out_handle->set_fill_color (UIConfiguration::instance().color ("inactive fade handle"));
 		fade_out_handle->set_data ("regionview", this);
 		fade_out_handle->hide ();
 
 		fade_in_trim_handle = new ArdourCanvas::Rectangle (group);
 		CANVAS_DEBUG_NAME (fade_in_handle, string_compose ("fade in trim handle for %1", region()->name()));
-		fade_in_trim_handle->set_outline_color (ArdourCanvas::rgba_to_color (0, 0, 0, 1.0));
+		fade_in_trim_handle->set_outline_color (Gtkmm2ext::rgba_to_color (0, 0, 0, 1.0));
 		fade_in_trim_handle->set_fill_color (UIConfiguration::instance().color ("inactive fade handle"));
 		fade_in_trim_handle->set_data ("regionview", this);
 		fade_in_trim_handle->hide ();
 
 		fade_out_trim_handle = new ArdourCanvas::Rectangle (group);
 		CANVAS_DEBUG_NAME (fade_out_handle, string_compose ("fade out trim handle for %1", region()->name()));
-		fade_out_trim_handle->set_outline_color (ArdourCanvas::rgba_to_color (0, 0, 0, 1.0));
+		fade_out_trim_handle->set_outline_color (Gtkmm2ext::rgba_to_color (0, 0, 0, 1.0));
 		fade_out_trim_handle->set_fill_color (UIConfiguration::instance().color ("inactive fade handle"));
 		fade_out_trim_handle->set_data ("regionview", this);
 		fade_out_trim_handle->hide ();
@@ -231,23 +239,24 @@ AudioRegionView::init (bool wfd)
 	}
 
 	const string line_name = _region->name() + ":gain";
+
 	gain_line.reset (new AudioRegionGainLine (line_name, *this, *group, audio_region()->envelope()));
 
 	update_envelope_visibility ();
 	gain_line->reset ();
 
-	set_height (trackview.current_height()); // XXX not correct for Layered mode, but set_height() will fix later.
+	/* streamview will call set_height() */
+	//set_height (trackview.current_height()); // XXX not correct for Layered mode, but set_height() will fix later.
 
 	region_muted ();
 	region_sync_changed ();
 
 	region_resized (ARDOUR::bounds_change);
+	/* region_resized sets ghost region duration */
 
-	for (vector<GhostRegion*>::iterator i = ghosts.begin(); i != ghosts.end(); ++i) {
-		(*i)->set_duration (_region->length() / samples_per_pixel);
-	}
+	/* region_locked is a synonym for region_renamed () which is called in region_muted() above */
+	//region_locked ();
 
-	region_locked ();
 	envelope_active_changed ();
 	fade_in_active_changed ();
 	fade_out_active_changed ();
@@ -274,15 +283,6 @@ AudioRegionView::init (bool wfd)
 
 	setup_waveform_visibility ();
 
-	pending_peak_data->raise_to_top ();
-
-	if (frame_handle_start) {
-		frame_handle_start->raise_to_top ();
-	}
-	if (frame_handle_end) {
-		frame_handle_end->raise_to_top ();
-	}
-
 	/* XXX sync mark drag? */
 }
 
@@ -297,7 +297,7 @@ AudioRegionView::~AudioRegionView ()
 	}
 	_data_ready_connections.clear ();
 
-	for (list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator i = feature_lines.begin(); i != feature_lines.end(); ++i) {
+	for (list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator i = feature_lines.begin(); i != feature_lines.end(); ++i) {
 		delete ((*i).second);
 	}
 
@@ -386,6 +386,7 @@ AudioRegionView::region_scale_amplitude_changed ()
 	for (uint32_t n = 0; n < waves.size(); ++n) {
 		waves[n]->gain_changed ();
 	}
+	region_renamed ();
 }
 
 void
@@ -393,12 +394,20 @@ AudioRegionView::region_renamed ()
 {
 	std::string str = RegionView::make_name ();
 
-	if (audio_region()->speed_mismatch (trackview.session()->frame_rate())) {
+	if (audio_region()->speed_mismatch (trackview.session()->sample_rate())) {
 		str = string ("*") + str;
 	}
 
 	if (_region->muted()) {
 		str = string ("!") + str;
+	}
+
+
+	boost::shared_ptr<AudioRegion> ar (audio_region());
+	if (ar->scale_amplitude() != 1.0) {
+		char tmp[32];
+		snprintf (tmp, 32, " (%.1fdB)", accurate_coefficient_to_dB (ar->scale_amplitude()));
+		str += tmp;
 	}
 
 	set_item_name (str, this);
@@ -425,16 +434,16 @@ AudioRegionView::region_resized (const PropertyChange& what_changed)
 		for (vector<GhostRegion*>::iterator i = ghosts.begin(); i != ghosts.end(); ++i) {
 			if ((agr = dynamic_cast<AudioGhostRegion*>(*i)) != 0) {
 
-				for (vector<WaveView*>::iterator w = agr->waves.begin(); w != agr->waves.end(); ++w) {
+				for (vector<ArdourWaveView::WaveView*>::iterator w = agr->waves.begin(); w != agr->waves.end(); ++w) {
 					(*w)->region_resized ();
 				}
 			}
 		}
 
 		/* hide transient lines that extend beyond the region */
-		list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator l;
-		framepos_t first = _region->first_frame();
-		framepos_t last = _region->last_frame();
+		list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
+		samplepos_t first = _region->first_sample();
+		samplepos_t last = _region->last_sample();
 
 		for (l = feature_lines.begin(); l != feature_lines.end(); ++l) {
 			if (l->first < first || l->first >= last) {
@@ -449,6 +458,10 @@ AudioRegionView::region_resized (const PropertyChange& what_changed)
 void
 AudioRegionView::reset_width_dependent_items (double pixel_width)
 {
+	if (pixel_width == _width) {
+		return;
+	}
+
 	RegionView::reset_width_dependent_items(pixel_width);
 	assert(_pixel_width == pixel_width);
 
@@ -475,10 +488,10 @@ AudioRegionView::reset_width_dependent_items (double pixel_width)
 		return;
 	}
 
-	framepos_t position = _region->position();
+	samplepos_t position = _region->position();
 
 	AnalysisFeatureList::const_iterator i;
-	list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator l;
+	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 	double y1;
 	if (_height >= NAME_HIGHLIGHT_THRESH) {
 		y1 = _height - TimeAxisViewItem::NAME_HIGHLIGHT_SIZE - 1;
@@ -530,6 +543,18 @@ AudioRegionView::setup_fade_handle_positions()
 void
 AudioRegionView::set_height (gdouble height)
 {
+	uint32_t gap = UIConfiguration::instance().get_vertical_region_gap ();
+	float ui_scale = UIConfiguration::instance().get_ui_scale ();
+	if (gap > 0 && ui_scale > 0) {
+		gap = ceil (gap * ui_scale);
+	}
+
+	height = std::max (3.0, height - gap);
+
+	if (height == _height) {
+		return;
+	}
+
 	RegionView::set_height (height);
 	pending_peak_data->set_y1 (height);
 
@@ -568,8 +593,8 @@ AudioRegionView::set_height (gdouble height)
 	reset_fade_shapes ();
 
 	/* Update heights for any feature lines */
-	framepos_t position = _region->position();
-	list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator l;
+	samplepos_t position = _region->position();
+	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 	double y1;
 	if (_height >= NAME_HIGHLIGHT_THRESH) {
 		y1 = _height - TimeAxisViewItem::NAME_HIGHLIGHT_SIZE - 1;
@@ -599,20 +624,20 @@ AudioRegionView::reset_fade_shapes ()
 void
 AudioRegionView::reset_fade_in_shape ()
 {
-	reset_fade_in_shape_width (audio_region(), (framecnt_t) audio_region()->fade_in()->back()->when);
+	reset_fade_in_shape_width (audio_region(), (samplecnt_t) audio_region()->fade_in()->back()->when);
 }
 
 void
-AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, framecnt_t width, bool drag_active)
+AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, samplecnt_t width, bool drag_active)
 {
 	trim_fade_in_drag_active = drag_active;
 	if (fade_in_handle == 0) {
 		return;
 	}
 
-	/* smallest size for a fade is 64 frames */
+	/* smallest size for a fade is 64 samples */
 
-	width = std::max ((framecnt_t) 64, width);
+	width = std::max ((samplecnt_t) 64, width);
 
 	/* round here to prevent little visual glitches with sub-pixel placement */
 	double const pwidth = floor (width / samples_per_pixel);
@@ -678,20 +703,20 @@ AudioRegionView::reset_fade_in_shape_width (boost::shared_ptr<AudioRegion> ar, f
 void
 AudioRegionView::reset_fade_out_shape ()
 {
-	reset_fade_out_shape_width (audio_region(), (framecnt_t) audio_region()->fade_out()->back()->when);
+	reset_fade_out_shape_width (audio_region(), (samplecnt_t) audio_region()->fade_out()->back()->when);
 }
 
 void
-AudioRegionView::reset_fade_out_shape_width (boost::shared_ptr<AudioRegion> ar, framecnt_t width, bool drag_active)
+AudioRegionView::reset_fade_out_shape_width (boost::shared_ptr<AudioRegion> ar, samplecnt_t width, bool drag_active)
 {
 	trim_fade_out_drag_active = drag_active;
 	if (fade_out_handle == 0) {
 		return;
 	}
 
-	/* smallest size for a fade is 64 frames */
+	/* smallest size for a fade is 64 samples */
 
-	width = std::max ((framecnt_t) 64, width);
+	width = std::max ((samplecnt_t) 64, width);
 
 
 	double const pwidth = floor(trackview.editor().sample_to_pixel (width));
@@ -761,13 +786,13 @@ AudioRegionView::reset_fade_out_shape_width (boost::shared_ptr<AudioRegion> ar, 
 	}
 }
 
-framepos_t
+samplepos_t
 AudioRegionView::get_fade_in_shape_width ()
 {
 	return audio_region()->fade_in()->back()->when;
 }
 
-framepos_t
+samplepos_t
 AudioRegionView::get_fade_out_shape_width ()
 {
 	return audio_region()->fade_out()->back()->when;
@@ -788,7 +813,7 @@ AudioRegionView::redraw_start_xfade ()
 }
 
 void
-AudioRegionView::redraw_start_xfade_to (boost::shared_ptr<AudioRegion> ar, framecnt_t /*width*/, Points& points, double effective_height,
+AudioRegionView::redraw_start_xfade_to (boost::shared_ptr<AudioRegion> ar, samplecnt_t /*width*/, Points& points, double effective_height,
 					double rect_width)
 {
 	if (points.size() < 2) {
@@ -877,8 +902,8 @@ AudioRegionView::redraw_end_xfade ()
 }
 
 void
-AudioRegionView::redraw_end_xfade_to (boost::shared_ptr<AudioRegion> ar, framecnt_t width, Points& points, double effective_height,
-				      double rect_edge, double rect_width)
+AudioRegionView::redraw_end_xfade_to (boost::shared_ptr<AudioRegion> ar, samplecnt_t width, Points& points, double effective_height,
+                                      double rect_edge, double rect_width)
 {
 	if (points.size() < 2) {
 		return;
@@ -1129,11 +1154,16 @@ AudioRegionView::delete_waves ()
 	}
 	_data_ready_connections.clear ();
 
-	for (vector<WaveView*>::iterator w = waves.begin(); w != waves.end(); ++w) {
+	for (vector<ArdourWaveView::WaveView*>::iterator w = waves.begin(); w != waves.end(); ++w) {
 		group->remove(*w);
+		delete *w;
 	}
 	waves.clear();
-	tmp_waves.clear();
+
+	while (!tmp_waves.empty ()) {
+		delete tmp_waves.back ();
+		tmp_waves.pop_back ();
+	}
 	pending_peak_data->show ();
 }
 
@@ -1221,13 +1251,10 @@ AudioRegionView::create_one_wave (uint32_t which, bool /*direct*/)
 		ht = (_height - NAME_HIGHLIGHT_SIZE) / (double) nchans;
 	}
 
-	/* first waveview starts at 1.0, not 0.0 since that will overlap the
-	 * frame
-	 */
-
+	/* first waveview starts at 1.0, not 0.0 since that will overlap the frame */
 	gdouble yoff = which * ht;
 
-	WaveView *wave = new WaveView (group, audio_region ());
+	ArdourWaveView::WaveView *wave = new ArdourWaveView::WaveView (group, audio_region ());
 	CANVAS_DEBUG_NAME (wave, string_compose ("wave view for chn %1 of %2", which, get_item_name()));
 
 	wave->set_channel (which);
@@ -1242,15 +1269,15 @@ AudioRegionView::create_one_wave (uint32_t which, bool /*direct*/)
 
 	switch (UIConfiguration::instance().get_waveform_shape()) {
 	case Rectified:
-		wave->set_shape (WaveView::Rectified);
+		wave->set_shape (ArdourWaveView::WaveView::Rectified);
 		break;
 	default:
-		wave->set_shape (WaveView::Normal);
+		wave->set_shape (ArdourWaveView::WaveView::Normal);
 	}
 
 	wave->set_logscaled (UIConfiguration::instance().get_waveform_scale() == Logarithmic);
 
-	vector<ArdourCanvas::WaveView*> v;
+	vector<ArdourWaveView::WaveView*> v;
 	v.push_back (wave);
 	set_some_waveform_colors (v);
 
@@ -1282,18 +1309,21 @@ AudioRegionView::create_one_wave (uint32_t which, bool /*direct*/)
 		/* all waves are ready */
 		tmp_waves.resize(nwaves);
 
-		waves = tmp_waves;
-		tmp_waves.clear ();
+		waves.swap(tmp_waves);
+
+		while (!tmp_waves.empty ()) {
+			delete tmp_waves.back ();
+			tmp_waves.pop_back ();
+		}
 
 		/* indicate peak-completed */
 		pending_peak_data->hide ();
 
 		/* Restore stacked coverage */
-		std::string str = trackview.gui_property ("layer-display");
-		if (!str.empty()) {
-			LayerDisplay layer_display;
-			update_coverage_frames (LayerDisplay (string_2_enum (str, layer_display)));
-		}
+		LayerDisplay layer_display;
+		if (trackview.get_gui_property ("layer-display", layer_display)) {
+			update_coverage_frame (layer_display);
+	  }
 	}
 
 	/* channel wave created, don't hook into peaks ready anymore */
@@ -1321,14 +1351,14 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 
 	item->canvas_to_item (mx, my);
 
-	framecnt_t const frame_within_region = (framecnt_t) floor (mx * samples_per_pixel);
+	samplecnt_t const sample_within_region = (samplecnt_t) floor (mx * samples_per_pixel);
 
-	if (!gain_line->control_points_adjacent (frame_within_region, before_p, after_p)) {
+	if (!gain_line->control_points_adjacent (sample_within_region, before_p, after_p)) {
 		/* no adjacent points */
 		return;
 	}
 
-	/*y is in item frame */
+	/* y is in item frame */
 	double const bx = gain_line->nth (before_p)->get_x();
 	double const ax = gain_line->nth (after_p)->get_x();
 	double const click_ratio = (ax - mx) / (ax - bx);
@@ -1338,11 +1368,10 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 	/* don't create points that can't be seen */
 
 	update_envelope_visibility ();
-
-	framepos_t rpos = region ()->position ();
-	framepos_t fx = trackview.editor().pixel_to_sample (mx) + rpos;
-	trackview.editor ().snap_to_with_modifier (fx, ev);
-	fx -= rpos;
+	samplepos_t rpos = region ()->position ();
+	MusicSample snap_pos (trackview.editor().pixel_to_sample (mx) + rpos, 0);
+	trackview.editor ().snap_to_with_modifier (snap_pos, ev);
+	samplepos_t fx = snap_pos.sample - rpos;
 
 	if (fx > _region->length()) {
 		return;
@@ -1387,6 +1416,8 @@ AudioRegionView::add_gain_point_event (ArdourCanvas::Item *item, GdkEvent *ev, b
 
 		trackview.editor ().commit_reversible_command ();
 		trackview.session ()->set_dirty ();
+	} else {
+		delete region_memento;
 	}
 }
 
@@ -1401,7 +1432,10 @@ GhostRegion*
 AudioRegionView::add_ghost (TimeAxisView& tv)
 {
 	RouteTimeAxisView* rtv = dynamic_cast<RouteTimeAxisView*>(&trackview);
-	assert(rtv);
+
+	if (!rtv) {
+		return 0;
+	}
 
 	double unit_position = _region->position () / samples_per_pixel;
 	AudioGhostRegion* ghost = new AudioGhostRegion (*this, tv, trackview, unit_position);
@@ -1415,7 +1449,7 @@ AudioRegionView::add_ghost (TimeAxisView& tv)
 			break;
 		}
 
-		WaveView *wave = new WaveView (ghost->group, audio_region());
+		ArdourWaveView::WaveView *wave = new ArdourWaveView::WaveView (ghost->group, audio_region());
 		CANVAS_DEBUG_NAME (wave, string_compose ("ghost wave for %1", get_item_name()));
 
 		wave->set_channel (n);
@@ -1535,39 +1569,42 @@ AudioRegionView::set_waveform_colors ()
 }
 
 void
-AudioRegionView::set_some_waveform_colors (vector<ArdourCanvas::WaveView*>& waves_to_color)
+AudioRegionView::set_some_waveform_colors (vector<ArdourWaveView::WaveView*>& waves_to_color)
 {
-	ArdourCanvas::Color fill;
-	ArdourCanvas::Color outline;
-	ArdourCanvas::Color clip = UIConfiguration::instance().color ("clipped waveform");
-	ArdourCanvas::Color zero = UIConfiguration::instance().color ("zero line");
+	Gtkmm2ext::Color fill = fill_color;
+	Gtkmm2ext::Color outline = fill;
+
+	Gtkmm2ext::Color clip = UIConfiguration::instance().color ("clipped waveform");
+	Gtkmm2ext::Color zero = UIConfiguration::instance().color ("zero line");
+
+	/* use track/region color to fill wform */
+	fill = fill_color;
+	fill = UINT_INTERPOLATE (fill, UIConfiguration::instance().color ("waveform fill"), 0.5);
+
+	/* set outline */
+	outline = UIConfiguration::instance().color ("waveform outline");
 
 	if (_selected) {
-		if (_region->muted()) {
-			/* hide outline with zero alpha */
-			outline = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("selected waveform outline"), 0);
-			fill = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("selected waveform fill"), MUTED_ALPHA);
-		} else {
-			outline = UIConfiguration::instance().color ("selected waveform outline");
-			fill = UIConfiguration::instance().color ("selected waveform fill");
-		}
-	} else {
-		if (_recregion) {
-			outline = UIConfiguration::instance().color ("recording waveform outline");
-			fill = UIConfiguration::instance().color ("recording waveform fill");
-		} else {
-			if (_region->muted()) {
-				/* hide outline with zero alpha */
-				outline = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform outline"), 0);
-				fill = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform fill"), MUTED_ALPHA);
-			} else {
-				outline = UIConfiguration::instance().color ("waveform outline");
-				fill = UIConfiguration::instance().color ("waveform fill");
-			}
-		}
+		outline = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("selected waveform outline"), 0xC0);
+		fill = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("selected waveform fill"), 0xC0);
+	} else if (_dragging) {
+		outline = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform outline"), 0xC0);
+		fill = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform fill"), 0xC0);
+	} else if (_region->muted()) {
+		outline = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform outline"), 80);
+		fill = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform fill"), 0);
+	} else if (!_region->opaque()) {
+		outline = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform outline"), 70);
+		fill = UINT_RGBA_CHANGE_A(UIConfiguration::instance().color ("waveform fill"), 70);
 	}
 
-        for (vector<ArdourCanvas::WaveView*>::iterator w = waves_to_color.begin(); w != waves_to_color.end(); ++w) {
+	/* recorded region, override to red */
+	if (_recregion) {
+		outline = UIConfiguration::instance().color ("recording waveform outline");
+		fill = UIConfiguration::instance().color ("recording waveform fill");
+	}
+
+	for (vector<ArdourWaveView::WaveView*>::iterator w = waves_to_color.begin(); w != waves_to_color.end(); ++w) {
 		(*w)->set_fill_color (fill);
 		(*w)->set_outline_color (outline);
 		(*w)->set_clip_color (clip);
@@ -1610,14 +1647,16 @@ AudioRegionView::set_fade_visibility (bool yn)
 }
 
 void
-AudioRegionView::update_coverage_frames (LayerDisplay d)
+AudioRegionView::update_coverage_frame (LayerDisplay d)
 {
-	RegionView::update_coverage_frames (d);
+	RegionView::update_coverage_frame (d);
 
-	if (fade_in_handle)       { fade_in_handle->raise_to_top (); }
-	if (fade_out_handle)      { fade_out_handle->raise_to_top (); }
-	if (fade_in_trim_handle)  { fade_in_trim_handle->raise_to_top (); }
-	if (fade_out_trim_handle) { fade_out_trim_handle->raise_to_top (); }
+	if (d == Stacked) {
+		if (fade_in_handle)       { fade_in_handle->raise_to_top (); }
+		if (fade_out_handle)      { fade_out_handle->raise_to_top (); }
+		if (fade_in_trim_handle)  { fade_in_trim_handle->raise_to_top (); }
+		if (fade_out_trim_handle) { fade_out_trim_handle->raise_to_top (); }
+	}
 }
 
 void
@@ -1636,9 +1675,9 @@ AudioRegionView::transients_changed ()
 {
 	AnalysisFeatureList analysis_features;
 	_region->transients (analysis_features);
-	framepos_t position = _region->position();
-	framepos_t first = _region->first_frame();
-	framepos_t last = _region->last_frame();
+	samplepos_t position = _region->position();
+	samplepos_t first = _region->first_sample();
+	samplepos_t last = _region->last_sample();
 
 	double y1;
 	if (_height >= NAME_HIGHLIGHT_THRESH) {
@@ -1671,7 +1710,7 @@ AudioRegionView::transients_changed ()
 	}
 
 	AnalysisFeatureList::const_iterator i;
-	list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator l;
+	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 
 	for (i = analysis_features.begin(), l = feature_lines.begin(); i != analysis_features.end() && l != feature_lines.end(); ++i, ++l) {
 
@@ -1697,8 +1736,8 @@ AudioRegionView::transients_changed ()
 void
 AudioRegionView::update_transient(float /*old_pos*/, float new_pos)
 {
-	/* Find frame at old pos, calulate new frame then update region transients*/
-	list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator l;
+	/* Find sample at old pos, calulate new sample then update region transients*/
+	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 
 	for (l = feature_lines.begin(); l != feature_lines.end(); ++l) {
 
@@ -1707,11 +1746,11 @@ AudioRegionView::update_transient(float /*old_pos*/, float new_pos)
 		float* pos = (float*) (*l).second->get_data ("position");
 
 		if (rint(new_pos) == rint(*pos)) {
-				framepos_t position = _region->position();
-		    framepos_t old_frame = (*l).first;
-		    framepos_t new_frame = trackview.editor().pixel_to_sample (new_pos) + position;
-		    _region->update_transient (old_frame, new_frame);
-		    break;
+			samplepos_t position = _region->position();
+			samplepos_t old_sample = (*l).first;
+			samplepos_t new_sample = trackview.editor().pixel_to_sample (new_pos) + position;
+			_region->update_transient (old_sample, new_sample);
+			break;
 		}
 	}
 }
@@ -1722,15 +1761,15 @@ AudioRegionView::remove_transient (float pos)
 	/* this is called from Editor::remove_transient () with pos == get_data ("position")
 	 * which is the item's x-coordinate inside the ARV.
 	 *
-	 * Find frame at old pos, calulate new frame then update region transients
+	 * Find sample at old pos, calulate new sample then update region transients
 	 */
-	list<std::pair<framepos_t, ArdourCanvas::Line*> >::iterator l;
+	list<std::pair<samplepos_t, ArdourCanvas::Line*> >::iterator l;
 
 	for (l = feature_lines.begin(); l != feature_lines.end(); ++l) {
 		float *line_pos = (float*) (*l).second->get_data ("position");
 		if (rint(pos) == rint(*line_pos)) {
-		    _region->remove_transient ((*l).first);
-		    break;
+			_region->remove_transient ((*l).first);
+			break;
 		}
 	}
 }

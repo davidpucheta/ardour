@@ -26,7 +26,7 @@ using namespace std;
 using namespace sigc;
 using namespace PBD;
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include <pbd/abstract_ui.cc>
 // HA, I don't need this anymore
@@ -181,7 +181,7 @@ TranzportControlProtocol::update_state ()
 void
 TranzportControlProtocol::prev_marker ()
 {
-	Location *location = session->locations()->first_location_before (session->transport_frame());
+	Location *location = session->locations()->first_location_before (session->transport_sample());
 
 	if (location) {
 		session->request_locate (location->start(), session->transport_rolling());
@@ -196,13 +196,13 @@ TranzportControlProtocol::prev_marker ()
 void
 TranzportControlProtocol::next_marker ()
 {
-	Location *location = session->locations()->first_location_after (session->transport_frame());
+	Location *location = session->locations()->first_location_after (session->transport_sample());
 
 	if (location) {
 		session->request_locate (location->start(), session->transport_rolling());
 		notify(location->name().c_str());
 	} else {
-		session->request_locate (session->current_end_frame());
+		session->request_locate (session->current_end_sample());
 		notify("END ");
 	}
 }

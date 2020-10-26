@@ -1,43 +1,45 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <algorithm>
 #include <sigc++/bind.h>
 #include "ardour/tempo.h"
 
 #include "pbd/file_utils.h"
-#include "pbd/convert.h"
+#include "pbd/types_convert.h"
+#include "ardour/filesystem_paths.h"
 #include "ardour/session_directory.h"
 
 #include "ardour_ui.h"
+#include "ardour_http.h"
 #include "public_editor.h"
 #include "gui_thread.h"
 #include "utils_videotl.h"
 #include "rgb_macros.h"
 #include "video_timeline.h"
-#include "video_tool_paths.h"
 
 #include <gtkmm2ext/utils.h>
 #include <pthread.h>
 #include <curl/curl.h>
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -47,8 +49,8 @@ using namespace VideoUtils;
 
 VideoTimeLine::VideoTimeLine (PublicEditor *ed, ArdourCanvas::Container *vbg, int initial_height)
 	: editor (ed)
-		, videotl_group(vbg)
-		, bar_height(initial_height)
+	, videotl_group(vbg)
+	, bar_height(initial_height)
 {
 	video_start_offset = 0L;
 	video_offset = 0L;
@@ -58,15 +60,16 @@ VideoTimeLine::VideoTimeLine (PublicEditor *ed, ArdourCanvas::Container *vbg, in
 	video_offset_lock = false;
 	video_aspect_ratio = 4.0/3.0;
 	Config->ParameterChanged.connect (*this, invalidator (*this), ui_bind (&VideoTimeLine::parameter_changed, this, _1), gui_context());
-	video_server_url = video_get_server_url(Config);
-	server_docroot   = video_get_docroot(Config);
 	video_filename = "";
 	local_file = true;
 	video_file_fps = 25.0;
-	flush_frames = false;
+	_flush_frames = false;
 	vmonitor=0;
 	reopen_vmonitor=false;
 	find_xjadeo();
+	find_harvid();
+	video_server_url = video_get_server_url(Config);
+	server_docroot   = video_get_docroot(Config);
 
 	VtlUpdate.connect (*this, invalidator (*this), boost::bind (&PublicEditor::queue_visual_videotimeline_update, editor), gui_context());
 	GuiUpdate.connect (*this, invalidator (*this), boost::bind (&VideoTimeLine::gui_update, this, _1), gui_context());
@@ -85,11 +88,9 @@ VideoTimeLine::save_session ()
 		return;
 	}
 
-	LocaleGuard lg (X_("C"));
-
 	XMLNode* node = new XMLNode(X_("Videomonitor"));
 	if (!node) return;
-	node->add_property (X_("active"), (vmonitor && vmonitor->is_started())?"yes":"no");
+	node->set_property (X_("active"), (vmonitor && vmonitor->is_started()));
 	_session->add_extra_xml (*node);
 
 	if (vmonitor) {
@@ -102,11 +103,11 @@ VideoTimeLine::save_session ()
 	/* VTL settings */
 	node = _session->extra_xml (X_("Videotimeline"));
 	if (!node) return;
-	node->add_property (X_("id"), id().to_s());
-	node->add_property (X_("Height"), editor->get_videotl_bar_height());
-	node->add_property (X_("VideoOffsetLock"), video_offset_lock?X_("1"):X_("0"));
-	node->add_property (X_("VideoOffset"), video_offset);
-	node->add_property (X_("AutoFPS"), auto_set_session_fps?X_("1"):X_("0"));
+	node->set_property (X_("id"), id());
+	node->set_property (X_("Height"), editor->get_videotl_bar_height());
+	node->set_property (X_("VideoOffsetLock"), video_offset_lock);
+	node->set_property (X_("VideoOffset"), video_offset);
+	node->set_property (X_("AutoFPS"), auto_set_session_fps);
 }
 
 /* close and save settings */
@@ -119,7 +120,7 @@ VideoTimeLine::close_session ()
 	sessionsave.disconnect();
 	close_video_monitor();
 
-	remove_frames();
+	remove_frames ();
 	video_filename = "";
 	video_duration = 0;
 	GuiUpdate("set-xjadeo-sensitive-off");
@@ -143,7 +144,6 @@ VideoTimeLine::set_session (ARDOUR::Session *s)
 	if (!_session) { return ; }
 
 	_session->SessionSaveUnderway.connect_same_thread (sessionsave, boost::bind (&VideoTimeLine::save_session, this));
-	LocaleGuard lg (X_("C"));
 
 	XMLNode* node = _session->extra_xml (X_("Videotimeline"));
 
@@ -155,39 +155,33 @@ VideoTimeLine::set_session (ARDOUR::Session *s)
 
 	set_id(*node);
 
-	const XMLProperty* proph = node->property (X_("Height"));
-	if (proph) {
-		editor->set_video_timeline_height(atoi(proph->value()));
+	int height;
+	if (node->get_property (X_("Height"), height)) {
+		editor->set_video_timeline_height(height);
 	}
 #if 0 /* TODO THINK: set FPS first time only ?! */
-	const XMLProperty* propasfps = node->property (X_("AutoFPS"));
+	XMLProperty const * propasfps = node->property (X_("AutoFPS"));
 	if (propasfps) {
 		auto_set_session_fps = atoi(propasfps->value())?true:false;
 	}
 #endif
 
-	const XMLProperty* propoffset = node->property (X_("VideoOffset"));
-	if (propoffset) {
-		video_offset = atoll(propoffset->value());
+	if (node->get_property (X_("VideoOffset"), video_offset)) {
 		video_offset_p = video_offset;
 	}
 
-	const XMLProperty* proplock = node->property (X_("VideoOffsetLock"));
-	if (proplock) {
-		video_offset_lock = atoi(proplock->value())?true:false;
-	}
+	node->get_property (X_("VideoOffsetLock"), video_offset_lock);
+	node->get_property (X_("LocalFile"), local_file);
 
-	const XMLProperty* localfile = node->property (X_("LocalFile"));
-	if (localfile) {
-		local_file = atoi(localfile->value())?true:false;
+	std::string filename;
+	if (node->get_property (X_("Filename"), filename)) {
+		video_file_info (filename, local_file);
 	}
-
-	const XMLProperty* propf = node->property (X_("Filename"));
-	video_file_info(propf->value(), local_file);
 
 	if ((node = _session->extra_xml (X_("Videomonitor")))) {
-		const XMLProperty* prop = node->property (X_("active"));
-		if (prop && prop->value() == "yes" && found_xjadeo() && !video_filename.empty() && local_file) {
+		bool active;
+		if (node->get_property (X_("active"), active) && active && found_xjadeo () &&
+		    !video_filename.empty () && local_file) {
 			open_video_monitor();
 		}
 	}
@@ -224,11 +218,7 @@ VideoTimeLine::save_undo ()
 int
 VideoTimeLine::set_state (const XMLNode& node, int /*version*/)
 {
-	LocaleGuard lg (X_("C"));
-	const XMLProperty* propoffset = node.property (X_("VideoOffset"));
-	if (propoffset) {
-		video_offset = atoll(propoffset->value());
-	}
+	node.get_property (X_("VideoOffset"), video_offset);
 	ARDOUR_UI::instance()->flush_videotimeline_cache(true);
 	return 0;
 }
@@ -237,8 +227,7 @@ XMLNode&
 VideoTimeLine::get_state ()
 {
 	XMLNode* node = new XMLNode (X_("Videotimeline"));
-	LocaleGuard lg (X_("C"));
-	node->add_property (X_("VideoOffset"), video_offset_p);
+	node->set_property (X_("VideoOffset"), video_offset_p);
 	return *node;
 }
 
@@ -246,19 +235,19 @@ void
 VideoTimeLine::remove_frames ()
 {
 	for (VideoFrames::iterator i = video_frames.begin(); i != video_frames.end(); ++i ) {
-		VideoImageFrame *frame = (*i);
+		VideoImageFrame* frame = (*i);
 		delete frame;
 		(*i) = 0;
 	}
 	video_frames.clear();
 }
 
-VideoImageFrame *
-VideoTimeLine::get_video_frame (framepos_t vfn, int cut, int rightend)
+VideoImageFrame*
+VideoTimeLine::get_video_frame (samplepos_t vfn, int cut, int rightend)
 {
 	if (vfn==0) cut=0;
 	for (VideoFrames::iterator i = video_frames.begin(); i != video_frames.end(); ++i) {
-		VideoImageFrame *frame = (*i);
+		VideoImageFrame* frame = (*i);
 		if (abs(frame->get_video_frame_number()-vfn)<=cut
 		    && frame->get_rightend() == rightend) { return frame; }
 	}
@@ -279,9 +268,9 @@ VideoTimeLine::get_apv()
 	}
 
 	if (_session->config.get_videotimeline_pullup()) {
-		apv = _session->frame_rate();
+		apv = _session->sample_rate();
 	} else {
-		apv = _session->nominal_frame_rate();
+		apv = _session->nominal_sample_rate();
 	}
 	if (_session->config.get_use_video_file_fps()) {
 		apv /= video_file_fps;
@@ -303,7 +292,7 @@ VideoTimeLine::update_video_timeline()
 	}
 
 	const double samples_per_pixel = editor->get_current_zoom();
-	const framepos_t leftmost_sample =  editor->leftmost_sample();
+	const samplepos_t leftmost_sample =  editor->leftmost_sample();
 
 	/* Outline:
 	 * 1) calculate how many frames there should be in current zoom (plus 1 page on each side)
@@ -316,17 +305,17 @@ VideoTimeLine::update_video_timeline()
 	/* video-file and session properties */
 	double display_vframe_width; /* unit: pixels ; width of one thumbnail in the timeline */
 	float apv; /* audio samples per video frame; */
-	framepos_t leftmost_video_frame; /* unit: video-frame number ; temporary var -> vtl_start */
+	samplepos_t leftmost_video_frame; /* unit: video-frame number ; temporary var -> vtl_start */
 
 	/* variables needed to render videotimeline -- what needs to computed first */
-	framepos_t vtl_start; /* unit: audio-samples ; first displayed video-frame */
-	framepos_t vtl_dist;  /* unit: audio-samples ; distance between displayed video-frames */
+	samplepos_t vtl_start; /* unit: audio-samples ; first displayed video-frame */
+	samplepos_t vtl_dist;  /* unit: audio-samples ; distance between displayed video-frames */
 	unsigned int visible_video_frames; /* number of frames that fit on current canvas */
 
 	if (_session->config.get_videotimeline_pullup()) {
-		apv = _session->frame_rate();
+		apv = _session->sample_rate();
 	} else {
-		apv = _session->nominal_frame_rate();
+		apv = _session->nominal_sample_rate();
 	}
 	if (_session->config.get_use_video_file_fps()) {
 		apv /= video_file_fps;
@@ -374,9 +363,9 @@ VideoTimeLine::update_video_timeline()
 		--visible_video_frames;
 	}
 
-	if (flush_frames) {
-		remove_frames();
-		flush_frames=false;
+	if (_flush_frames) {
+		remove_frames ();
+		_flush_frames = false;
 	}
 
 	while (video_frames.size() < visible_video_frames) {
@@ -392,9 +381,9 @@ VideoTimeLine::update_video_timeline()
 	outdated_video_frames = video_frames;
 
 #if 1
-	/* when zoomed out, ignore shifts by +-1 frame
+	/* when zoomed out, ignore shifts by +-1 sample
 	 * which can occur due to rounding errors when
-	 * scrolling to a new leftmost-audio frame.
+	 * scrolling to a new leftmost-audio sample.
 	 */
 	int cut =1;
 	if (vtl_dist/apv < 3.0) cut =0;
@@ -403,33 +392,33 @@ VideoTimeLine::update_video_timeline()
 #endif
 
 	for (unsigned int vfcount=0; vfcount < visible_video_frames; ++vfcount){
-		framepos_t vfpos = vtl_start + vfcount * vtl_dist; /* unit: audio-frames */
-		framepos_t vframeno = rint ( (vfpos - video_offset) / apv); /* unit: video-frames */
-		vfpos = (vframeno * apv ) + video_offset; /* audio-frame  corresponding to /rounded/ video-frame */
+		samplepos_t vfpos = vtl_start + vfcount * vtl_dist; /* unit: audio-samples */
+		samplepos_t vframeno = rint ( (vfpos - video_offset) / apv); /* unit: video-frames */
+		vfpos = (vframeno * apv ) + video_offset; /* audio-sample  corresponding to /rounded/ video-frame */
 
 		int rightend = -1; /* unit: pixels */
 		if (vfpos + vtl_dist > video_start_offset + video_duration + video_offset) {
 			rightend = display_vframe_width * (video_start_offset + video_duration + video_offset - vfpos) / vtl_dist;
 			//printf("lf(e): %lu\n", vframeno); // XXX
 		}
-		VideoImageFrame * frame = get_video_frame(vframeno, cut, rightend);
+		VideoImageFrame* frame = get_video_frame(vframeno, cut, rightend);
 		if (frame) {
 		  frame->set_position(vfpos);
-			outdated_video_frames.remove(frame);
+			outdated_video_frames.remove (frame);
 		} else {
 			remaining.push_back(vfcount);
 		}
 	}
 
 	for (VideoFrames::iterator i = outdated_video_frames.begin(); i != outdated_video_frames.end(); ++i ) {
-		VideoImageFrame *frame = (*i);
+		VideoImageFrame* frame = (*i);
 		if (remaining.empty()) {
 		  frame->set_position(-2 * vtl_dist + leftmost_sample); /* move off screen */
 		} else {
-			int vfcount=remaining.front();
+			int vfcount = remaining.front();
 			remaining.pop_front();
-			framepos_t vfpos = vtl_start + vfcount * vtl_dist; /* unit: audio-frames */
-			framepos_t vframeno = rint ((vfpos - video_offset) / apv);  /* unit: video-frames */
+			samplepos_t vfpos = vtl_start + vfcount * vtl_dist; /* unit: audio-samples */
+			samplepos_t vframeno = rint ((vfpos - video_offset) / apv);  /* unit: video-frames */
 			int rightend = -1; /* unit: pixels */
 			if (vfpos + vtl_dist > video_start_offset + video_duration + video_offset) {
 				rightend = display_vframe_width * (video_start_offset + video_duration + video_offset - vfpos) / vtl_dist;
@@ -475,8 +464,8 @@ VideoTimeLine::video_file_info (std::string filename, bool local)
 		GuiUpdate("video-unavailable");
 		return false;
 	}
-	video_duration = _duration * _session->nominal_frame_rate() / video_file_fps;
-	video_start_offset = _start_offset * _session->nominal_frame_rate();
+	video_duration = _duration * _session->nominal_sample_rate() / video_file_fps;
+	video_start_offset = _start_offset * _session->nominal_sample_rate();
 
 	if (auto_set_session_fps && video_file_fps != _session->timecode_frames_per_second()) {
 		switch ((int)floorf(video_file_fps*1000.0)) {
@@ -556,7 +545,7 @@ VideoTimeLine::check_server ()
 			, video_server_url.c_str()
 			, (video_server_url.length()>0 && video_server_url.at(video_server_url.length()-1) == '/')?"":"/"
 			);
-	char *res=a3_curl_http_get(url, NULL);
+	char* res = ArdourCurl::http_get (url, NULL, false);
 	if (res) {
 		if (strstr(res, "status: ok, online.")) { ok = true; }
 		free(res);
@@ -578,7 +567,7 @@ VideoTimeLine::check_server_docroot ()
 			, video_server_url.c_str()
 			, (video_server_url.length()>0 && video_server_url.at(video_server_url.length()-1) == '/')?"":"/"
 			);
-	char *res=a3_curl_http_get(url, NULL);
+	char* res = ArdourCurl::http_get (url, NULL, false);
 	if (!res) {
 		return false;
 	}
@@ -662,7 +651,7 @@ VideoTimeLine::vmon_update () {
 
 void
 VideoTimeLine::flush_local_cache () {
-	flush_frames = true;
+	_flush_frames = true;
 	vmon_update();
 }
 
@@ -674,7 +663,7 @@ VideoTimeLine::flush_cache () {
 			, video_server_url.c_str()
 			, (video_server_url.length()>0 && video_server_url.at(video_server_url.length()-1) == '/')?"":"/"
 			);
-	char *res=a3_curl_http_get(url, NULL);
+	char* res = ArdourCurl::http_get (url, NULL, false);
 	if (res) {
 		free (res);
 	}
@@ -738,7 +727,7 @@ VideoTimeLine::find_xjadeo () {
 		xjadeo_version = "";
 		version_check.ReadStdout.connect_same_thread (*this, boost::bind (&VideoTimeLine::xjadeo_readversion, this, _1 ,_2));
 		version_check.Terminated.connect_same_thread (*this, boost::bind (&VideoTimeLine::xjadeo_readversion, this, "\n" ,1));
-		if (version_check.start(2)) {
+		if (version_check.start (ARDOUR::SystemExec::MergeWithStdin)) {
 			warning << _(
 					"Video-monitor 'xjadeo' cannot be launched."
 					) << endmsg;
@@ -780,6 +769,61 @@ VideoTimeLine::find_xjadeo () {
 }
 
 void
+VideoTimeLine::harvid_readversion (std::string d, size_t /* s */) {
+	harvid_version += d;
+}
+
+void
+VideoTimeLine::find_harvid () {
+	/* This is mainly for the benefit of the windows version:
+	 * harvid >= 0.8.2 allows an empty docroot and ardour can
+	 * pass the drive-letter along.
+	 *
+	 * It is a chicken/egg w.r.t. the video-server dialog
+	 * but needed for default preferences and initial settings.
+	 */
+	std::string harvid_bin;
+	if (VideoUtils::harvid_version != 0x0) {
+		return;
+	}
+	if (!ArdourVideoToolPaths::harvid_exe(harvid_bin)) {
+		return;
+	}
+	if (harvid_bin.empty ()) {
+		return;
+	}
+	ARDOUR::SystemExec version_check(harvid_bin, X_("--version"));
+	harvid_version = "";
+	version_check.ReadStdout.connect_same_thread (*this, boost::bind (&VideoTimeLine::harvid_readversion, this, _1 ,_2));
+	version_check.Terminated.connect_same_thread (*this, boost::bind (&VideoTimeLine::harvid_readversion, this, "\n" ,1));
+	if (version_check.start (ARDOUR::SystemExec::MergeWithStdin)) {
+		return;
+	}
+
+#ifdef PLATFORM_WINDOWS
+	version_check.wait (); // 40ms timeout
+#else
+	version_check.wait (WNOHANG);
+#endif
+
+	int timeout = 300;
+	while (harvid_version.empty() && --timeout) {
+		Glib::usleep(10000);
+	}
+
+	size_t vo = harvid_version.find("harvid v");
+	if (vo != string::npos) {
+		int v_major, v_minor, v_micro;
+		if(sscanf(harvid_version.substr(vo + 8, string::npos).c_str(),"%d.%d.%d",
+					&v_major, &v_minor, &v_micro) == 3)
+		{
+			VideoUtils::harvid_version = (v_major << 16) | (v_minor << 8) | v_micro;
+			info << "harvid version: "<< hex << VideoUtils::harvid_version << endmsg;
+		}
+	}
+}
+
+void
 VideoTimeLine::open_video_monitor() {
 	if (!found_xjadeo()) return;
 	if (!vmonitor) {
@@ -804,7 +848,7 @@ VideoTimeLine::open_video_monitor() {
 		/* load mask from Session */
 		XMLNode* node = _session->extra_xml (X_("XJRestoreSettings"));
 		if (node) {
-			const XMLProperty* prop = node->property (X_("mask"));
+			XMLProperty const * prop = node->property (X_("mask"));
 			if (prop) {
 				xj_settings_mask = atoi(prop->value());
 			}
@@ -825,8 +869,10 @@ VideoTimeLine::open_video_monitor() {
 		if (_session) {
 			XMLNode* node = _session->extra_xml (X_("Videomonitor"));
 			if (node) {
-				const XMLProperty* prop = node->property (X_("active"));
-				if (prop && prop->value() != "yes") _session->set_dirty ();
+				bool active;
+				if (node->get_property (X_("active"), active) && !active) {
+					_session->set_dirty ();
+				}
 			} else {
 				_session->set_dirty ();
 			}
@@ -870,7 +916,7 @@ VideoTimeLine::terminated_video_monitor () {
 }
 
 void
-VideoTimeLine::manual_seek_video_monitor (framepos_t pos)
+VideoTimeLine::manual_seek_video_monitor (samplepos_t pos)
 {
 	if (!vmonitor) { return; }
 	if (!vmonitor->is_started()) { return; }

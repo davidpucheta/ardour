@@ -1,21 +1,21 @@
 /*
-	Copyright (C) 2006,2007 John Anderson
-	Copyright (C) 2012 Paul Davis
-
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2007 John Anderson
+ * Copyright (C) 2012-2015 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cmath>
 
 #include "pot.h"
@@ -33,6 +33,7 @@ Pot::factory (Surface& surface, int id, const char* name, Group& group)
 {
 	Pot* p = new Pot (id, name, group);
 	surface.pots[id] = p;
+	p->is_qcon = surface.get_qcon_flag();
 	surface.controls.push_back (p);
 	group.add (*p);
 	return p;
@@ -43,11 +44,30 @@ Pot::set (float val, bool onoff, Mode mode)
 {
 	// TODO do an exact calc for 0.50? To allow manually re-centering the port.
 
+	MIDI::byte msg;
+
 	// center on if val is "very close" to 0.50
-	MIDI::byte msg =  (val > 0.48 && val < 0.58 ? 1 : 0) << 6;
+	if( !is_qcon ) {
+		// center the position and shift bits for standard mackie surface
+		msg =  (val > 0.48 && val < 0.58 ? 1 : 0) << 6; 
+	} else {	//center the position and don't shift anything for qcon - TODO: on center position lit the center LED on the ring
+		if(val > 0.48 && val < 0.58) {
+			val = 0.50;		
+		}
+
+		// set msg
+		msg = val;
+	}	
+
 
 	// Pot/LED mode
-	msg |=  (mode << 4);
+	if( !is_qcon ) {
+		// Mackie mode - Supports all ring modes
+		msg |=  (mode << 4);
+	} else {	
+		// Qcon rotary mode - Only "DOT" mode? - TODO: Investigate how to proper set vpot rings to different modes on qcon
+		msg |=  (0 << 4);
+	}
 
 	/*
 	 * Even though a width value may be negative, there is

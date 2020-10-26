@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2006-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 
@@ -33,7 +36,7 @@
 #include "audio_region_view.h"
 #include "gui_thread.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -43,7 +46,6 @@ using namespace Gtkmm2ext;
 static void *
 _peak_amplitude_thread (void* arg)
 {
-	SessionEvent::create_per_thread_pool ("peak amplitude events", 64);
 	static_cast<AudioRegionEditor*>(arg)->peak_amplitude_thread ();
 	return 0;
 }
@@ -52,11 +54,7 @@ AudioRegionEditor::AudioRegionEditor (Session* s, boost::shared_ptr<AudioRegion>
 	: RegionEditor (s, r)
 	, _audio_region (r)
 	, gain_adjustment(accurate_coefficient_to_dB(_audio_region->scale_amplitude()), -40.0, +40.0, 0.1, 1.0, 0)
-#ifdef PLATFORM_WINDOWS
-	, m_peak_sem ("peak_semaphore", 0)
-#else
 	, _peak_channel (false)
-#endif
 {
 
 	Gtk::HBox* b = Gtk::manage (new Gtk::HBox);
@@ -92,14 +90,17 @@ AudioRegionEditor::AudioRegionEditor (Session* s, boost::shared_ptr<AudioRegion>
 	_peak_amplitude.set_text (_("Calculating..."));
 
 	PeakAmplitudeFound.connect (_peak_amplitude_connection, invalidator (*this), boost::bind (&AudioRegionEditor::peak_amplitude_found, this, _1), gui_context ());
-	pthread_create_and_store (X_("peak-amplitude"), &_peak_amplitude_thread_handle, _peak_amplitude_thread, this);
+
+	char name[64];
+	snprintf (name, 64, "peak amplitude-%p", this);
+	pthread_create_and_store (name, &_peak_amplitude_thread_handle, _peak_amplitude_thread, this);
 	signal_peak_thread ();
 }
 
 AudioRegionEditor::~AudioRegionEditor ()
 {
 	void* v;
-	pthread_cancel_one (_peak_amplitude_thread_handle);
+	_peak_channel.deliver ('t');
 	pthread_join (_peak_amplitude_thread_handle, &v);
 }
 
@@ -138,30 +139,20 @@ AudioRegionEditor::gain_adjustment_changed ()
 void
 AudioRegionEditor::signal_peak_thread ()
 {
-#ifdef PLATFORM_WINDOWS
-	m_peak_sem.signal ();
-#else
 	_peak_channel.deliver ('c');
-#endif
-}
-
-void
-AudioRegionEditor::wait_for_signal ()
-{
-#ifdef PLATFORM_WINDOWS
-	m_peak_sem.wait ();
-#else
-	char msg;
-	_peak_channel.receive (msg);
-#endif
 }
 
 void
 AudioRegionEditor::peak_amplitude_thread ()
 {
 	while (1) {
+		char msg;
 		/* await instructions to run */
-		wait_for_signal ();
+		_peak_channel.receive (msg);
+
+		if (msg == 't') {
+			break;
+		}
 
 		/* compute peak amplitude and signal the fact */
 		PeakAmplitudeFound (accurate_coefficient_to_dB (_audio_region->maximum_amplitude ())); /* EMIT SIGNAL */

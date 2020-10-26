@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2018 Robin Gareus <robin@gareus.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #ifndef __gtkardour_plugin_pin_dialog_h__
@@ -27,20 +27,27 @@
 #include "ardour/plugin_insert.h"
 #include "ardour/route.h"
 
-#include "gtkmm2ext/pixfader.h"
-#include "gtkmm2ext/persistent_tooltip.h"
-#include "gtkmm2ext/slider_controller.h"
+#include <gtkmm/alignment.h>
+#include <gtkmm/box.h>
+#include <gtkmm/drawingarea.h>
+#include <gtkmm/scrolledwindow.h>
+#include <gtkmm/sizegroup.h>
 
-#include "ardour_button.h"
-#include "ardour_dropdown.h"
+#include "gtkmm2ext/persistent_tooltip.h"
+
+#include "widgets/ardour_button.h"
+#include "widgets/ardour_dropdown.h"
+#include "widgets/ardour_fader.h"
+#include "widgets/slider_controller.h"
+
 #include "ardour_window.h"
 #include "io_selector.h"
 
-class PluginPinDialog : public ArdourWindow
+class PluginPinWidget : public ARDOUR::SessionHandlePtr, public Gtk::VBox
 {
 public:
-	PluginPinDialog (boost::shared_ptr<ARDOUR::PluginInsert>);
-	~PluginPinDialog ();
+	PluginPinWidget (boost::shared_ptr<ARDOUR::PluginInsert>);
+	~PluginPinWidget ();
 	void set_session (ARDOUR::Session *);
 private:
 	typedef enum {
@@ -92,22 +99,23 @@ private:
 
 
 	Gtk::DrawingArea darea;
-	ArdourButton _set_config;
-	ArdourButton _tgl_sidechain;
-	ArdourButton _add_plugin;
-	ArdourButton _del_plugin;
-	ArdourButton _add_input_audio;
-	ArdourButton _del_input_audio;
-	ArdourButton _add_input_midi;
-	ArdourButton _del_input_midi;
-	ArdourButton _add_output_audio;
-	ArdourButton _del_output_audio;
-	ArdourButton _add_output_midi;
-	ArdourButton _del_output_midi;
-	ArdourButton _add_sc_audio;
-	ArdourButton _add_sc_midi;
 
-	ArdourDropdown _out_presets;
+	ArdourWidgets::ArdourButton _set_config;
+	ArdourWidgets::ArdourButton _tgl_sidechain;
+	ArdourWidgets::ArdourButton _add_plugin;
+	ArdourWidgets::ArdourButton _del_plugin;
+	ArdourWidgets::ArdourButton _add_input_audio;
+	ArdourWidgets::ArdourButton _del_input_audio;
+	ArdourWidgets::ArdourButton _add_input_midi;
+	ArdourWidgets::ArdourButton _del_input_midi;
+	ArdourWidgets::ArdourButton _add_output_audio;
+	ArdourWidgets::ArdourButton _del_output_audio;
+	ArdourWidgets::ArdourButton _add_output_midi;
+	ArdourWidgets::ArdourButton _del_output_midi;
+	ArdourWidgets::ArdourButton _add_sc_audio;
+	ArdourWidgets::ArdourButton _add_sc_midi;
+
+	ArdourWidgets::ArdourDropdown _out_presets;
 
 	Gtk::Menu reset_menu;
 	Gtk::Menu input_menu;
@@ -174,6 +182,8 @@ private:
 	void queue_idle_update ();
 	bool idle_update ();
 
+	void error_message_dialog (std::string const&) const;
+
 	uint32_t _n_plugins;
 	ARDOUR::ChanCount _in, _ins, _out;
 	ARDOUR::ChanCount _sinks, _sources;
@@ -206,7 +216,7 @@ private:
 
 		boost::weak_ptr<ARDOUR::AutomationControl> _control;
 		Gtk::Adjustment _adjustment;
-		Gtkmm2ext::HSliderController _slider;
+		ArdourWidgets::HSliderController _slider;
 		Gtkmm2ext::PersistentTooltip _slider_persistant_tooltip;
 
 		bool _ignore_ui_adjustment;
@@ -214,6 +224,31 @@ private:
 		std::string _name;
 	};
 	std::list<Control*> _controls;
+};
+
+
+class PluginPinDialog : public ArdourWindow
+{
+public:
+	PluginPinDialog (boost::shared_ptr<ARDOUR::PluginInsert>);
+	PluginPinDialog (boost::shared_ptr<ARDOUR::Route>);
+
+	void set_session (ARDOUR::Session *);
+private:
+	Gtk::ScrolledWindow* scroller;
+	Gtk::VBox *vbox;
+	typedef boost::shared_ptr<PluginPinWidget> PluginPinWidgetPtr;
+	typedef std::vector<PluginPinWidgetPtr> PluginPinWidgetList;
+
+	void route_going_away ();
+	void route_processors_changed (ARDOUR::RouteProcessorChange);
+	void add_processor (boost::weak_ptr<ARDOUR::Processor>);
+	void map_height (Gtk::Allocation&);
+
+	boost::shared_ptr<ARDOUR::Route> _route;
+	PluginPinWidgetList ppw;
+	PBD::ScopedConnectionList _route_connections;
+	bool _height_mapped;
 };
 
 #endif

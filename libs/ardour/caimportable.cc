@@ -1,27 +1,27 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/caimportable.h"
 #include <sndfile.h>
 #include "pbd/error.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace std;
@@ -55,12 +55,12 @@ CAImportableSource::~CAImportableSource ()
 {
 }
 
-framecnt_t
-CAImportableSource::read (Sample* buffer, framecnt_t nframes)
+samplecnt_t
+CAImportableSource::read (Sample* buffer, samplecnt_t nframes)
 {
-	framecnt_t nread = 0;
+	samplecnt_t nread = 0;
 	AudioBufferList abl;
-	framecnt_t per_channel;
+	samplecnt_t per_channel;
 	bool at_end = false;
 
 	abl.mNumberBuffers = 1;
@@ -104,13 +104,13 @@ CAImportableSource::channels () const
 	return af.GetFileDataFormat().NumberChannels();
 }
 
-framecnt_t
+samplecnt_t
 CAImportableSource::length () const
 {
 	return af.GetNumberFrames();
 }
 
-framecnt_t
+samplecnt_t
 CAImportableSource::samplerate () const
 {
 	CAStreamBasicDescription client_asbd;
@@ -126,7 +126,7 @@ CAImportableSource::samplerate () const
 }
 
 void
-CAImportableSource::seek (framepos_t pos)
+CAImportableSource::seek (samplepos_t pos)
 {
 	try {
 		af.Seek (pos);
@@ -136,4 +136,9 @@ CAImportableSource::seek (framepos_t pos)
 }
 
 
-
+samplepos_t
+CAImportableSource::natural_position () const
+{
+	// TODO: extract timecode, if any
+	return 0;
+}

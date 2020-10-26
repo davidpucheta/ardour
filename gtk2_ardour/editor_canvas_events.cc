@@ -1,21 +1,28 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015-2019 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstdlib>
 #include <cmath>
@@ -27,8 +34,8 @@
 #include "ardour/audio_track.h"
 #include "ardour/midi_track.h"
 #include "ardour/midi_region.h"
-#include "ardour/region_factory.h"
 #include "ardour/profile.h"
+#include "ardour/region_factory.h"
 
 #include "canvas/canvas.h"
 #include "canvas/text.h"
@@ -48,10 +55,11 @@
 #include "editor_drag.h"
 #include "midi_time_axis.h"
 #include "editor_regions.h"
+#include "editor_sources.h"
 #include "ui_config.h"
 #include "verbose_cursor.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -75,11 +83,7 @@ Editor::track_canvas_scroll (GdkEventScroll* ev)
 	switch (direction) {
 	case GDK_SCROLL_UP:
 		if (Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollZoomHorizontalModifier)) {
-			if (UIConfiguration::instance().get_use_mouse_position_as_zoom_focus_on_scroll()) {
-				temporal_zoom_step_mouse_focus (false);
-			} else {
-				temporal_zoom_step (false);
-			}
+			temporal_zoom_step_mouse_focus (false);
 			return true;
 		} else if (Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollHorizontalModifier)) {
 			scroll_left_step ();
@@ -104,11 +108,7 @@ Editor::track_canvas_scroll (GdkEventScroll* ev)
 
 	case GDK_SCROLL_DOWN:
 		if (Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollZoomHorizontalModifier)) {
-			if (UIConfiguration::instance().get_use_mouse_position_as_zoom_focus_on_scroll()) {
-				temporal_zoom_step_mouse_focus (true);
-			} else {
-				temporal_zoom_step (true);
-			}
+			temporal_zoom_step_mouse_focus (true);
 			return true;
 		} else if (Keyboard::modifier_state_equals (ev->state, Keyboard::ScrollHorizontalModifier)) {
 			scroll_right_step ();
@@ -167,11 +167,11 @@ bool
 Editor::track_canvas_button_press_event (GdkEventButton *event)
 {
 	_track_canvas->grab_focus();
-	if (!Keyboard::is_context_menu_event (event)) {
+	if (!internal_editing() && !Keyboard::is_context_menu_event (event)) {
 		begin_reversible_selection_op (X_("Clear Selection Click (track canvas)"));
 		selection->clear ();
 		commit_reversible_selection_op();
-        }
+	}
 	return false;
 }
 
@@ -179,10 +179,18 @@ bool
 Editor::track_canvas_button_release_event (GdkEventButton *event)
 {
 	if (!Keyboard::is_context_menu_event (event)) {
-                if (_drags->active ()) {
-                        _drags->end_grab ((GdkEvent*) event);
-                }
-        }
+		if (_drags->active ()) {
+
+			GdkEvent copy = *((GdkEvent*) event);
+			Duple winpos = Duple (event->x, event->y);
+			Duple where = _track_canvas->window_to_canvas (winpos);
+
+			copy.button.x = where.x;
+			copy.button.y = where.y;
+
+			_drags->end_grab (&copy);
+		}
+	}
 	return false;
 }
 
@@ -198,6 +206,10 @@ Editor::track_canvas_motion_notify_event (GdkEventMotion */*event*/)
 bool
 Editor::typed_event (ArdourCanvas::Item* item, GdkEvent *event, ItemType type)
 {
+	if (!session () || session()->loading () || session()->deletion_in_progress ()) {
+		return false;
+	}
+
 	gint ret = FALSE;
 
 	switch (event->type) {
@@ -532,7 +544,6 @@ Editor::canvas_fade_in_handle_event (GdkEvent *event, ArdourCanvas::Item* item, 
 
 	case GDK_BUTTON_RELEASE:
 		ret = button_release_handler (item, event, trim ? FadeInTrimHandleItem : FadeInHandleItem);
-		maybe_locate_with_edit_preroll ( rv->region()->position() );
 		break;
 
 	case GDK_MOTION_NOTIFY:
@@ -616,7 +627,6 @@ Editor::canvas_fade_out_handle_event (GdkEvent *event, ArdourCanvas::Item* item,
 
 	case GDK_BUTTON_RELEASE:
 		ret = button_release_handler (item, event, trim ? FadeOutTrimHandleItem : FadeOutHandleItem);
-		maybe_locate_with_edit_preroll ( rv->region()->last_frame() - rv->get_fade_out_shape_width() );
 		break;
 
 	case GDK_MOTION_NOTIFY:
@@ -639,9 +649,9 @@ Editor::canvas_fade_out_handle_event (GdkEvent *event, ArdourCanvas::Item* item,
 }
 
 struct DescendingRegionLayerSorter {
-    bool operator()(boost::shared_ptr<Region> a, boost::shared_ptr<Region> b) {
-	    return a->layer() > b->layer();
-    }
+	bool operator()(boost::shared_ptr<Region> a, boost::shared_ptr<Region> b) {
+		return a->layer() > b->layer();
+	}
 };
 
 bool
@@ -677,10 +687,14 @@ Editor::canvas_line_event (GdkEvent *event, ArdourCanvas::Item* item, Automation
 	AudioRegionGainLine* gl;
 	if ((gl = dynamic_cast<AudioRegionGainLine*> (al)) != 0) {
 		type = GainLineItem;
-		clicked_regionview = &gl->region_view ();
+		if (event->type == GDK_BUTTON_PRESS) {
+			clicked_regionview = &gl->region_view ();
+		}
 	} else {
 		type = AutomationLineItem;
-		clicked_regionview = 0;
+		if (event->type == GDK_BUTTON_PRESS) {
+			clicked_regionview = 0;
+		}
 	}
 
 	clicked_control_point = 0;
@@ -1004,9 +1018,15 @@ Editor::canvas_videotl_bar_event (GdkEvent *event, ArdourCanvas::Item* item)
 }
 
 bool
-Editor::canvas_tempo_marker_event (GdkEvent *event, ArdourCanvas::Item* item, TempoMarker* /*marker*/)
+Editor::canvas_tempo_marker_event (GdkEvent *event, ArdourCanvas::Item* item, TempoMarker* marker)
 {
 	return typed_event (item, event, TempoMarkerItem);
+}
+
+bool
+Editor::canvas_tempo_curve_event (GdkEvent *event, ArdourCanvas::Item* item, TempoCurve* /*marker*/)
+{
+	return typed_event (item, event, TempoCurveItem);
 }
 
 bool
@@ -1028,10 +1048,11 @@ Editor::canvas_ruler_event (GdkEvent *event, ArdourCanvas::Item* item, ItemType 
 
 		switch (event->scroll.direction) {
 		case GDK_SCROLL_UP:
-			if (Keyboard::modifier_state_equals(event->scroll.state,
-			                                    Keyboard::ScrollHorizontalModifier)) {
+			if (Keyboard::modifier_state_equals (event->scroll.state, Keyboard::ScrollHorizontalModifier)) {
 				scroll_left_step ();
 			} else if (UIConfiguration::instance().get_use_mouse_position_as_zoom_focus_on_scroll()) {
+				temporal_zoom_step_mouse_focus (false);
+			} else if (Keyboard::modifier_state_equals (event->scroll.state, Keyboard::PrimaryModifier)) {
 				temporal_zoom_step_mouse_focus (false);
 			} else {
 				temporal_zoom_step (false);
@@ -1040,10 +1061,11 @@ Editor::canvas_ruler_event (GdkEvent *event, ArdourCanvas::Item* item, ItemType 
 			break;
 
 		case GDK_SCROLL_DOWN:
-			if (Keyboard::modifier_state_equals(event->scroll.state,
-			                                    Keyboard::ScrollHorizontalModifier)) {
+			if (Keyboard::modifier_state_equals (event->scroll.state, Keyboard::ScrollHorizontalModifier)) {
 				scroll_right_step ();
 			} else if (UIConfiguration::instance().get_use_mouse_position_as_zoom_focus_on_scroll()) {
+				temporal_zoom_step_mouse_focus (true);
+			} else if (Keyboard::modifier_state_equals (event->scroll.state, Keyboard::PrimaryModifier)) {
 				temporal_zoom_step_mouse_focus (true);
 			} else {
 				temporal_zoom_step (true);
@@ -1184,14 +1206,17 @@ Editor::track_canvas_drag_motion (Glib::RefPtr<Gdk::DragContext> const& context,
 	}
 
 	if (can_drop) {
-		region = _regions->get_dragged_region ();
+
+		if (target == X_("regions")) {
+			region = _regions->get_dragged_region ();
+		}
 
 		if (region) {
 
 			if (tv.first == 0
 			    && (
-			        boost::dynamic_pointer_cast<AudioRegion> (region) != 0 ||
-			        boost::dynamic_pointer_cast<MidiRegion> (region) != 0
+				boost::dynamic_pointer_cast<AudioRegion> (region) != 0 ||
+				boost::dynamic_pointer_cast<MidiRegion> (region) != 0
 			       )
 			   )
 			{
@@ -1239,9 +1264,10 @@ Editor::track_canvas_drag_motion (Glib::RefPtr<Gdk::DragContext> const& context,
 
 void
 Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
-		      int x, int y,
-		      const SelectionData& /*data*/,
-		      guint /*info*/, guint /*time*/)
+                      int x, int y,
+                      const SelectionData& /*data*/,
+                      guint /*info*/, guint /*time*/,
+                      bool from_region_list)
 {
 	GdkEvent event;
 	double px;
@@ -1252,9 +1278,16 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 	event.button.y = y;
 	/* assume we're dragging with button 1 */
 	event.motion.state = Gdk::BUTTON1_MASK;
-	framepos_t const pos = window_event_sample (&event, &px, &py);
+	samplepos_t const pos = window_event_sample (&event, &px, &py);
 
-	boost::shared_ptr<Region> region = _regions->get_dragged_region ();
+	boost::shared_ptr<Region> region;
+
+	if (from_region_list) {
+		region = _regions->get_dragged_region ();
+	} else {
+		region = _sources->get_dragged_region ();
+	}
+
 	if (!region) { return; }
 
 	RouteTimeAxisView* rtav = 0;
@@ -1270,13 +1303,17 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 					output_chan =  session()->master_out()->n_inputs().n_audio();
 				}
 				list<boost::shared_ptr<AudioTrack> > audio_tracks;
-				audio_tracks = session()->new_audio_track (region->n_channels(), output_chan, ARDOUR::Normal, 0, 1, region->name());
-				rtav = axis_view_from_route (audio_tracks.front());
+				audio_tracks = session()->new_audio_track (region->n_channels(), output_chan, 0, 1, region->name(), PresentationInfo::max_order);
+				rtav = dynamic_cast<RouteTimeAxisView*> (time_axis_view_from_stripable (audio_tracks.front()));
 			} else if (boost::dynamic_pointer_cast<MidiRegion> (region)) {
 				ChanCount one_midi_port (DataType::MIDI, 1);
 				list<boost::shared_ptr<MidiTrack> > midi_tracks;
-				midi_tracks = session()->new_midi_track (one_midi_port, one_midi_port, boost::shared_ptr<ARDOUR::PluginInfo>(), ARDOUR::Normal, 0, 1, region->name());
-				rtav = axis_view_from_route (midi_tracks.front());
+				midi_tracks = session()->new_midi_track (one_midi_port, one_midi_port,
+				                                         Config->get_strict_io () || Profile->get_mixbus (),
+				                                         boost::shared_ptr<ARDOUR::PluginInfo>(),
+				                                         (ARDOUR::Plugin::PresetRecord*) 0,
+				                                         (ARDOUR::RouteGroup*) 0, 1, region->name(), PresentationInfo::max_order);
+				rtav = dynamic_cast<RouteTimeAxisView*> (time_axis_view_from_stripable (midi_tracks.front()));
 			} else {
 				return;
 			}
@@ -1292,7 +1329,7 @@ Editor::drop_regions (const Glib::RefPtr<Gdk::DragContext>& /*context*/,
 		if ((boost::dynamic_pointer_cast<AudioRegion> (region_copy) != 0 && dynamic_cast<AudioTimeAxisView*> (rtav) != 0) ||
 		    (boost::dynamic_pointer_cast<MidiRegion> (region_copy) != 0 && dynamic_cast<MidiTimeAxisView*> (rtav) != 0)) {
 			_drags->set (new RegionInsertDrag (this, region_copy, rtav, pos), &event);
-			_drags->end_grab (0);
+			_drags->end_grab (&event);
 		}
 	}
 }
@@ -1338,4 +1375,3 @@ Editor::key_release_handler (ArdourCanvas::Item* item, GdkEvent* event, ItemType
 
 	return handled;
 }
-

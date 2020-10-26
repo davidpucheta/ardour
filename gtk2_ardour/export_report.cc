@@ -1,19 +1,20 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2016-2018 Robin Gareus <robin@gareus.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <algorithm>
@@ -25,10 +26,9 @@
 
 #include "pbd/openuri.h"
 #include "pbd/basename.h"
+
 #include "gtkmm2ext/utils.h"
-#include "gtkmm2ext/utils.h"
-#include "canvas/utils.h"
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 
 #include "audiographer/general/analyser.h"
 
@@ -36,18 +36,19 @@
 #include "ardour/audioregion.h"
 #include "ardour/auditioner.h"
 #include "ardour/dB.h"
+#include "ardour/logmeter.h"
 #include "ardour/region_factory.h"
 #include "ardour/session.h"
 #include "ardour/smf_source.h"
 #include "ardour/source_factory.h"
 #include "ardour/srcfilesource.h"
+#include "ardour/utils.h"
 
 #include "audio_clock.h"
 #include "export_report.h"
-#include "logmeter.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace ARDOUR;
@@ -123,9 +124,9 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 		SoundFileInfo info;
 		std::string errmsg;
 
-		framecnt_t file_length = 0;
-		framecnt_t sample_rate = 0;
-		framecnt_t start_off = 0;
+		samplecnt_t file_length = 0;
+		samplecnt_t sample_rate = 0;
+		samplecnt_t start_off = 0;
 		unsigned int channels = 0;
 		std::string file_fmt;
 
@@ -141,7 +142,7 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 
 			/* File Info Table */
 
-			framecnt_t const nfr = _session ? _session->nominal_frame_rate () : 25;
+			samplecnt_t const nfr = _session ? _session->nominal_sample_rate () : 25;
 			double src_coef = (double) nfr / info.samplerate;
 
 			l = manage (new Label (_("Format:"), ALIGN_END));
@@ -182,10 +183,14 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 			clock->set (info.timecode * src_coef + 0.5, true);
 			t->attach (*clock, 3, 4, 3, 4);
 		} else if (with_file) {
-			l = manage (new Label (_("Error:"), ALIGN_END));
-			t->attach (*l, 0, 1, 1, 2);
-			l = manage (new Label (errmsg, ALIGN_START));
-			t->attach (*l, 1, 4, 1, 2);
+			with_file = false;
+			/* Note: errmsg can have size = 1, and contain "\0\0" */
+			if (!errmsg.empty() && 0 != strlen(errmsg.c_str())) {
+				l = manage (new Label (_("Error:"), ALIGN_END));
+				t->attach (*l, 0, 1, 1, 2);
+				l = manage (new Label (errmsg, ALIGN_START));
+				t->attach (*l, 1, 4, 1, 2);
+			}
 		}
 
 		int w, h;
@@ -232,9 +237,11 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 		TXTSIZE(5, _("+888.88 dB"), get_SmallMonospaceFont);
 
 		TXTSIZE(0, _("Integrated Loudness:"), get_SmallFont);
-		TXTSIZE(1, string_compose (_("%1 LUFS"), std::setprecision (1), std::fixed, p->loudness), get_LargeFont);
+		TXTSIZE(1, string_compose (_("%1 LUFS"), std::setprecision (1), std::fixed, p->integrated_loudness), get_LargeFont);
 		TXTSIZE(2, _("Loudness Range:"), get_SmallFont);
 		TXTSIZE(3, string_compose (_("%1 LU"), std::setprecision (1), std::fixed, p->loudness_range), get_LargeFont);
+		TXTSIZE(4, _("Max Short/Momentary:"), get_SmallFont);
+		TXTSIZE(5, string_compose (_("%1/%2 LUFS"), std::setprecision (1), std::fixed, p->max_loudness_short, p->max_loudness_momentary), get_SmallFont);
 
 		mnw += 8;
 		const int ht = lin[0] * 1.25 + lin[1] * 1.25 + lin[2] * 1.25 + lin[3] *1.25 + lin[4] * 1.25 + lin[5];
@@ -251,10 +258,10 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 		const int nw2 = mnw / 2; // nums, horizontal center
 
 		int y0[6];
-		if (p->normalized) {
-			y0[0] = (hh - ht) * .5;
+		if (true /*p->normalized*/) {
+			y0[0] = (hh - ht) * .5; // 5 lines
 		} else {
-			y0[0] = (hh - htn) * .5;
+			y0[0] = (hh - htn) * .5; // 4 lines
 		}
 		y0[1] = y0[0] + lin[0] * 1.25;
 		y0[2] = y0[1] + lin[1] * 1.25;
@@ -318,9 +325,13 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 
 				// TODO get max width of labels per column, right-align labels,  x-align 1/3, 2/3 columns
 				const int lx0 = m_l;
-				const int lx1 = m_l + png_w / 2;
+				const int lx1 = m_l + png_w * 2 / 3; // right-col is short (channels, SR, duration)
+				std::string sha1sum = ARDOUR::compute_sha1_of_file (path);
+				if (!sha1sum.empty()) {
+					sha1sum = " (sha1: " + sha1sum + ")";
+				}
 
-				IMGLABEL (lx0, _("File:"), Glib::path_get_basename (path));
+				IMGLABEL (lx0, _("File:"), Glib::path_get_basename (path) + sha1sum);
 				IMGLABEL (lx1, _("Channels:"), string_compose ("%1", channels));
 				png_y0 += linesp;
 
@@ -427,7 +438,7 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 				cr->move_to (rint (nw2 - w * .5), rint ((hh - h) * .5));
 				layout->show_in_cairo_context (cr);
 			}
-			else if (p->loudness == -200 && p->loudness_range == 0) {
+			else if (p->integrated_loudness == -200 && p->loudness_range == 0) {
 				layout->set_alignment (Pango::ALIGN_CENTER);
 				layout->set_font_description (UIConfiguration::instance ().get_LargeFont ());
 				layout->set_text (_("Not\nAvailable"));
@@ -451,7 +462,7 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 				layout->show_in_cairo_context (cr);
 
 				layout->set_font_description (UIConfiguration::instance ().get_LargeFont ());
-				layout->set_text (string_compose (_("%1 LUFS"), std::setprecision (1), std::fixed,  p->loudness));
+				layout->set_text (string_compose (_("%1 LUFS"), std::setprecision (1), std::fixed,  p->integrated_loudness));
 				layout->get_pixel_size (w, h);
 				cr->move_to (rint (nw2 - w * .5), y0[1]);
 				layout->show_in_cairo_context (cr);
@@ -467,6 +478,19 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 				layout->get_pixel_size (w, h);
 				cr->move_to (rint (nw2 - w * .5), y0[3]);
 				layout->show_in_cairo_context (cr);
+
+				layout->set_font_description (UIConfiguration::instance ().get_SmallFont ());
+				layout->set_text (_("Max Short/Momentary:"));
+				layout->get_pixel_size (w, h);
+				cr->move_to (rint (nw2 - w * .5), y0[4]);
+				layout->show_in_cairo_context (cr);
+
+				layout->set_text (string_compose (_("%1/%2 LUFS"), std::setprecision (1), std::fixed, p->max_loudness_short, p->max_loudness_momentary));
+				layout->get_pixel_size (w, h);
+				cr->move_to (rint (nw2 - w * .5), y0[5]);
+				layout->show_in_cairo_context (cr);
+
+				layout->set_font_description (UIConfiguration::instance ().get_LargeFont ());
 			}
 			ebur->flush ();
 
@@ -525,8 +549,8 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 							rint ((g + 59.0) * 10.0 - h * .5), 5,
 							h + 2, w + 2, 4);
 					const float pk = (g + 59.0) / 54.0;
-					ArdourCanvas::Color c = ArdourCanvas::hsva_to_color (252 - 260 * pk, .9, .3 + pk * .4, .6);
-					ArdourCanvas::set_source_rgba (cr, c);
+					Gtkmm2ext::Color c = Gtkmm2ext::hsva_to_color (252 - 260 * pk, .9, .3 + pk * .4, .6);
+					Gtkmm2ext::set_source_rgba (cr, c);
 					cr->fill ();
 
 					cr->save ();
@@ -602,6 +626,9 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 			VBox *lrb = manage (new VBox());
 			ToggleButton *log = manage (new ToggleButton (S_("Logscale|Lg")));
 			ToggleButton *rec = manage (new ToggleButton (S_("Rectified|Rf")));
+			Gtkmm2ext::UI::instance()->set_tip (log, _("Logscale"));
+			Gtkmm2ext::UI::instance()->set_tip (rec, _("Rectified"));
+
 			lrb->pack_start (*log, false, false, 5);
 			lrb->pack_end (*rec, false, false, 5);
 			log->signal_toggled ().connect (sigc::bind (sigc::mem_fun (*this, &ExportReport::on_logscale_toggled), log));
@@ -723,8 +750,8 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 			for (size_t x = 0 ; x < width; ++x) {
 				for (size_t y = 0 ; y < height; ++y) {
 					const float pk = p->spectrum[x][y];
-					ArdourCanvas::Color c = ArdourCanvas::hsva_to_color (252 - 260 * pk, .9, sqrt(pk));
-					ArdourCanvas::set_source_rgba (cr, c);
+					Gtkmm2ext::Color c = Gtkmm2ext::hsva_to_color (252 - 260 * pk, .9, sqrt(pk));
+					Gtkmm2ext::set_source_rgba (cr, c);
 					cr->rectangle (m_l + x - .5, y - .5, 1, 1);
 					cr->fill ();
 				}
@@ -784,8 +811,8 @@ ExportReport::init (const AnalysisResults & ar, bool with_file)
 
 			for (size_t y = 0 ; y < innerheight - 2; ++y) {
 					const float pk = 1.0 - (float) y / innerheight;
-					ArdourCanvas::Color c = ArdourCanvas::hsva_to_color (252 - 260 * pk, .9, sqrt(pk));
-					ArdourCanvas::set_source_rgba (cr, c);
+					Gtkmm2ext::Color c = Gtkmm2ext::hsva_to_color (252 - 260 * pk, .9, sqrt(pk));
+					Gtkmm2ext::set_source_rgba (cr, c);
 					cr->rectangle (2, innertop + y + .5, m_r - 4 - anw, 1);
 					cr->fill ();
 			}
@@ -954,7 +981,7 @@ ExportReport::audition (std::string path, unsigned n_chn, int page)
 				SourceFactory::createExternal (DataType::AUDIO, *_session,
 										 path, n,
 										 Source::Flag (ARDOUR::AudioFileSource::NoPeakFile), false));
-			if (afs->sample_rate() != _session->nominal_frame_rate()) {
+			if (afs->sample_rate() != _session->nominal_sample_rate()) {
 				boost::shared_ptr<SrcFileSource> sfs (new SrcFileSource(*_session, afs, ARDOUR::SrcGood));
 				srclist.push_back(sfs);
 			} else {
@@ -979,7 +1006,7 @@ ExportReport::audition (std::string path, unsigned n_chn, int page)
 	PBD::PropertyList plist;
 
 	plist.add (ARDOUR::Properties::start, 0);
-	plist.add (ARDOUR::Properties::length, srclist[0]->length(srclist[0]->timeline_position()));
+	plist.add (ARDOUR::Properties::length, srclist[0]->length(srclist[0]->natural_position()));
 	plist.add (ARDOUR::Properties::name, rname);
 	plist.add (ARDOUR::Properties::layer, 0);
 
@@ -1027,7 +1054,7 @@ ExportReport::on_switch_page (GtkNotebookPage*, guint page_num)
 }
 
 void
-ExportReport::audition_progress (framecnt_t pos, framecnt_t len)
+ExportReport::audition_progress (samplecnt_t pos, samplecnt_t len)
 {
 	if (_audition_num == _page_num && timeline.find (_audition_num) != timeline.end ()) {
 		const float p = (float)pos / len;
@@ -1146,7 +1173,7 @@ ExportReport::draw_waveform (Cairo::RefPtr<Cairo::ImageSurface>& wave, ExportAna
 		}
 	}
 
-	// > 0dBFS
+	// >= 0dBFS
 	cr->set_source_rgba (1.0, 0, 0, 1.0);
 	for (size_t x = 0 ; x < width; ++x) {
 		if (p->peaks[c][x].max >= 1.0) {
@@ -1160,9 +1187,9 @@ ExportReport::draw_waveform (Cairo::RefPtr<Cairo::ImageSurface>& wave, ExportAna
 	}
 	cr->stroke ();
 
-	// > -1dBTP
+	// >= -1dBTP (coeff >= .89125, libs/vamp-plugins/TruePeak.cpp)
 	cr->set_source_rgba (1.0, 0.7, 0, 0.7);
-	for (std::set<framepos_t>::const_iterator i = p->truepeakpos[c].begin (); i != p->truepeakpos[c].end (); ++i) {
+	for (std::set<samplepos_t>::const_iterator i = p->truepeakpos[c].begin (); i != p->truepeakpos[c].end (); ++i) {
 		cr->move_to (m_l + (*i) - .5, clip_top);
 		cr->line_to (m_l + (*i) - .5, clip_bot);
 		cr->stroke ();

@@ -1,20 +1,23 @@
 /*
-    Copyright (C) 2001, 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_audio_streamview_h__
 #define __ardour_audio_streamview_h__
@@ -50,7 +53,7 @@ class Selection;
 
 class AudioStreamView : public StreamView
 {
-  public:
+public:
 	AudioStreamView (AudioTimeAxisView&);
 
 	int     set_amplitude_above_axis (gdouble app);
@@ -64,10 +67,12 @@ class AudioStreamView : public StreamView
 	RegionView* create_region_view (boost::shared_ptr<ARDOUR::Region>, bool, bool);
 	void set_selected_points (PointSelection&);
 
-  private:
+	void reload_waves ();
+
+private:
 	void setup_rec_box ();
-	void rec_peak_range_ready (framepos_t start, ARDOUR::framecnt_t cnt, boost::weak_ptr<ARDOUR::Source> src);
-	void update_rec_regions (ARDOUR::framepos_t, ARDOUR::framecnt_t);
+	void rec_peak_range_ready (samplepos_t start, ARDOUR::samplecnt_t cnt, boost::weak_ptr<ARDOUR::Source> src);
+	void update_rec_regions (ARDOUR::samplepos_t, ARDOUR::samplecnt_t);
 
 	RegionView* add_region_view_internal (boost::shared_ptr<ARDOUR::Region>, bool wait_for_waves, bool recording = false);
 	void remove_audio_region_view (boost::shared_ptr<ARDOUR::AudioRegion> );

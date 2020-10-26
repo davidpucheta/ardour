@@ -1,29 +1,35 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2014 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2013-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cstdio>
 #include <cmath>
 
 #include <sigc++/bind.h>
 
+#include <gtkmm/box.h>
+#include <gtkmm/filechooserdialog.h>
+#include <gtkmm/stock.h>
+#include <gtkmm/table.h>
+
 #include "pbd/error.h"
 #include "pbd/file_utils.h"
+#include "ardour/filesystem_paths.h"
 #include "ardour/session_directory.h"
 #include "gtkmm2ext/utils.h"
 #include "ardour/template_utils.h"
@@ -35,8 +41,7 @@
 
 #include "video_server_dialog.h"
 #include "utils_videotl.h"
-#include "video_tool_paths.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #ifdef PLATFORM_WINDOWS
 #include <windows.h>
@@ -76,7 +81,7 @@ VideoServerDialog::VideoServerDialog (Session* s)
 	path_entry.set_width_chars(38);
 	path_entry.set_text("/usr/bin/harvid");
 	docroot_entry.set_width_chars(38);
-	docroot_entry.set_text(Config->get_video_server_docroot());
+	docroot_entry.set_text(video_get_docroot (Config));
 
 #ifndef __APPLE__
 	/* Note: on OSX icsd is not able to bind to IPv4 localhost */
@@ -101,6 +106,11 @@ VideoServerDialog::VideoServerDialog (Session* s)
 			<< endmsg;
 	}
 
+#ifdef PLATFORM_WINDOWS
+	if (VideoUtils::harvid_version >= 0x000802) {
+		/* empty docroot -> all drive letters */
+	} else
+#endif
 	if (docroot_entry.get_text().empty()) {
 	  std::string docroot =  Glib::path_get_dirname(_session->session_directory().root_path());
 	  if ((docroot.empty() || docroot.at(docroot.length()-1) != '/')) { docroot += "/"; }
@@ -148,11 +158,6 @@ VideoServerDialog::VideoServerDialog (Session* s)
 	if (Config->get_video_advanced_setup()){
 		vbox->pack_start (*docroot_hbox, false, false);
 	} else {
-#ifndef PLATFORM_WINDOWS
-		docroot_entry.set_text(X_("/"));
-#else
-		docroot_entry.set_text(X_("C:\\"));
-#endif
 		listenport_spinner.set_sensitive(false);
 	}
 	vbox->pack_start (*options_box, false, true);

@@ -1,19 +1,19 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Paul Davis <paul@linuxaudiosystems.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 
@@ -21,7 +21,7 @@
 #include "ardour/route.h"
 #include "ardour/session.h"
 
-#include "timecode/time.h"
+#include "temporal/time.h"
 
 #include "audiographer/process_context.h"
 #include "audiographer/general/chunker.h"
@@ -29,7 +29,7 @@
 #include "audiographer/general/analyser.h"
 #include "audiographer/general/peak_reader.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace AudioGrapher;
@@ -37,8 +37,8 @@ using namespace AudioGrapher;
 AnalysisGraph::AnalysisGraph (Session *s)
 	: _session (s)
 	, _max_chunksize (8192)
-	, _frames_read (0)
-	, _frames_end (0)
+	, _samples_read (0)
+	, _samples_end (0)
 	, _canceled (false)
 {
 	_buf     = (Sample *) malloc(sizeof(Sample) * _max_chunksize);
@@ -60,7 +60,7 @@ AnalysisGraph::analyze_region (boost::shared_ptr<AudioRegion> region)
 	interleaver->init (region->n_channels(), _max_chunksize);
 	chunker.reset (new Chunker<Sample> (_max_chunksize));
 	analyser.reset (new Analyser (
-				_session->nominal_frame_rate(),
+				_session->nominal_sample_rate(),
 				region->n_channels(),
 				_max_chunksize,
 				region->length()));
@@ -68,11 +68,11 @@ AnalysisGraph::analyze_region (boost::shared_ptr<AudioRegion> region)
 	interleaver->add_output(chunker);
 	chunker->add_output (analyser);
 
-	framecnt_t x = 0;
-	framecnt_t length = region->length();
+	samplecnt_t x = 0;
+	samplecnt_t length = region->length();
 	while (x < length) {
-		framecnt_t chunk = std::min (_max_chunksize, length - x);
-		framecnt_t n = 0;
+		samplecnt_t chunk = std::min (_max_chunksize, length - x);
+		samplecnt_t n = 0;
 		for (unsigned int channel = 0; channel < region->n_channels(); ++channel) {
 			memset (_buf, 0, chunk * sizeof (Sample));
 			n = region->read_at (_buf, _mixbuf, _gainbuf, region->position() + x, chunk, channel);
@@ -88,8 +88,8 @@ AnalysisGraph::analyze_region (boost::shared_ptr<AudioRegion> region)
 			}
 		}
 		x += n;
-		_frames_read += n;
-		Progress (_frames_read, _frames_end);
+		_samples_read += n;
+		Progress (_samples_read, _samples_end);
 		if (_canceled) {
 			return;
 		}
@@ -112,10 +112,10 @@ AnalysisGraph::analyze_range (boost::shared_ptr<Route> route, boost::shared_ptr<
 		interleaver->add_output(chunker);
 		chunker->add_output (analyser);
 
-		framecnt_t x = 0;
+		samplecnt_t x = 0;
 		while (x < j->length()) {
-			framecnt_t chunk = std::min (_max_chunksize, (*j).length() - x);
-			framecnt_t n = 0;
+			samplecnt_t chunk = std::min (_max_chunksize, (*j).length() - x);
+			samplecnt_t n = 0;
 			for (uint32_t channel = 0; channel < n_audio; ++channel) {
 				n = pl->read (_buf, _mixbuf, _gainbuf, (*j).start + x, chunk, channel);
 
@@ -126,8 +126,8 @@ AnalysisGraph::analyze_range (boost::shared_ptr<Route> route, boost::shared_ptr<
 				interleaver->input (channel)->process (context);
 			}
 			x += n;
-			_frames_read += n;
-			Progress (_frames_read, _frames_end);
+			_samples_read += n;
+			Progress (_samples_read, _samples_end);
 			if (_canceled) {
 				return;
 			}
@@ -136,11 +136,11 @@ AnalysisGraph::analyze_range (boost::shared_ptr<Route> route, boost::shared_ptr<
 		std::string name = string_compose (_("%1 (%2..%3)"), route->name(),
 				Timecode::timecode_format_sampletime (
 					(*j).start,
-					_session->nominal_frame_rate(),
+					_session->nominal_sample_rate(),
 					100, false),
 				Timecode::timecode_format_sampletime (
 					(*j).start + (*j).length(),
-					_session->nominal_frame_rate(),
+					_session->nominal_sample_rate(),
 					100, false)
 				);
 		_results.insert (std::make_pair (name, analyser->result ()));

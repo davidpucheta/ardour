@@ -1,31 +1,30 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2000-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006 Hans Fugal <hans@fugal.net>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <ostream>
 #include <stdio.h>
 
-#ifndef __STDC_FORMAT_MACROS
-#define __STDC_FORMAT_MACROS
-#endif
-#include <inttypes.h>
-
 #include "pbd/id.h"
+#include "pbd/string_convert.h"
+
 #include <string>
 
 using namespace std;
@@ -37,8 +36,9 @@ uint64_t ID::_counter = 0;
 void
 ID::init ()
 {
-	if (!counter_lock)
+	if (!counter_lock) {
 		counter_lock = new Glib::Threads::Mutex;
+	}
 }
 
 ID::ID ()
@@ -53,39 +53,39 @@ ID::ID (const ID& other)
 
 ID::ID (string str)
 {
+	/* danger, will robinson: could result in non-unique ID */
 	string_assign (str);
+}
+
+ID::ID (uint64_t n)
+{
+	/* danger, will robinson: could result in non-unique ID */
+	_id = n;
 }
 
 void
 ID::reset ()
 {
 	Glib::Threads::Mutex::Lock lm (*counter_lock);
-	_id = _counter++;
+	_id = ++_counter;
 }
 
-int
+bool
 ID::string_assign (string str)
 {
-	return sscanf (str.c_str(), "%" PRIu64, &_id) != 0;
+	return string_to_uint64 (str, _id);
 }
 
-void
-ID::print (char* buf, uint32_t bufsize) const
+std::string
+ID::to_s () const
 {
-	snprintf (buf, bufsize, "%" PRIu64, _id);
-}
-
-string ID::to_s() const
-{
-    char buf[32]; // see print()
-    print(buf, sizeof (buf));
-    return string(buf);
+	return to_string (_id);
 }
 
 bool
 ID::operator== (const string& str) const
 {
-	return to_s() == str;
+	return to_string (_id) == str;
 }
 
 ID&
@@ -105,11 +105,9 @@ ID::operator= (const ID& other)
 }
 
 ostream&
-operator<< (ostream& ostr, const ID& _id)
+operator<< (ostream& ostr, const ID& id)
 {
-	char buf[32];
-	_id.print (buf, sizeof (buf));
-	ostr << buf;
+	ostr << id.to_s();
 	return ostr;
 }
 

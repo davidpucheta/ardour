@@ -1,30 +1,31 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __pbd_properties_h__
 #define __pbd_properties_h__
 
 #include <string>
-#include <sstream>
 #include <list>
 #include <set>
-#include <iostream>
 
 #include "pbd/libpbd_visibility.h"
 #include "pbd/xml++.h"
@@ -32,6 +33,7 @@
 #include "pbd/property_list.h"
 #include "pbd/enumwriter.h"
 #include "pbd/stateful.h"
+#include "pbd/string_convert.h"
 
 namespace PBD {
 
@@ -117,7 +119,7 @@ public:
 	}
 
 	void get_value (XMLNode & node) const {
-                node.add_property (property_name(), to_string (_current));
+		node.set_property (property_name (), _current);
 	}
 
 
@@ -140,8 +142,8 @@ public:
 
 	void get_changes_as_xml (XMLNode* history_node) const {
 		XMLNode* node = history_node->add_child (property_name());
-                node->add_property ("from", to_string (_old));
-                node->add_property ("to", to_string (_current));
+		node->set_property ("from", _old);
+		node->set_property ("to", _current);
 	}
 
 	void get_changes_as_properties (PropertyList& changes, Command *) const {
@@ -236,8 +238,8 @@ public:
 		if (i == children.end()) {
 			return 0;
 		}
-		XMLProperty* from = (*i)->property ("from");
-		XMLProperty* to = (*i)->property ("to");
+		XMLProperty const * from = (*i)->property ("from");
+		XMLProperty const * to = (*i)->property ("to");
 
 		if (!from || !to) {
 			return 0;
@@ -249,6 +251,11 @@ public:
 	T & operator=(T const& v) {
 		this->set (v);
 		return this->_current;
+	}
+
+	Property<T>& operator=(Property<T> const& v) {
+		this->set (v);
+		return *this;
 	}
 
 private:
@@ -265,17 +272,11 @@ private:
 	 * other than C or POSIX locales.
 	 */
 	virtual std::string to_string (T const& v) const {
-		std::stringstream s;
-		s.precision (12); // in case its floating point
-		s << v;
-		return s.str ();
+		return PBD::to_string (v);
 	}
 
 	virtual T from_string (std::string const& s) const {
-		std::stringstream t (s);
-		T                 v;
-		t >> v;
-		return v;
+		return PBD::string_to<T>(s);
 	}
 
 };

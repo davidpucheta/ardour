@@ -1,46 +1,59 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2017 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdint.h>
 
 #include <sstream>
 #include <algorithm>
 
+#ifdef COMPILER_MSVC
+#include <io.h> // Microsoft's nearest equivalent to <unistd.h>
+#include <ardourext/misc.h>
+#else
+#include <regex.h>
+#endif
+
 #include <glibmm/fileutils.h>
 #include <glibmm/miscutils.h>
 
-#include "pbd/controllable_descriptor.h"
+#include "pbd/compose.h"
+#include "pbd/convert.h"
 #include "pbd/error.h"
 #include "pbd/failed_constructor.h"
 #include "pbd/file_utils.h"
+#include "pbd/strsplit.h"
+#include "pbd/types_convert.h"
 #include "pbd/xml++.h"
-#include "pbd/compose.h"
 
 #include "midi++/port.h"
 
 #include "ardour/async_midi_port.h"
 #include "ardour/audioengine.h"
-#include "ardour/audioengine.h"
+#include "ardour/auditioner.h"
 #include "ardour/filesystem_paths.h"
 #include "ardour/session.h"
-#include "ardour/route.h"
 #include "ardour/midi_ui.h"
+#include "ardour/plugin_insert.h"
 #include "ardour/rc_configuration.h"
 #include "ardour/midiport_manager.h"
 #include "ardour/debug.h"
@@ -50,23 +63,52 @@
 #include "midifunction.h"
 #include "midiaction.h"
 
+#include "pbd/abstract_ui.cc" // instantiate template
+
+#include "pbd/i18n.h"
+
 using namespace ARDOUR;
 using namespace PBD;
+using namespace Glib;
 using namespace std;
-
-#include "i18n.h"
-
-#define midi_ui_context() MidiControlUI::instance() /* a UICallback-derived object that specifies the event loop for signal handling */
 
 GenericMidiControlProtocol::GenericMidiControlProtocol (Session& s)
 	: ControlProtocol (s, _("Generic MIDI"))
+	, AbstractUI<GenericMIDIRequest> (name())
 	, connection_state (ConnectionState (0))
 	, _motorised (false)
 	, _threshold (10)
 	, gui (0)
 {
-	_input_port = boost::dynamic_pointer_cast<AsyncMIDIPort> (s.midi_input_port ());
-	_output_port = boost::dynamic_pointer_cast<AsyncMIDIPort> (s.midi_output_port ());
+	boost::shared_ptr<ARDOUR::Port> inp;
+	boost::shared_ptr<ARDOUR::Port> outp;
+
+	inp  = AudioEngine::instance()->register_input_port (DataType::MIDI, _("MIDI Control In"), true);
+	outp = AudioEngine::instance()->register_output_port (DataType::MIDI, _("MIDI Control Out"), true);
+
+	if (inp == 0 || outp == 0) {
+		throw failed_constructor();
+	}
+
+	_input_port = boost::dynamic_pointer_cast<AsyncMIDIPort>(inp);
+	_output_port = boost::dynamic_pointer_cast<AsyncMIDIPort>(outp);
+
+	_input_bundle.reset (new ARDOUR::Bundle (_("Generic MIDI Control In"), true));
+	_output_bundle.reset (new ARDOUR::Bundle (_("Generic MIDI Control Out"), false));
+
+	_input_bundle->add_channel (
+		inp->name(),
+		ARDOUR::DataType::MIDI,
+		session->engine().make_port_name_non_relative (inp->name())
+		);
+
+	_output_bundle->add_channel (
+		outp->name(),
+		ARDOUR::DataType::MIDI,
+		session->engine().make_port_name_non_relative (outp->name())
+		);
+
+	session->BundleAddedOrRemoved ();
 
 	do_feedback = false;
 	_feedback_interval = 10000; // microseconds
@@ -75,15 +117,13 @@ GenericMidiControlProtocol::GenericMidiControlProtocol (Session& s)
 	_current_bank = 0;
 	_bank_size = 0;
 
-	/* these signals are emitted by the MidiControlUI's event loop thread
+	/* these signals are emitted by our event loop thread
 	 * and we may as well handle them right there in the same the same
 	 * thread
 	 */
 
 	Controllable::StartLearning.connect_same_thread (*this, boost::bind (&GenericMidiControlProtocol::start_learning, this, _1));
 	Controllable::StopLearning.connect_same_thread (*this, boost::bind (&GenericMidiControlProtocol::stop_learning, this, _1));
-	Controllable::CreateBinding.connect_same_thread (*this, boost::bind (&GenericMidiControlProtocol::create_binding, this, _1, _2, _3));
-	Controllable::DeleteBinding.connect_same_thread (*this, boost::bind (&GenericMidiControlProtocol::delete_binding, this, _1));
 
 	/* this signal is emitted by the process() callback, and if
 	 * send_feedback() is going to do anything, it should do it in the
@@ -91,25 +131,53 @@ GenericMidiControlProtocol::GenericMidiControlProtocol (Session& s)
 	 */
 
 	Session::SendFeedback.connect_same_thread (*this, boost::bind (&GenericMidiControlProtocol::send_feedback, this));
-	//Session::SendFeedback.connect (*this, MISSING_INVALIDATOR, boost::bind (&GenericMidiControlProtocol::send_feedback, this), midi_ui_context());;
 
 	/* this one is cross-thread */
 
-	Route::RemoteControlIDChange.connect (*this, MISSING_INVALIDATOR, boost::bind (&GenericMidiControlProtocol::reset_controllables, this), midi_ui_context());
+	PresentationInfo::Change.connect (*this, MISSING_INVALIDATOR, boost::bind (&GenericMidiControlProtocol::reset_controllables, this), this);
 
 	/* Catch port connections and disconnections (cross-thread) */
 	ARDOUR::AudioEngine::instance()->PortConnectedOrDisconnected.connect (port_connection, MISSING_INVALIDATOR,
 	                                                                      boost::bind (&GenericMidiControlProtocol::connection_handler, this, _1, _2, _3, _4, _5),
-	                                                                      midi_ui_context());
+	                                                                      this);
 
 	reload_maps ();
 }
 
 GenericMidiControlProtocol::~GenericMidiControlProtocol ()
 {
+	if (_input_port) {
+		DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("unregistering input port %1\n", boost::shared_ptr<ARDOUR::Port>(_input_port)->name()));
+		Glib::Threads::Mutex::Lock em (AudioEngine::instance()->process_lock());
+		AudioEngine::instance()->unregister_port (_input_port);
+		_input_port.reset ();
+	}
+
+	if (_output_port) {
+		_output_port->drain (10000,  250000); /* check every 10 msecs, wait up to 1/4 second for the port to drain */
+		DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("unregistering output port %1\n", boost::shared_ptr<ARDOUR::Port>(_output_port)->name()));
+		Glib::Threads::Mutex::Lock em (AudioEngine::instance()->process_lock());
+		AudioEngine::instance()->unregister_port (_output_port);
+		_output_port.reset ();
+	}
+
 	drop_all ();
 	tear_down_gui ();
 }
+
+list<boost::shared_ptr<ARDOUR::Bundle> >
+GenericMidiControlProtocol::bundles ()
+{
+	list<boost::shared_ptr<ARDOUR::Bundle> > b;
+
+	if (_input_bundle) {
+		b.push_back (_input_bundle);
+		b.push_back (_output_bundle);
+	}
+
+	return b;
+}
+
 
 static const char * const midimap_env_variable_name = "ARDOUR_MIDIMAPS_PATH";
 static const char* const midi_map_dir_name = "midi_maps";
@@ -168,13 +236,12 @@ GenericMidiControlProtocol::reload_maps ()
 
 		MapInfo mi;
 
-		XMLProperty* prop = tree.root()->property ("name");
-
-		if (!prop) {
+		std::string str;
+		if (!tree.root()->get_property ("name", str)) {
 			continue;
 		}
 
-		mi.name = prop->value ();
+		mi.name = str;
 		mi.path = fullpath;
 
 		map_info.push_back (mi);
@@ -194,6 +261,10 @@ GenericMidiControlProtocol::drop_all ()
 	controllables.clear ();
 
 	for (MIDIPendingControllables::iterator i = pending_controllables.begin(); i != pending_controllables.end(); ++i) {
+		(*i)->connection.disconnect();
+		if ((*i)->own_mc) {
+			delete (*i)->mc;
+		}
 		delete *i;
 	}
 	pending_controllables.clear ();
@@ -234,12 +305,57 @@ GenericMidiControlProtocol::drop_bindings ()
 	_current_bank = 0;
 }
 
-int
-GenericMidiControlProtocol::set_active (bool /*yn*/)
+void
+GenericMidiControlProtocol::do_request (GenericMIDIRequest* req)
 {
-	/* nothing to do here: the MIDI UI thread in libardour handles all our
-	   I/O needs.
-	*/
+	if (req->type == CallSlot) {
+
+		call_slot (MISSING_INVALIDATOR, req->the_slot);
+
+	} else if (req->type == Quit) {
+
+		stop ();
+	}
+}
+
+int
+GenericMidiControlProtocol::stop ()
+{
+	BaseUI::quit ();
+
+	return 0;
+}
+
+void
+GenericMidiControlProtocol::thread_init ()
+{
+	pthread_set_name (event_loop_name().c_str());
+
+	PBD::notify_event_loops_about_thread_creation (pthread_self(), event_loop_name(), 2048);
+	ARDOUR::SessionEvent::create_per_thread_pool (event_loop_name(), 128);
+
+	set_thread_priority ();
+}
+
+int
+GenericMidiControlProtocol::set_active (bool yn)
+{
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose("GenericMIDI::set_active init with yn: '%1'\n", yn));
+
+	if (yn == active()) {
+		return 0;
+	}
+
+	if (yn) {
+		BaseUI::run ();
+	} else {
+		BaseUI::quit ();
+	}
+
+	ControlProtocol::set_active (yn);
+
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose("GenericMIDI::set_active done with yn: '%1'\n", yn));
+
 	return 0;
 }
 
@@ -302,14 +418,19 @@ GenericMidiControlProtocol::_send_feedback ()
 }
 
 bool
-GenericMidiControlProtocol::start_learning (Controllable* c)
+GenericMidiControlProtocol::start_learning (boost::weak_ptr <Controllable> wc)
 {
-	if (c == 0) {
+	boost::shared_ptr<Controllable> c = wc.lock ();
+	if (!c) {
 		return false;
 	}
 
 	Glib::Threads::Mutex::Lock lm2 (controllables_lock);
 	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("Learn binding: Controlable number: %1\n", c));
+
+	/* drop any existing mappings for the same controllable for which
+	 * learning has just started.
+	 */
 
 	MIDIControllables::iterator tmp;
 	for (MIDIControllables::iterator i = controllables.begin(); i != controllables.end(); ) {
@@ -322,24 +443,29 @@ GenericMidiControlProtocol::start_learning (Controllable* c)
 		i = tmp;
 	}
 
+	/* check pending controllables (those for which a learn is underway) to
+	 * see if it is for the same one for which learning has just started.
+	 */
+
 	{
 		Glib::Threads::Mutex::Lock lm (pending_lock);
 
-		MIDIPendingControllables::iterator ptmp;
 		for (MIDIPendingControllables::iterator i = pending_controllables.begin(); i != pending_controllables.end(); ) {
-			ptmp = i;
-			++ptmp;
-			if (((*i)->first)->get_controllable() == c) {
-				(*i)->second.disconnect();
-				delete (*i)->first;
+			if (((*i)->mc)->get_controllable() == c) {
+				(*i)->connection.disconnect();
+				if ((*i)->own_mc) {
+					delete (*i)->mc;
+				}
 				delete *i;
-				pending_controllables.erase (i);
+				i = pending_controllables.erase (i);
+			} else {
+				++i;
 			}
-			i = ptmp;
 		}
 	}
 
 	MIDIControllable* mc = 0;
+	bool own_mc = false;
 
 	for (MIDIControllables::iterator i = controllables.begin(); i != controllables.end(); ++i) {
 		if ((*i)->get_controllable() && ((*i)->get_controllable()->id() == c->id())) {
@@ -349,15 +475,17 @@ GenericMidiControlProtocol::start_learning (Controllable* c)
 	}
 
 	if (!mc) {
-		mc = new MIDIControllable (this, *_input_port->parser(), *c, false);
+		mc = new MIDIControllable (this, *_input_port->parser(), c, false);
+		own_mc = true;
 	}
+
+	/* stuff the new controllable into pending */
 
 	{
 		Glib::Threads::Mutex::Lock lm (pending_lock);
 
-		MIDIPendingControllable* element = new MIDIPendingControllable;
-		element->first = mc;
-		c->LearningFinished.connect_same_thread (element->second, boost::bind (&GenericMidiControlProtocol::learning_stopped, this, mc));
+		MIDIPendingControllable* element = new MIDIPendingControllable (mc, own_mc);
+		c->LearningFinished.connect_same_thread (element->connection, boost::bind (&GenericMidiControlProtocol::learning_stopped, this, mc));
 
 		pending_controllables.push_back (element);
 	}
@@ -371,27 +499,31 @@ GenericMidiControlProtocol::learning_stopped (MIDIControllable* mc)
 	Glib::Threads::Mutex::Lock lm (pending_lock);
 	Glib::Threads::Mutex::Lock lm2 (controllables_lock);
 
-	MIDIPendingControllables::iterator tmp;
-
 	for (MIDIPendingControllables::iterator i = pending_controllables.begin(); i != pending_controllables.end(); ) {
-		tmp = i;
-		++tmp;
-
-		if ( (*i)->first == mc) {
-			(*i)->second.disconnect();
+		if ( (*i)->mc == mc) {
+			(*i)->connection.disconnect();
 			delete *i;
-			pending_controllables.erase(i);
+			i = pending_controllables.erase(i);
+		} else {
+			++i;
 		}
-
-		i = tmp;
 	}
+
+	/* add the controllable for which learning stopped to our list of
+	 * controllables
+	 */
 
 	controllables.push_back (mc);
 }
 
 void
-GenericMidiControlProtocol::stop_learning (Controllable* c)
+GenericMidiControlProtocol::stop_learning (boost::weak_ptr<PBD::Controllable> wc)
 {
+	boost::shared_ptr<Controllable> c = wc.lock ();
+	if (!c) {
+		return;
+	}
+
 	Glib::Threads::Mutex::Lock lm (pending_lock);
 	Glib::Threads::Mutex::Lock lm2 (controllables_lock);
 	MIDIControllable* dptr = 0;
@@ -401,10 +533,10 @@ GenericMidiControlProtocol::stop_learning (Controllable* c)
 	*/
 
 	for (MIDIPendingControllables::iterator i = pending_controllables.begin(); i != pending_controllables.end(); ++i) {
-		if (((*i)->first)->get_controllable() == c) {
-			(*i)->first->stop_learning ();
-			dptr = (*i)->first;
-			(*i)->second.disconnect();
+		if (((*i)->mc)->get_controllable() == c) {
+			(*i)->mc->stop_learning ();
+			dptr = (*i)->mc;
+			(*i)->connection.disconnect();
 
 			delete *i;
 			pending_controllables.erase (i);
@@ -413,64 +545,6 @@ GenericMidiControlProtocol::stop_learning (Controllable* c)
 	}
 
 	delete dptr;
-}
-
-void
-GenericMidiControlProtocol::delete_binding (PBD::Controllable* control)
-{
-	if (control != 0) {
-		Glib::Threads::Mutex::Lock lm2 (controllables_lock);
-
-		for (MIDIControllables::iterator iter = controllables.begin(); iter != controllables.end();) {
-			MIDIControllable* existingBinding = (*iter);
-
-			if (control == (existingBinding->get_controllable())) {
-				delete existingBinding;
-				iter = controllables.erase (iter);
-			} else {
-				++iter;
-			}
-
-		}
-	}
-}
-
-// This next function seems unused
-void
-GenericMidiControlProtocol::create_binding (PBD::Controllable* control, int pos, int control_number)
-{
-	if (control != NULL) {
-		Glib::Threads::Mutex::Lock lm2 (controllables_lock);
-
-		MIDI::channel_t channel = (pos & 0xf);
-		MIDI::byte value = control_number;
-
-		// Create a MIDIControllable
-		MIDIControllable* mc = new MIDIControllable (this, *_input_port->parser(), *control, false);
-
-		// Remove any old binding for this midi channel/type/value pair
-		// Note:  can't use delete_binding() here because we don't know the specific controllable we want to remove, only the midi information
-		for (MIDIControllables::iterator iter = controllables.begin(); iter != controllables.end();) {
-			MIDIControllable* existingBinding = (*iter);
-
-			if ((existingBinding->get_control_channel() & 0xf ) == channel &&
-			    existingBinding->get_control_additional() == value &&
-			    (existingBinding->get_control_type() & 0xf0 ) == MIDI::controller) {
-
-				delete existingBinding;
-				iter = controllables.erase (iter);
-			} else {
-				++iter;
-			}
-
-		}
-
-		// Update the MIDI Controllable based on the the pos param
-		// Here is where a table lookup for user mappings could go; for now we'll just wing it...
-		mc->bind_midi(channel, MIDI::controller, value);
-		DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("Create binding: Channel: %1 Controller: %2 Value: %3 \n", channel, MIDI::controller, value));
-		controllables.push_back (mc);
-	}
 }
 
 void
@@ -484,7 +558,6 @@ GenericMidiControlProtocol::check_used_event (int pos, int control_number)
 	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("checking for used event: Channel: %1 Controller: %2 value: %3\n", (int) channel, (pos & 0xf0), (int) value));
 
 	// Remove any old binding for this midi channel/type/value pair
-	// Note:  can't use delete_binding() here because we don't know the specific controllable we want to remove, only the midi information
 	for (MIDIControllables::iterator iter = controllables.begin(); iter != controllables.end();) {
 		MIDIControllable* existingBinding = (*iter);
 		if ( (existingBinding->get_control_type() & 0xf0 ) == (pos & 0xf0) && (existingBinding->get_control_channel() & 0xf ) == channel ) {
@@ -536,17 +609,24 @@ XMLNode&
 GenericMidiControlProtocol::get_state ()
 {
 	XMLNode& node (ControlProtocol::get_state());
-	char buf[32];
 
-	snprintf (buf, sizeof (buf), "%" PRIu64, _feedback_interval);
-	node.add_property (X_("feedback_interval"), buf);
-	snprintf (buf, sizeof (buf), "%d", _threshold);
-	node.add_property (X_("threshold"), buf);
 
-	node.add_property (X_("motorized"), _motorised ? "yes" : "no");
+	XMLNode* child;
+
+	child = new XMLNode (X_("Input"));
+	child->add_child_nocopy (boost::shared_ptr<ARDOUR::Port>(_input_port)->get_state());
+	node.add_child_nocopy (*child);
+
+	child = new XMLNode (X_("Output"));
+	child->add_child_nocopy (boost::shared_ptr<ARDOUR::Port>(_output_port)->get_state());
+	node.add_child_nocopy (*child);
+
+	node.set_property (X_("feedback-interval"), _feedback_interval);
+	node.set_property (X_("threshold"), _threshold);
+	node.set_property (X_("motorized"), _motorised);
 
 	if (!_current_binding.empty()) {
-		node.add_property ("binding", _current_binding);
+		node.set_property ("binding", _current_binding);
 	}
 
 	XMLNode* children = new XMLNode (X_("Controls"));
@@ -574,31 +654,35 @@ GenericMidiControlProtocol::set_state (const XMLNode& node, int version)
 {
 	XMLNodeList nlist;
 	XMLNodeConstIterator niter;
-	const XMLProperty* prop;
+	XMLNode const* child;
 
 	if (ControlProtocol::set_state (node, version)) {
 		return -1;
 	}
 
-	if ((prop = node.property ("feedback_interval")) != 0) {
-		if (sscanf (prop->value().c_str(), "%" PRIu64, &_feedback_interval) != 1) {
-			_feedback_interval = 10000;
+	if ((child = node.child (X_("Input"))) != 0) {
+		XMLNode* portnode = child->child (Port::state_node_name.c_str());
+		if (portnode) {
+			boost::shared_ptr<ARDOUR::Port>(_input_port)->set_state (*portnode, version);
 		}
-	} else {
+	}
+
+	if ((child = node.child (X_("Output"))) != 0) {
+		XMLNode* portnode = child->child (Port::state_node_name.c_str());
+		if (portnode) {
+			boost::shared_ptr<ARDOUR::Port>(_output_port)->set_state (*portnode, version);
+		}
+	}
+
+	if (!node.get_property ("feedback-interval", _feedback_interval)) {
 		_feedback_interval = 10000;
 	}
 
-	if ((prop = node.property ("threshold")) != 0) {
-		if (sscanf (prop->value().c_str(), "%d", &_threshold) != 1) {
-			_threshold = 10;
-		}
-	} else {
+	if (!node.get_property ("threshold", _threshold)) {
 		_threshold = 10;
 	}
 
-	if ((prop = node.property ("motorized")) != 0) {
-		_motorised = string_is_affirmative (prop->value ());
-	} else {
+	if (!node.get_property ("motorized", _motorised)) {
 		_motorised = false;
 	}
 
@@ -607,15 +691,20 @@ GenericMidiControlProtocol::set_state (const XMLNode& node, int version)
 	{
 		Glib::Threads::Mutex::Lock lm (pending_lock);
 		for (MIDIPendingControllables::iterator i = pending_controllables.begin(); i != pending_controllables.end(); ++i) {
+			(*i)->connection.disconnect();
+			if ((*i)->own_mc) {
+				delete (*i)->mc;
+			}
 			delete *i;
 		}
 		pending_controllables.clear ();
 	}
 
+	std::string str;
 	// midi map has to be loaded first so learned binding can go on top
-	if ((prop = node.property ("binding")) != 0) {
+	if (node.get_property ("binding", str)) {
 		for (list<MapInfo>::iterator x = map_info.begin(); x != map_info.end(); ++x) {
-			if (prop->value() == (*x).name) {
+			if (str == (*x).name) {
 				load_bindings ((*x).path);
 				break;
 			}
@@ -626,27 +715,36 @@ GenericMidiControlProtocol::set_state (const XMLNode& node, int version)
 	 * <Controls><MidiControllable>...</MidiControllable><Controls> section
 	 */
 
-	{
-		Glib::Threads::Mutex::Lock lm2 (controllables_lock);
-		nlist = node.children(); // "Controls"
+	bool load_dynamic_bindings = false;
+	node.get_property ("session-state", load_dynamic_bindings);
 
-		if (!nlist.empty()) {
-			nlist = nlist.front()->children(); // "MIDIControllable" ...
+	if (load_dynamic_bindings) {
+		Glib::Threads::Mutex::Lock lm2 (controllables_lock);
+		XMLNode* controls_node = node.child (X_("Controls"));
+
+		if (controls_node) {
+
+			nlist = controls_node->children();
 
 			if (!nlist.empty()) {
+
 				for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
 
-					if ((prop = (*niter)->property ("id")) != 0) {
+					PBD::ID id;
 
-						ID id = prop->value ();
+					if ((*niter)->get_property ("id", id)) {
+
 						DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("Relearned binding for session: Control ID: %1\n", id.to_s()));
-						Controllable* c = Controllable::by_id (id);
+						boost::shared_ptr<PBD::Controllable> c = Controllable::by_id (id);
 
 						if (c) {
-							MIDIControllable* mc = new MIDIControllable (this, *_input_port->parser(), *c, false);
+							MIDIControllable* mc = new MIDIControllable (this, *_input_port->parser(), c, false);
 
 							if (mc->set_state (**niter, version) == 0) {
 								controllables.push_back (mc);
+							} else {
+								warning << string_compose ("Generic MIDI control: Failed to set state for Control ID: %1\n", id.to_s());
+								delete mc;
 							}
 
 						} else {
@@ -699,13 +797,6 @@ GenericMidiControlProtocol::load_bindings (const string& xmlpath)
 
 	if ((prop = root->property ("version")) == 0) {
 		return -1;
-	} else {
-		int major;
-		int minor;
-		int micro;
-
-		sscanf (prop->value().c_str(), "%d.%d.%d", &major, &minor, &micro);
-		Stateful::loading_state_version = (major * 1000) + minor;
 	}
 
 	const XMLNodeList& children (root->children());
@@ -720,25 +811,18 @@ GenericMidiControlProtocol::load_bindings (const string& xmlpath)
 	for (citer = children.begin(); citer != children.end(); ++citer) {
 
 		if ((*citer)->name() == "DeviceInfo") {
-			const XMLProperty* prop;
 
-			if ((prop = (*citer)->property ("bank-size")) != 0) {
-				_bank_size = atoi (prop->value());
+			if ((*citer)->get_property ("bank-size", _bank_size)) {
 				_current_bank = 0;
 			}
 
-			if ((prop = (*citer)->property ("motorized")) != 0) {
-				_motorised = string_is_affirmative (prop->value ());
-			} else {
+			if (!(*citer)->get_property ("motorized", _motorised)) {
 				_motorised = false;
 			}
 
-			if ((prop = (*citer)->property ("threshold")) != 0) {
-				_threshold = atoi (prop->value ());
-			} else {
+			if (!(*citer)->get_property ("threshold", _threshold)) {
 				_threshold = 10;
 			}
-
 		}
 
 		if ((*citer)->name() == "Binding") {
@@ -747,8 +831,8 @@ GenericMidiControlProtocol::load_bindings (const string& xmlpath)
 			if (child->property ("uri")) {
 				/* controllable */
 
+				Glib::Threads::Mutex::Lock lm2 (controllables_lock);
 				if ((mc = create_binding (*child)) != 0) {
-					Glib::Threads::Mutex::Lock lm2 (controllables_lock);
 					controllables.push_back (mc);
 				}
 
@@ -762,12 +846,12 @@ GenericMidiControlProtocol::load_bindings (const string& xmlpath)
 				}
 
 			} else if (child->property ("action")) {
-                                MIDIAction* ma;
+				MIDIAction* ma;
 
 				if ((ma = create_action (*child)) != 0) {
 					actions.push_back (ma);
 				}
-                        }
+			}
 		}
 	}
 
@@ -790,6 +874,7 @@ GenericMidiControlProtocol::create_binding (const XMLNode& node)
 	MIDI::eventType ev;
 	int intval;
 	bool momentary;
+	MIDIControllable::CtlType ctltype;
 	MIDIControllable::Encoder encoder = MIDIControllable::No_enc;
 	bool rpn_value = false;
 	bool nrpn_value = false;
@@ -797,6 +882,13 @@ GenericMidiControlProtocol::create_binding (const XMLNode& node)
 	bool nrpn_change = false;
 
 	if ((prop = node.property (X_("ctl"))) != 0) {
+		ctltype = MIDIControllable::Ctl_Momentary;
+		ev = MIDI::controller;
+	} else if ((prop = node.property (X_("ctl-toggle"))) !=0) {
+		ctltype = MIDIControllable::Ctl_Toggle;
+		ev = MIDI::controller;
+	} else if ((prop = node.property (X_("ctl-dial"))) !=0) {
+		ctltype = MIDIControllable::Ctl_Dial;
 		ev = MIDI::controller;
 	} else if ((prop = node.property (X_("note"))) != 0) {
 		ev = MIDI::on;
@@ -848,7 +940,7 @@ GenericMidiControlProtocol::create_binding (const XMLNode& node)
 	}
 
 	if ((prop = node.property (X_("momentary"))) != 0) {
-		momentary = string_is_affirmative (prop->value());
+		momentary = string_to<bool> (prop->value());
 	} else {
 		momentary = false;
 	}
@@ -872,6 +964,7 @@ GenericMidiControlProtocol::create_binding (const XMLNode& node)
 	} else if (nrpn_change) {
 		mc->bind_nrpn_change (channel, detail);
 	} else {
+		mc->set_ctltype (ctltype);
 		mc->set_encoder (encoder);
 		mc->bind_midi (channel, ev, detail);
 	}
@@ -890,11 +983,6 @@ GenericMidiControlProtocol::reset_controllables ()
 		++next;
 
 		if (!existingBinding->learned()) {
-			ControllableDescriptor& desc (existingBinding->descriptor());
-
-			if (desc.banked()) {
-				desc.set_bank_offset (_current_bank * _bank_size);
-			}
 
 			/* its entirely possible that the session doesn't have
 			 * the specified controllable (e.g. it has too few
@@ -911,9 +999,320 @@ GenericMidiControlProtocol::reset_controllables ()
 }
 
 boost::shared_ptr<Controllable>
-GenericMidiControlProtocol::lookup_controllable (const ControllableDescriptor& desc) const
+GenericMidiControlProtocol::lookup_controllable (const string & str) const
 {
-	return session->controllable_by_descriptor (desc);
+	boost::shared_ptr<Controllable> c;
+
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("lookup controllable from \"%1\"\n", str));
+
+	if (!session) {
+		DEBUG_TRACE (DEBUG::GenericMidi, "no session\n");
+		return c;
+	}
+
+	/* step 1: split string apart */
+
+	string::size_type first_space = str.find_first_of (" ");
+
+	if (first_space == string::npos) {
+		return c;
+	}
+
+	string front = str.substr (0, first_space);
+	vector<string> path;
+	split (front, path, '/');
+
+	if (path.size() < 2) {
+		return c;
+	}
+
+	string back = str.substr (first_space);
+	vector<string> rest;
+	split (back, rest, ' ');
+
+	if (rest.empty()) {
+		return c;
+	}
+
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("parsed into path of %1, rest of %1\n", path.size(), rest.size()));
+
+	/* Step 2: analyse parts of the string to figure out what type of
+	 * Stripable we're looking for
+	 */
+
+	enum Type {
+		Selection,
+		PresentationOrder,
+		Named,
+	};
+	Type type = Named;
+	int id = 1;
+	string name;
+
+	static regex_t compiled_pattern;
+	static bool compiled = false;
+
+	if (!compiled) {
+		const char * const pattern = "^[BS]?[0-9]+";
+		/* this pattern compilation is not going to fail */
+		regcomp (&compiled_pattern, pattern, REG_EXTENDED|REG_NOSUB);
+		/* leak compiled pattern */
+		compiled = true;
+	}
+
+	/* Step 3: identify what "rest" looks like - name, or simple nueric, or
+	 * banked/selection specifier
+	 */
+
+	bool matched = (regexec (&compiled_pattern, rest[0].c_str(), 0, 0, 0) == 0);
+
+	if (matched) {
+		bool banked = false;
+
+		if (rest[0][0] == 'B') {
+			banked = true;
+			/* already matched digits, so we know atoi() will succeed */
+			id = atoi (rest[0].substr (1));
+			type = PresentationOrder;
+		} else if (rest[0][0] == 'S') {
+			/* already matched digits, so we know atoi() will succeed */
+			id = atoi (rest[0].substr (1));
+			type = Selection;
+		} else if (isdigit (rest[0][0])) {
+			/* already matched digits, so we know atoi() will succeed */
+			id = atoi (rest[0]);
+			type = PresentationOrder;
+		} else {
+			return c;
+		}
+
+		id -= 1; /* order is zero-based, but maps use 1-based */
+
+		if (banked) {
+			id += _current_bank * _bank_size;
+		}
+
+	} else {
+
+		type = Named;
+		name = rest[0];
+	}
+
+	/* step 4: find the reference Stripable */
+
+	boost::shared_ptr<Stripable> s;
+
+	if (path[0] == X_("route") || path[0] == X_("rid")) {
+
+		std::string name;
+
+		switch (type) {
+		case PresentationOrder:
+			s = session->get_remote_nth_stripable (id, PresentationInfo::Route);
+			break;
+		case Named:
+			/* name */
+			name = rest[0];
+
+			if (name == "Master" || name == X_("master")) {
+				s = session->master_out();
+			} else if (name == X_("control") || name == X_("listen") || name == X_("monitor") || name == "Monitor") {
+				s = session->monitor_out();
+			} else if (name == X_("auditioner")) {
+				s = session->the_auditioner();
+			} else {
+				s = session->route_by_name (name);
+			}
+			break;
+
+		case Selection:
+			s = session->route_by_selected_count (id);
+			break;
+		}
+
+	} else if (path[0] == X_("vca")) {
+
+		s = session->get_remote_nth_stripable (id, PresentationInfo::VCA);
+
+	} else if (path[0] == X_("bus")) {
+
+		switch (type) {
+		case Named:
+			s = session->route_by_name (name);
+			break;
+		default:
+			s = session->get_remote_nth_stripable (id, PresentationInfo::Bus);
+		}
+
+	} else if (path[0] == X_("track")) {
+
+		switch (type) {
+		case Named:
+			s = session->route_by_name (name);
+			break;
+		default:
+			s = session->get_remote_nth_stripable (id, PresentationInfo::Track);
+		}
+	}
+
+	if (!s) {
+		DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("no stripable found for \"%1\"\n", str));
+		return c;
+	}
+
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("found stripable %1\n", s->name()));
+
+	/* step 5: find the referenced controllable for that stripable.
+	 *
+	 * Some controls exist only for Route, so we need that too
+	 */
+
+	boost::shared_ptr<Route> r = boost::dynamic_pointer_cast<Route> (s);
+
+	if (path[1] == X_("gain")) {
+		c = s->gain_control();
+	} else if (path[1] == X_("trim")) {
+		c = s->trim_control ();
+	} else if (path[1] == X_("solo")) {
+		c = s->solo_control();
+	} else if (path[1] == X_("mute")) {
+		c = s->mute_control();
+	} else if (path[1] == X_("recenable")) {
+		c = s->rec_enable_control ();
+	} else if (path[1] == X_("panwidth")) {
+		c = s->pan_width_control ();
+	} else if (path[1] == X_("pandirection") || path[1] == X_("balance")) {
+		c = s->pan_azimuth_control ();
+	} else if (path[1] == X_("plugin")) {
+
+		/* /route/plugin/parameter */
+
+		if (path.size() == 3 && rest.size() == 3) {
+			if (path[2] == X_("parameter")) {
+
+				int plugin = atoi (rest[1]);
+				int parameter_index = atoi (rest[2]);
+
+				/* revert to zero based counting */
+				if (plugin > 0) {
+					--plugin;
+				}
+				if (parameter_index > 0) {
+					--parameter_index;
+				}
+
+				if (r) {
+					boost::shared_ptr<Processor> proc = r->nth_plugin (plugin);
+
+					if (proc) {
+						boost::shared_ptr<PluginInsert> p = boost::dynamic_pointer_cast<PluginInsert> (proc);
+						if (p) {
+							uint32_t param;
+							bool ok;
+							param = p->plugin()->nth_parameter (parameter_index, ok);
+							if (ok) {
+								c = boost::dynamic_pointer_cast<Controllable> (proc->control (Evoral::Parameter (PluginAutomation, 0, param)));
+							}
+						}
+					}
+				}
+			}
+		}
+
+	} else if (path[1] == X_("send")) {
+
+		if (path.size() == 3 && rest.size() == 2) {
+			if (path[2] == X_("gain")) {
+				uint32_t send = atoi (rest[1]);
+				if (send > 0) {
+					--send;
+				}
+				c = s->send_level_controllable (send);
+			} else if (path[2] == X_("direction")) {
+				/* XXX not implemented yet */
+
+			} else if (path[2] == X_("enable")) {
+				/* XXX not implemented yet */
+			}
+		}
+
+	} else if (path[1] == X_("eq")) {
+
+		/* /route/eq/enable */
+		/* /route/eq/gain/<band> */
+		/* /route/eq/freq/<band> */
+		/* /route/eq/q/<band> */
+		/* /route/eq/shape/<band> */
+
+		if (path.size() == 3) {
+
+			if (path[2] == X_("enable")) {
+				c = s->eq_enable_controllable ();
+			}
+
+		} else if (path.size() == 4) {
+
+			int band = atoi (path[3]); /* band number */
+
+			if (path[2] == X_("gain")) {
+				c = s->eq_gain_controllable (band);
+			} else if (path[2] == X_("freq")) {
+				c = s->eq_freq_controllable (band);
+			} else if (path[2] == X_("q")) {
+				c = s->eq_q_controllable (band);
+			} else if (path[2] == X_("shape")) {
+				c = s->eq_shape_controllable (band);
+			}
+		}
+
+	} else if (path[1] == X_("filter")) {
+
+		/* /route/filter/hi/freq */
+
+		if (path.size() == 4) {
+
+			int filter;
+
+			if (path[2] == X_("hi")) {
+				filter = 1; /* high pass filter */
+			} else {
+				filter = 0; /* low pass filter */
+			}
+
+			if (path[3] == X_("enable")) {
+				c = s->filter_enable_controllable (filter);
+			} else if (path[3] == X_("freq")) {
+				c = s->filter_freq_controllable (filter);
+			} else if (path[3] == X_("slope")) {
+				c = s->filter_slope_controllable (filter);
+			}
+
+		}
+
+	} else if (path[1] == X_("compressor")) {
+
+		if (path.size() == 3) {
+			if (path[2] == X_("enable")) {
+				c = s->comp_enable_controllable ();
+			} else if (path[2] == X_("threshold")) {
+				c = s->comp_threshold_controllable ();
+			} else if (path[2] == X_("mode")) {
+				c = s->comp_mode_controllable ();
+			} else if (path[2] == X_("speed")) {
+				c = s->comp_speed_controllable ();
+			} else if (path[2] == X_("makeup")) {
+				c = s->comp_makeup_controllable ();
+			}
+		}
+	}
+
+	if (c) {
+		DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("found controllable \"%1\"\n", c->name()));
+	} else {
+		DEBUG_TRACE (DEBUG::GenericMidi, "no controllable found\n");
+	}
+
+	return c;
 }
 
 MIDIFunction*
@@ -937,11 +1336,11 @@ GenericMidiControlProtocol::create_function (const XMLNode& node)
 		ev = MIDI::program;
 	} else if ((prop = node.property (X_("sysex"))) != 0 || (prop = node.property (X_("msg"))) != 0) {
 
-                if (prop->name() == X_("sysex")) {
-                        ev = MIDI::sysex;
-                } else {
-                        ev = MIDI::any;
-                }
+		if (prop->name() == X_("sysex")) {
+			ev = MIDI::sysex;
+		} else {
+			ev = MIDI::any;
+		}
 
 		int val;
 		uint32_t cnt;
@@ -1037,11 +1436,11 @@ GenericMidiControlProtocol::create_action (const XMLNode& node)
 		ev = MIDI::program;
 	} else if ((prop = node.property (X_("sysex"))) != 0 || (prop = node.property (X_("msg"))) != 0) {
 
-                if (prop->name() == X_("sysex")) {
-                        ev = MIDI::sysex;
-                } else {
-                        ev = MIDI::any;
-                }
+		if (prop->name() == X_("sysex")) {
+			ev = MIDI::sysex;
+		} else {
+			ev = MIDI::any;
+		}
 
 		int val;
 		uint32_t cnt;
@@ -1151,9 +1550,13 @@ GenericMidiControlProtocol::set_threshold (int t)
 bool
 GenericMidiControlProtocol::connection_handler (boost::weak_ptr<ARDOUR::Port>, std::string name1, boost::weak_ptr<ARDOUR::Port>, std::string name2, bool yn)
 {
+	bool input_was_connected = (connection_state & InputConnected);
+
 	if (!_input_port || !_output_port) {
 		return false;
 	}
+
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("connection change: %1 and %2 connected ? %3\n", name1, name2, yn));
 
 	string ni = ARDOUR::AudioEngine::instance()->make_port_name_non_relative (boost::shared_ptr<ARDOUR::Port>(_input_port)->name());
 	string no = ARDOUR::AudioEngine::instance()->make_port_name_non_relative (boost::shared_ptr<ARDOUR::Port>(_output_port)->name());
@@ -1175,29 +1578,19 @@ GenericMidiControlProtocol::connection_handler (boost::weak_ptr<ARDOUR::Port>, s
 		return false;
 	}
 
-	if ((connection_state & (InputConnected|OutputConnected)) == (InputConnected|OutputConnected)) {
-
-		/* XXX this is a horrible hack. Without a short sleep here,
-		   something prevents the device wakeup messages from being
-		   sent and/or the responses from being received.
-		*/
-
-		g_usleep (100000);
-		connected ();
-
+	if (connection_state & InputConnected) {
+		if (!input_was_connected) {
+			start_midi_handling ();
+		}
 	} else {
-
+		if (input_was_connected) {
+			stop_midi_handling ();
+		}
 	}
 
 	ConnectionChange (); /* emit signal for our GUI */
 
 	return true; /* connection status changed */
-}
-
-void
-GenericMidiControlProtocol::connected ()
-{
-	cerr << "Now connected\n";
 }
 
 boost::shared_ptr<Port>
@@ -1210,4 +1603,62 @@ boost::shared_ptr<Port>
 GenericMidiControlProtocol::input_port() const
 {
 	return _input_port;
+}
+
+void
+GenericMidiControlProtocol::maybe_start_touch (boost::shared_ptr<Controllable> controllable)
+{
+	boost::shared_ptr<AutomationControl> actl = boost::dynamic_pointer_cast<AutomationControl> (controllable);
+	if (actl) {
+		actl->start_touch (session->audible_sample ());
+	}
+}
+
+
+void
+GenericMidiControlProtocol::start_midi_handling ()
+{
+	/* This connection means that whenever data is ready from the input
+	 * port, the relevant thread will invoke our ::midi_input_handler()
+	 * method, which will read the data, and invoke the parser.
+	 */
+
+	_input_port->xthread().set_receive_handler (sigc::bind (sigc::mem_fun (this, &GenericMidiControlProtocol::midi_input_handler), boost::weak_ptr<AsyncMIDIPort> (_input_port)));
+	_input_port->xthread().attach (main_loop()->get_context());
+}
+
+void
+GenericMidiControlProtocol::stop_midi_handling ()
+{
+	midi_connections.drop_connections ();
+
+	/* Note: the input handler is still active at this point, but we're no
+	 * longer connected to any of the parser signals
+	 */
+}
+
+bool
+GenericMidiControlProtocol::midi_input_handler (Glib::IOCondition ioc, boost::weak_ptr<ARDOUR::AsyncMIDIPort> wport)
+{
+	boost::shared_ptr<AsyncMIDIPort> port (wport.lock());
+
+	if (!port) {
+		return false;
+	}
+
+	DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("something happend on  %1\n", boost::shared_ptr<MIDI::Port>(port)->name()));
+
+	if (ioc & ~IO_IN) {
+		return false;
+	}
+
+	if (ioc & IO_IN) {
+
+		port->clear ();
+		DEBUG_TRACE (DEBUG::GenericMidi, string_compose ("data available on %1\n", boost::shared_ptr<MIDI::Port>(port)->name()));
+		samplepos_t now = session->engine().sample_time();
+		port->parse (now);
+	}
+
+	return true;
 }

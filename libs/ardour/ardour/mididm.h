@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2014 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #ifndef __libardour_mididm_h__
@@ -30,21 +30,21 @@ class LIBARDOUR_API MIDIDM
 {
 public:
 
-	MIDIDM (framecnt_t sample_rate);
+	MIDIDM (samplecnt_t sample_rate);
 
 	int process (pframes_t nframes, PortEngine &pe, void *midi_in, void *midi_out);
 
-	framecnt_t latency (void) { return _cnt_total > 10 ? _avg_delay : 0; }
-	framecnt_t processed (void) { return _cnt_total; }
+	samplecnt_t latency (void) { return _cnt_total > 10 ? _avg_delay : 0; }
+	samplecnt_t processed (void) { return _cnt_total; }
 	double     deviation (void) { return _cnt_total > 1 ? sqrt(_var_s / ((double)(_cnt_total - 1))) : 0; }
 	bool       ok (void) { return _cnt_total > 200; }
 	bool       have_signal (void) { return (_monotonic_cnt - _last_signal_tme) < (uint64_t) _sample_rate ; }
 
 private:
-	int64_t parse_mclk (uint8_t* buf, pframes_t timestamp) const;
-	int64_t parse_mtc  (uint8_t* buf, pframes_t timestamp) const;
+	int64_t parse_mclk (uint8_t const * const buf, pframes_t timestamp) const;
+	int64_t parse_mtc  (uint8_t const * const buf, pframes_t timestamp) const;
 
-	framecnt_t _sample_rate;
+	samplecnt_t _sample_rate;
 
 	uint64_t _monotonic_cnt;
 	uint64_t _last_signal_tme;

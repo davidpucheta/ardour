@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2018 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <inttypes.h>
 
@@ -24,13 +28,14 @@
 
 #include "ardour/audioregion.h"
 #include "ardour/audiosource.h"
+#include "ardour/boost_debug.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
 #include "ardour/region.h"
 #include "ardour/region_factory.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -46,7 +51,7 @@ std::map<std::string, PBD::ID>                RegionFactory::region_name_map;
 RegionFactory::CompoundAssociations           RegionFactory::_compound_associations;
 
 boost::shared_ptr<Region>
-RegionFactory::create (boost::shared_ptr<const Region> region, bool announce)
+RegionFactory::create (boost::shared_ptr<const Region> region, bool announce, bool fork)
 {
 	boost::shared_ptr<Region> ret;
 	boost::shared_ptr<const AudioRegion> ar;
@@ -54,11 +59,11 @@ RegionFactory::create (boost::shared_ptr<const Region> region, bool announce)
 
 	if ((ar = boost::dynamic_pointer_cast<const AudioRegion>(region)) != 0) {
 
-		ret = boost::shared_ptr<Region> (new AudioRegion (ar, 0));
+		ret = boost::shared_ptr<Region> (new AudioRegion (ar, MusicSample (0, 0)));
 
 	} else if ((mr = boost::dynamic_pointer_cast<const MidiRegion>(region)) != 0) {
 
-		if (mr->session().config.get_midi_copy_is_fork()) {
+		if (mr->session().config.get_midi_copy_is_fork() || fork) {
 			/* What we really want to do here is what Editor::fork_region()
 			   does via Session::create_midi_source_by_stealing_name(), but we
 			   don't have a Track.  We'll just live with the skipped number,
@@ -71,7 +76,7 @@ RegionFactory::create (boost::shared_ptr<const Region> region, bool announce)
 			source->set_ancestor_name(mr->sources().front()->name());
 			ret = mr->clone(source);
 		} else {
-			ret = boost::shared_ptr<Region> (new MidiRegion (mr, 0));
+			ret = boost::shared_ptr<Region> (new MidiRegion (mr, MusicSample (0, 0)));
 		}
 
 	} else {
@@ -82,22 +87,19 @@ RegionFactory::create (boost::shared_ptr<const Region> region, bool announce)
 
 	if (ret) {
 		ret->set_name (new_region_name(ret->name()));
-		ret->set_position (region->position());
 
-		if (ret->session().config.get_glue_new_regions_to_bars_and_beats ()) {
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_lock_style() != MusicTime) {
 			ret->set_position_lock_style (MusicTime);
 		}
 
 		/* pure copy constructor - no property list */
 		if (announce) {
 			map_add (ret);
-			CheckNewRegion (ret);
+			CheckNewRegion (ret); /* EMIT SIGNAL */
 		}
 	}
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-	// boost_debug_shared_ptr_mark_interesting (ret.get(), "Region");
-#endif
+	BOOST_MARK_REGION (ret);
 	return ret;
 }
 
@@ -126,24 +128,22 @@ RegionFactory::create (boost::shared_ptr<Region> region, const PropertyList& pli
 	if (ret) {
 		ret->apply_changes (plist);
 
-		if (ret->session().config.get_glue_new_regions_to_bars_and_beats ()) {
-			ret->set_position_lock_style (MusicTime);
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_lock_style() != MusicTime) {
+ 			ret->set_position_lock_style (MusicTime);
 		}
 
 		if (announce) {
 			map_add (ret);
-			CheckNewRegion (ret);
+			CheckNewRegion (ret); /* EMIT SIGNAL */
 		}
 	}
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-        // boost_debug_shared_ptr_mark_interesting (ret.get(), "Region");
-#endif
+	BOOST_MARK_REGION (ret);
 	return ret;
 }
 
 boost::shared_ptr<Region>
-RegionFactory::create (boost::shared_ptr<Region> region, frameoffset_t offset, const PropertyList& plist, bool announce)
+RegionFactory::create (boost::shared_ptr<Region> region, MusicSample offset, const PropertyList& plist, bool announce)
 {
 	boost::shared_ptr<Region> ret;
 	boost::shared_ptr<const AudioRegion> other_a;
@@ -167,19 +167,17 @@ RegionFactory::create (boost::shared_ptr<Region> region, frameoffset_t offset, c
 	if (ret) {
 		ret->apply_changes (plist);
 
-		if (ret->session().config.get_glue_new_regions_to_bars_and_beats ()) {
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_lock_style() != MusicTime) {
 			ret->set_position_lock_style (MusicTime);
 		}
 
 		if (announce) {
 			map_add (ret);
-			CheckNewRegion (ret);
+			CheckNewRegion (ret); /* EMIT SIGNAL */
 		}
 	}
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-	// boost_debug_shared_ptr_mark_interesting (ret.get(), "Region");
-#endif
+	BOOST_MARK_REGION (ret);
 	return ret;
 }
 
@@ -195,7 +193,7 @@ RegionFactory::create (boost::shared_ptr<Region> region, const SourceList& srcs,
 
 	if ((other = boost::dynamic_pointer_cast<AudioRegion>(region)) != 0) {
 
-		// XXX use me in caller where plist is setup, this is start i think srcs.front()->length (srcs.front()->timeline_position())
+		// XXX use me in caller where plist is setup, this is start i think srcs.front()->length (srcs.front()->natural_position())
 
 		ret = boost::shared_ptr<Region> (new AudioRegion (other, srcs));
 
@@ -208,19 +206,17 @@ RegionFactory::create (boost::shared_ptr<Region> region, const SourceList& srcs,
 	if (ret) {
 		ret->apply_changes (plist);
 
-		if (ret->session().config.get_glue_new_regions_to_bars_and_beats ()) {
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_lock_style() != MusicTime) {
 			ret->set_position_lock_style (MusicTime);
 		}
 
 		if (announce) {
 			map_add (ret);
-			CheckNewRegion (ret);
+			CheckNewRegion (ret); /* EMIT SIGNAL */
 		}
 	}
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-        // boost_debug_shared_ptr_mark_interesting (ret.get(), "Region");
-#endif
+	BOOST_MARK_REGION (ret);
 	return ret;
 }
 
@@ -252,19 +248,17 @@ RegionFactory::create (const SourceList& srcs, const PropertyList& plist, bool a
 	if (ret) {
 		ret->apply_changes (plist);
 
-		if (ret->session().config.get_glue_new_regions_to_bars_and_beats ()) {
+		if (ret->session().config.get_glue_new_regions_to_bars_and_beats() && ret->position_lock_style() != MusicTime) {
 			ret->set_position_lock_style (MusicTime);
 		}
 
 		if (announce) {
 			map_add (ret);
-			CheckNewRegion (ret);
+			CheckNewRegion (ret); /* EMIT SIGNAL */
 		}
 	}
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-	// boost_debug_shared_ptr_mark_interesting (ret.get(), "Region");
-#endif
+	BOOST_MARK_REGION (ret);
 	return ret;
 }
 
@@ -303,13 +297,11 @@ RegionFactory::create (SourceList& srcs, const XMLNode& node)
 			   description is coming from XML.
 			*/
 
-			CheckNewRegion (ret);
+			CheckNewRegion (ret); /* EMIT SIGNAL */
 		}
 	}
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-	// boost_debug_shared_ptr_mark_interesting (ret.get(), "Region");
-#endif
+	BOOST_MARK_REGION (ret);
 	return ret;
 }
 
@@ -630,12 +622,26 @@ RegionFactory::new_region_name (string old)
 	return old;
 }
 
+boost::shared_ptr<Region>
+RegionFactory::get_whole_region_for_source (boost::shared_ptr<Source> s)
+{
+	Glib::Threads::Mutex::Lock lm (region_map_lock);
+
+	for (RegionMap::const_iterator i = region_map.begin(); i != region_map.end(); ++i) {
+		if (i->second->uses_source (s) && i->second->whole_file()) {
+			return (i->second);
+		}
+	}
+
+	return boost::shared_ptr<Region>();
+}
+
 void
 RegionFactory::get_regions_using_source (boost::shared_ptr<Source> s, std::set<boost::shared_ptr<Region> >& r)
 {
 	Glib::Threads::Mutex::Lock lm (region_map_lock);
 
-	for (RegionMap::iterator i = region_map.begin(); i != region_map.end(); ++i) {
+	for (RegionMap::const_iterator i = region_map.begin(); i != region_map.end(); ++i) {
 		if (i->second->uses_source (s)) {
 			r.insert (i->second);
 		}
@@ -646,19 +652,17 @@ void
 RegionFactory::remove_regions_using_source (boost::shared_ptr<Source> src)
 {
 	Glib::Threads::Mutex::Lock lm (region_map_lock);
-
-	RegionMap::iterator i = region_map.begin();
-	while (i != region_map.end()) {
-
-		RegionMap::iterator j = i;
-		++j;
-
+	RegionList remove_regions;
+	for (RegionMap::const_iterator i = region_map.begin(); i != region_map.end(); ++i) {
 		if (i->second->uses_source (src)) {
-			remove_from_region_name_map (i->second->name ());
-			region_map.erase (i);
-                }
+			remove_regions.push_back (i->second);
+		}
+	}
+	lm.release ();
 
-		i = j;
+	/* this will call RegionFactory::map_remove () */
+	for (RegionList::iterator i = remove_regions.begin(); i != remove_regions.end(); ++i) {
+		(*i)->drop_references ();
 	}
 }
 

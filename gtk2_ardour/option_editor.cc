@@ -1,21 +1,28 @@
 /*
-  Copyright (C) 2001-2009 Paul Davis
-
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2006 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2012-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2016 Julien "_FrnchFrgg_" RIVAUD <frnchfrgg@free.fr>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <algorithm>
 
 #include <gtkmm/box.h>
@@ -36,7 +43,7 @@
 #include "option_editor.h"
 #include "public_editor.h"
 #include "utils.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -59,7 +66,7 @@ OptionEditorComponent::add_widget_to_page (OptionEditorPage* p, Gtk::Widget* w)
 }
 
 void
-OptionEditorComponent::add_widgets_to_page (OptionEditorPage* p, Gtk::Widget* wa, Gtk::Widget* wb)
+OptionEditorComponent::add_widgets_to_page (OptionEditorPage* p, Gtk::Widget* wa, Gtk::Widget* wb, bool /*notused*/)
 {
 	int const n = p->table.property_n_rows();
 	int m = n + 1;
@@ -69,7 +76,10 @@ OptionEditorComponent::add_widgets_to_page (OptionEditorPage* p, Gtk::Widget* wa
 
 	p->table.resize (m, 3);
 	p->table.attach (*wa, 1, 2, n, n + 1, FILL);
-	p->table.attach (*wb, 2, 3, n, n + 1, FILL | EXPAND);
+
+	Alignment* a = manage (new Alignment (0, 0.5, 0, 1.0));
+	a->add (*wb);
+	p->table.attach (*a, 2, 3, n, n + 1, FILL | EXPAND);
 
 	maybe_add_note (p, n + 1);
 }
@@ -78,8 +88,9 @@ void
 OptionEditorComponent::maybe_add_note (OptionEditorPage* p, int n)
 {
 	if (!_note.empty ()) {
-		Gtk::Label* l = manage (new Gtk::Label (string_compose (X_("<i>%1</i>"), _note)));
+		Gtk::Label* l = manage (left_aligned_label (string_compose (X_("<i>%1</i>"), _note)));
 		l->set_use_markup (true);
+		l->set_line_wrap (true);
 		p->table.attach (*l, 1, 3, n, n + 1, FILL | EXPAND);
 	}
 }
@@ -90,6 +101,8 @@ OptionEditorComponent::set_note (string const & n)
 	_note = n;
 }
 
+/*--------------------------*/
+
 OptionEditorHeading::OptionEditorHeading (string const & h)
 {
 	std::stringstream s;
@@ -98,45 +111,36 @@ OptionEditorHeading::OptionEditorHeading (string const & h)
 	_label->set_use_markup (true);
 }
 
+/*--------------------------*/
+
 void
 OptionEditorHeading::add_to_page (OptionEditorPage* p)
 {
 	int const n = p->table.property_n_rows();
-	p->table.resize (n + 2, 3);
+	if (!_note.empty ()) {
+		p->table.resize (n + 3, 3);
+	} else {
+		p->table.resize (n + 2, 3);
+	}
 
 	p->table.attach (*manage (new Label ("")), 0, 3, n, n + 1, FILL | EXPAND);
 	p->table.attach (*_label, 0, 3, n + 1, n + 2, FILL | EXPAND);
+	maybe_add_note (p, n + 2);
 }
+
+/*--------------------------*/
 
 void
-OptionEditorBox::add_to_page (OptionEditorPage* p)
-{
-	add_widget_to_page (p, _box);
-}
-
-RcActionButton::RcActionButton (std::string const & t, const Glib::SignalProxy0< void >::SlotType & slot, std::string const & l)
-	: _label (NULL)
-{
-	_button = manage (new Button (t));
-	_button->signal_clicked().connect (slot);
-	if (!l.empty ()) {
-		_label = manage (right_aligned_label (l));
-	}
-}
-
-void
-RcActionButton::add_to_page (OptionEditorPage *p)
+OptionEditorBlank::add_to_page (OptionEditorPage* p)
 {
 	int const n = p->table.property_n_rows();
-	int m = n + 1;
-	p->table.resize (m, 3);
-	if (_label) {
-		p->table.attach (*_label,  1, 2, n, n + 1, FILL | EXPAND);
-		p->table.attach (*_button, 2, 3, n, n + 1, FILL | EXPAND);
-	} else {
-		p->table.attach (*_button, 1, 3, n, n + 1, FILL | EXPAND);
-	}
+	p->table.resize (n + 1, 3);
+	p->table.attach (_dummy, 2, 3, n, n + 1, FILL | EXPAND, SHRINK, 0, 0);
+	_dummy.set_size_request (-1, 1);
+	_dummy.show ();
 }
+
+/*--------------------------*/
 
 RcConfigDisplay::RcConfigDisplay (string const & i, string const & n, sigc::slot<string> g, char s)
 	: _get (g)
@@ -177,6 +181,84 @@ RcConfigDisplay::add_to_page (OptionEditorPage *p)
 	p->table.attach (*_info,  2, 3, n, n + 1, FILL | EXPAND);
 }
 
+/*--------------------------*/
+
+RcActionButton::RcActionButton (std::string const & t, const Glib::SignalProxy0< void >::SlotType & slot, std::string const & l)
+	: _label (NULL)
+{
+	_button = manage (new Button (t));
+	_button->signal_clicked().connect (slot);
+	if (!l.empty ()) {
+		_label = manage (right_aligned_label (l));
+	}
+}
+
+void
+RcActionButton::add_to_page (OptionEditorPage *p)
+{
+	int const n = p->table.property_n_rows();
+	const int m = n + 1;
+	p->table.resize (m, 3);
+	Alignment* a = manage (new Alignment (0, 0.5, 0, 1.0));
+	a->add (*_button);
+
+	if (_label) {
+		p->table.attach (*_label,  1, 2, n, m);
+		p->table.attach (*a, 2, 3, n, m, FILL|EXPAND);
+	} else {
+		p->table.attach (*a, 1, 3, n, m, FILL|EXPAND);
+	}
+}
+
+/*--------------------------*/
+
+CheckOption::CheckOption (string const & i, string const & n, Glib::RefPtr<Gtk::Action> act)
+{
+	_button = manage (new CheckButton);
+	_label = manage (new Label);
+	_label->set_markup (n);
+	_button->add (*_label);
+	_button->signal_toggled().connect (sigc::mem_fun (*this, &CheckOption::toggled));
+
+	Gtkmm2ext::Activatable::set_related_action (act);
+	assert (_action);
+
+	action_sensitivity_changed ();
+
+	Glib::RefPtr<ToggleAction> tact = Glib::RefPtr<ToggleAction>::cast_dynamic (_action);
+	if (tact) {
+		action_toggled ();
+		tact->signal_toggled().connect (sigc::mem_fun (*this, &CheckOption::action_toggled));
+	}
+
+	_action->connect_property_changed ("sensitive", sigc::mem_fun (*this, &CheckOption::action_sensitivity_changed));
+}
+
+void
+CheckOption::action_toggled ()
+{
+	Glib::RefPtr<ToggleAction> tact = Glib::RefPtr<ToggleAction>::cast_dynamic (_action);
+	if (tact) {
+		_button->set_active (tact->get_active());
+	}
+}
+
+void
+CheckOption::add_to_page (OptionEditorPage* p)
+{
+	add_widget_to_page (p, _button);
+}
+
+void
+CheckOption::toggled ()
+{
+	Glib::RefPtr<ToggleAction> tact = Glib::RefPtr<ToggleAction>::cast_dynamic (_action);
+
+	tact->set_active (_button->get_active ());
+}
+
+
+/*--------------------------*/
 
 BoolOption::BoolOption (string const & i, string const & n, sigc::slot<bool> g, sigc::slot<bool, bool> s)
 	: Option (i, n),
@@ -211,6 +293,8 @@ BoolOption::toggled ()
 	}
 }
 
+/*--------------------------*/
+
 RouteDisplayBoolOption::RouteDisplayBoolOption (string const & i, string const & n, sigc::slot<bool> g, sigc::slot<bool, bool> s)
 	: BoolOption (i, n, g, s)
 {
@@ -222,6 +306,8 @@ RouteDisplayBoolOption::toggled ()
 	DisplaySuspender ds;
 	BoolOption::toggled ();
 }
+
+/*--------------------------*/
 
 EntryOption::EntryOption (string const & i, string const & n, sigc::slot<string> g, sigc::slot<bool, string> s)
 	: Option (i, n),
@@ -278,6 +364,130 @@ EntryOption::focus_out (GdkEventFocus*)
 	return true;
 }
 
+/*--------------------------*/
+HSliderOption::HSliderOption (
+		std::string const& i,
+		std::string const& n,
+		sigc::slot<float> g,
+		sigc::slot<bool, float> s,
+		double lower, double upper,
+		double step_increment,
+		double page_increment,
+		double mult,
+		bool logarithmic
+		)
+	: Option (i, n)
+	, _get (g)
+	, _set (s)
+	, _adj (lower, lower, upper, step_increment, page_increment, 0)
+	, _hscale (_adj)
+	, _label (n + ":")
+	, _mult (mult)
+	, _log (logarithmic)
+{
+	_label.set_alignment (0, 0.5);
+	_label.set_name ("OptionsLabel");
+	_adj.set_value (_get());
+	_adj.signal_value_changed().connect (sigc::mem_fun (*this, &HSliderOption::changed));
+	_hscale.set_update_policy (Gtk::UPDATE_DISCONTINUOUS);
+
+	/* make the slider be a fixed, font-relative width */
+
+	_hscale.ensure_style ();
+	int width, height;
+	get_pixel_size (_hscale.create_pango_layout (X_("a long piece of text that is about as wide as we want sliders to be")), width, height);
+	_hscale.set_size_request (width, -1);
+}
+
+void
+HSliderOption::set_state_from_config ()
+{
+	if (_log) {
+		_adj.set_value (log10(_get()) / _mult);
+	} else {
+		_adj.set_value (_get() / _mult);
+	}
+}
+
+void
+HSliderOption::changed ()
+{
+	if (_log) {
+		_set (pow (10, _adj.get_value () * _mult));
+	} else {
+		_set (_adj.get_value () * _mult);
+	}
+}
+
+void
+HSliderOption::add_to_page (OptionEditorPage* p)
+{
+	add_widgets_to_page (p, &_label, &_hscale);
+}
+
+void
+HSliderOption::set_sensitive (bool yn)
+{
+	_hscale.set_sensitive (yn);
+}
+
+/*--------------------------*/
+
+ComboStringOption::ComboStringOption (
+		std::string const & i,
+		std::string const & n,
+		sigc::slot<std::string> g,
+		sigc::slot<bool, std::string> s
+		)
+	: Option (i, n)
+	, _get (g)
+	, _set (s)
+{
+	_label = Gtk::manage (new Gtk::Label (n + ":"));
+	_label->set_alignment (0, 0.5);
+	_combo = Gtk::manage (new Gtk::ComboBoxText);
+	_combo->signal_changed().connect (sigc::mem_fun (*this, &ComboStringOption::changed));
+}
+
+void
+ComboStringOption::set_state_from_config () {
+	_combo->set_active_text (_get());
+}
+
+void
+ComboStringOption::add_to_page (OptionEditorPage* p)
+{
+	add_widgets_to_page (p, _label, _combo);
+}
+
+/** Set the allowed strings for this option
+ *  @param strings a vector of allowed strings
+ */
+void
+ComboStringOption::set_popdown_strings (const std::vector<std::string>& strings) {
+	_combo->clear_items ();
+	for (std::vector<std::string>::const_iterator i = strings.begin(); i != strings.end(); ++i) {
+		_combo->append_text (*i);
+	}
+}
+
+void
+ComboStringOption::clear () {
+	_combo->clear_items();
+}
+
+void
+ComboStringOption::changed () {
+	_set (_combo->get_active_text ());
+}
+
+void
+ComboStringOption::set_sensitive (bool yn) {
+	_combo->set_sensitive (yn);
+}
+
+/*--------------------------*/
+
 /** Construct a BoolComboOption.
  *  @param i id
  *  @param n User-visible name.
@@ -330,7 +540,7 @@ BoolComboOption::set_sensitive (bool yn)
 	_combo->set_sensitive (yn);
 }
 
-
+/*--------------------------*/
 
 FaderOption::FaderOption (string const & i, string const & n, sigc::slot<gain_t> g, sigc::slot<bool, gain_t> s)
 	: Option (i, n)
@@ -338,7 +548,7 @@ FaderOption::FaderOption (string const & i, string const & n, sigc::slot<gain_t>
 	, _get (g)
 	, _set (s)
 {
-	_db_slider = manage (new HSliderController (&_db_adjustment, boost::shared_ptr<PBD::Controllable>(), 115, 18));
+	_db_slider = manage (new ArdourWidgets::HSliderController (&_db_adjustment, boost::shared_ptr<PBD::Controllable>(), 220, 18));
 
 	_label.set_text (n + ":");
 	_label.set_alignment (0, 0.5);
@@ -350,9 +560,10 @@ FaderOption::FaderOption (string const & i, string const & n, sigc::slot<gain_t>
 	_box.set_homogeneous (false);
 	_box.pack_start (_fader_centering_box, false, false);
 	_box.pack_start (_db_display, false, false);
+	_box.pack_start (*manage (new Label ("dB")), false, false);
 	_box.show_all ();
 
-	set_size_request_to_display_given_text (_db_display, "-99.00", 12, 12);
+	set_size_request_to_display_given_text (_db_display, "-99.00", 12, 0);
 
 	_db_adjustment.signal_value_changed().connect (sigc::mem_fun (*this, &FaderOption::db_changed));
 	_db_display.signal_activate().connect (sigc::mem_fun (*this, &FaderOption::on_activate));
@@ -408,6 +619,8 @@ FaderOption::add_to_page (OptionEditorPage* p)
 	add_widgets_to_page (p, &_label, &_box);
 }
 
+/*--------------------------*/
+
 ClockOption::ClockOption (string const & i, string const & n, sigc::slot<std::string> g, sigc::slot<bool, std::string> s)
 	: Option (i, n)
 	, _clock (X_("timecode-offset"), true, X_(""), true, false, true, false)
@@ -424,11 +637,11 @@ void
 ClockOption::set_state_from_config ()
 {
 	Timecode::Time TC;
-	framepos_t when;
+	samplepos_t when;
 	if (!Timecode::parse_timecode_format(_get(), TC)) {
 		_clock.set (0, true);
 	}
-	TC.rate = _session->frames_per_timecode_frame();
+	TC.rate = _session->samples_per_timecode_frame();
 	TC.drop = _session->timecode_drop_frames();
 	_session->timecode_to_sample(TC, when, false, false);
 	if (TC.negative) { when=-when; }
@@ -456,21 +669,66 @@ ClockOption::set_session (Session* s)
 	_clock.set_session (s);
 }
 
+/*--------------------------*/
+
+WidgetOption::WidgetOption (string const & i, string const & n, Gtk::Widget& w)
+	: Option (i, n)
+	, _widget (&w)
+{
+}
+
+void
+WidgetOption::add_to_page (OptionEditorPage* p)
+{
+	add_widget_to_page (p, _widget);
+}
+
+/*--------------------------*/
+
+OptionEditorPage::OptionEditorPage ()
+	: table (1, 3)
+{
+	init ();
+}
+
 OptionEditorPage::OptionEditorPage (Gtk::Notebook& n, std::string const & t)
 	: table (1, 3)
 {
-	table.set_spacings (4);
-	table.set_col_spacing (0, 32);
+	init ();
 	box.pack_start (table, false, false);
 	box.set_border_width (4);
 	n.append_page (box, t);
 }
 
+void
+OptionEditorPage::init ()
+{
+	table.set_spacings (4);
+	table.set_col_spacing (0, 32);
+}
+
+/*--------------------------*/
+
+void
+OptionEditorMiniPage::add_to_page (OptionEditorPage* p)
+{
+	int const n = p->table.property_n_rows();
+	int m = n + 1;
+	if (!_note.empty ()) {
+		++m;
+	}
+	p->table.resize (m, 3);
+	p->table.attach (box, 0, 3, n, n + 1, FILL | EXPAND, SHRINK, 0, 0);
+	maybe_add_note (p, n + 1);
+}
+
+/*--------------------------*/
+
 /** Construct an OptionEditor.
  *  @param o Configuration to edit.
  *  @param t Title for the dialog.
  */
-OptionEditor::OptionEditor (PBD::Configuration* c, std::string const & t)
+OptionEditor::OptionEditor (PBD::Configuration* c)
 	: _config (c)
 	, option_tree (TreeStore::create (option_columns))
 	, option_treeview (option_tree)
@@ -524,7 +782,8 @@ OptionEditor::treeview_row_selected ()
 {
 	Glib::RefPtr<Gtk::TreeSelection> selection = option_treeview.get_selection();
 	TreeModel::iterator iter = selection->get_selected();
-	if(iter) {
+
+	if (iter) {
 		TreeModel::Row row = *iter;
 		Gtk::Widget* w = row[option_columns.widget];
 		if (w) {
@@ -533,99 +792,63 @@ OptionEditor::treeview_row_selected ()
 	}
 }
 
+TreeModel::iterator
+OptionEditor::find_path_in_treemodel (std::string const & pn, bool create_missing)
+{
+	/* split page name, which is actually a path, into each component */
+
+	std::vector<std::string> components;
+	split (pn, components, '/');
+
+	/* start with top level children */
+
+	TreeModel::Children children = option_tree->children();
+	TreeModel::iterator iter;
+
+	/* foreach path component ... */
+
+	for (std::vector<std::string>::const_iterator s = components.begin(); s != components.end(); ++s) {
+
+		for (iter = children.begin(); iter != children.end(); ++iter) {
+			TreeModel::Row row = *iter;
+			const std::string row_name = row[option_columns.name];
+			if (row_name == (*s)) {
+				break;
+			}
+		}
+
+		if (iter == children.end()) {
+			/* the current component is missing; bail out or create it */
+			if (!create_missing) {
+				return option_tree->get_iter(TreeModel::Path(""));
+			} else {
+				iter = option_tree->append (children);
+				TreeModel::Row row = *iter;
+				row[option_columns.name] = *s;
+				row[option_columns.widget] = 0;
+			}
+		}
+
+		/* from now on, iter points to a valid row, either the one we found or a new one */
+		/* set children to the row's children to continue searching */
+		children = (*iter)->children ();
+
+	}
+
+	return iter;
+}
+
 void
 OptionEditor::add_path_to_treeview (std::string const & pn, Gtk::Widget& widget)
 {
 	option_treeview.set_model (Glib::RefPtr<TreeStore>());
 
-	if (pn.find ('/') == std::string::npos) {
-		/* new top level item in tree */
+	TreeModel::iterator row_iter = find_path_in_treemodel(pn, true);
 
-		TreeModel::iterator new_row = option_tree->append ();
-		TreeModel::Row row = *new_row;
-		row[option_columns.name] = pn;
-		row[option_columns.widget] = &widget;
+	assert(row_iter);
 
-	} else {
-
-		/* find parent */
-
-		/* split page name, which is actually a path, into each
-		 * component
-		 */
-
-		std::vector<std::string> components;
-		split (pn, components, '/');
-
-		/* start with top level children */
-
-		typedef Gtk::TreeModel::Children type_children; //minimise code length.
-		type_children children = option_tree->children();
-
-		/* foreach path component ... */
-
-		for (std::vector<std::string>::const_iterator s = components.begin(); s != components.end(); ) {
-
-			bool component_found = false;
-
-			type_children::iterator iter;
-
-			/* look through the children at this level */
-
-			for (iter = children.begin(); iter != children.end(); ++iter) {
-				Gtk::TreeModel::Row row = *iter;
-
-				std::string row_name = row[option_columns.name];
-				if (row_name == (*s)) {
-
-					/* found it */
-
-					component_found = true;
-
-					/* reset children to point to
-					 * the children of this row
-					 */
-
-					children = row.children();
-					break;
-				}
-			}
-
-			if (!component_found) {
-
-				/* missing component. If it is the last
-				 * one, append a real page. Otherwise
-				 * just put an entry in the tree model
-				 * since it is a navigational/sorting
-				 * component.
-				 */
-
-				TreeModel::iterator new_row = option_tree->append (children);
-				TreeModel::Row row = *new_row;
-				row[option_columns.name] = *s;
-
-				++s;
-
-				if (s == components.end()) {
-					row[option_columns.widget] = &widget;
-				} else {
-					row[option_columns.widget] = 0;
-				}
-
-				children = row.children ();
-
-			} else {
-
-				/* component found, just move on to the
-				 * next one. children has already been
-				 * reset appropriately.
-				 */
-
-				++s;
-			}
-		}
-
-	}
+	TreeModel::Row row = *row_iter;
+	row[option_columns.widget] = &widget;
 
 	option_treeview.set_model (option_tree);
 	option_treeview.expand_all ();
@@ -672,27 +895,25 @@ OptionEditor::add_page (std::string const & pn, Gtk::Widget& w)
 void
 OptionEditor::set_current_page (string const & p)
 {
-	int i = 0;
-	while (i < _notebook.get_n_pages ()) {
-		if (_notebook.get_tab_label_text (*_notebook.get_nth_page (i)) == p) {
-			_notebook.set_current_page (i);
-			return;
-		}
+	TreeModel::iterator row_iter = find_path_in_treemodel(p);
 
-		++i;
+	if (row_iter) {
+		option_treeview.get_selection()->select(row_iter);
 	}
+
 }
 
+/*--------------------------*/
 
 DirectoryOption::DirectoryOption (string const & i, string const & n, sigc::slot<string> g, sigc::slot<bool, string> s)
 	: Option (i, n)
 	, _get (g)
 	, _set (s)
 {
+	Gtkmm2ext::add_volume_shortcuts (_file_chooser);
 	_file_chooser.set_action (Gtk::FILE_CHOOSER_ACTION_SELECT_FOLDER);
 	_file_chooser.signal_selection_changed().connect (sigc::mem_fun (*this, &DirectoryOption::selection_changed));
 }
-
 
 void
 DirectoryOption::set_state_from_config ()
@@ -718,23 +939,31 @@ DirectoryOption::selection_changed ()
 /*--------------------------*/
 
 OptionEditorContainer::OptionEditorContainer (PBD::Configuration* c, string const& str)
-	: OptionEditor (c, str)
+	: OptionEditor (c)
 {
 	set_border_width (4);
-	hpacker.pack_start (treeview(), false, false);
-	hpacker.pack_start (notebook(), true, true);
+	Frame* f = manage (new Frame ());
+	f->add (treeview());
+	f->set_shadow_type (Gtk::SHADOW_OUT);
+	f->set_border_width (0);
+	hpacker.pack_start (*f, false, false, 4);
+	hpacker.pack_start (notebook(), false, false);
 	pack_start (hpacker, true, true);
 
-	hpacker.show_all ();
-	show ();
+	show_all ();
 }
 
 OptionEditorWindow::OptionEditorWindow (PBD::Configuration* c, string const& str)
-	: OptionEditor (c, str)
+	: OptionEditor (c)
+	, ArdourWindow (str)
 {
 	container.set_border_width (4);
-	hpacker.pack_start (treeview(), false, false);
-	hpacker.pack_start (notebook(), true, true);
+	Frame* f = manage (new Frame ());
+	f->add (treeview());
+	f->set_shadow_type (Gtk::SHADOW_OUT);
+	f->set_border_width (0);
+	hpacker.pack_start (*f, false, false);
+	hpacker.pack_start (notebook(), true, true, 4);
 
 	container.pack_start (hpacker, true, true);
 

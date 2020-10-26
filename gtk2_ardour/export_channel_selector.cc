@@ -1,26 +1,32 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
-#include "export_channel_selector.h"
+ * Copyright (C) 2008-2013 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2015 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
+#include <sstream>
+
+#include <gtkmm/menu.h>
 
 #include "pbd/convert.h"
 
@@ -30,27 +36,25 @@
 #include "ardour/io.h"
 #include "ardour/route.h"
 #include "ardour/session.h"
+#include "ardour/selection.h"
 
-#include <sstream>
+#include "export_channel_selector.h"
+#include "route_sorter.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Glib;
 using namespace ARDOUR;
 using namespace PBD;
 
-struct EditorOrderRouteSorter {
-    bool operator() (boost::shared_ptr<Route> a, boost::shared_ptr<Route> b) {
-	    return a->order_key () < b->order_key ();
-    }
-};
+#define MAX_EXPORT_CHANNELS 32
 
 PortExportChannelSelector::PortExportChannelSelector (ARDOUR::Session * session, ProfileManagerPtr manager) :
   ExportChannelSelector (session, manager),
   channels_label (_("Channels:"), Gtk::ALIGN_LEFT),
   split_checkbox (_("Split to mono files")),
-  max_channels (20),
+  max_channels (MAX_EXPORT_CHANNELS),
   channel_view (max_channels)
 {
 	channels_hbox.pack_start (channels_label, false, false, 0);
@@ -91,9 +95,6 @@ PortExportChannelSelector::PortExportChannelSelector (ARDOUR::Session * session,
 
 PortExportChannelSelector::~PortExportChannelSelector ()
 {
-// 	if (session) {
-// 		session->add_instant_xml (get_state(), false);
-// 	}
 }
 
 void
@@ -104,15 +105,26 @@ PortExportChannelSelector::sync_with_manager ()
 	split_checkbox.set_active (state->config->get_split());
 	channels_spinbutton.set_value (state->config->get_n_chans());
 
+	/* when loading presets, config is ready set here (shared ptr)
+	 * fill_route_list () -> update_channel_count () -> set_channel_count () -> update_config()
+	 * will call config->clear_channels(); and clear the config
+	 */
+	channel_view.set_config (ChannelConfigPtr ());
 	fill_route_list ();
 	channel_view.set_config (state->config);
+}
+
+bool
+PortExportChannelSelector::channel_limit_reached () const
+{
+	return channel_view.max_route_channel_count () > channel_view.channel_count ();
 }
 
 void
 PortExportChannelSelector::fill_route_list ()
 {
 	channel_view.clear_routes ();
-	RouteList routes = *_session->get_routes();
+	RouteList routes = _session->get_routelist();
 
 	/* Add master bus and then everything else */
 
@@ -121,7 +133,7 @@ PortExportChannelSelector::fill_route_list ()
 		channel_view.add_route (master);
 	}
 
-	routes.sort (EditorOrderRouteSorter ());
+	routes.sort (Stripable::Sorter ());
 
 	for (RouteList::iterator it = routes.begin(); it != routes.end(); ++it) {
 		if ((*it)->is_master () || (*it)->is_monitor ()) {
@@ -161,9 +173,7 @@ PortExportChannelSelector::RouteCols::add_channels (uint32_t chans)
 PortExportChannelSelector::RouteCols::Channel &
 PortExportChannelSelector::RouteCols::get_channel (uint32_t channel)
 {
-	if (channel > n_channels) {
-		std::cout << "Invalid channel count for get_channel!" << std::endl;
-	}
+	assert (channel > 0 && channel <= channels.size ());
 
 	std::list<Channel>::iterator it = channels.begin();
 
@@ -217,6 +227,7 @@ PortExportChannelSelector::ChannelTreeView::set_config (ChannelConfigPtr c)
 
 	if (config == c) { return; }
 	config = c;
+	if (!config) { return; }
 
 	uint32_t i = 1;
 	ExportChannelConfiguration::ChannelList chan_list = config->get_channels();
@@ -237,7 +248,7 @@ PortExportChannelSelector::ChannelTreeView::set_config (ChannelConfigPtr c)
 			for (Gtk::ListStore::Children::const_iterator p_it = port_list->children().begin(); p_it != port_list->children().end(); ++p_it) {
 				route_ports.insert ((*p_it)->get_value (route_cols.port_cols.port));
 				port_labels.insert (make_pair ((*p_it)->get_value (route_cols.port_cols.port),
-							       (*p_it)->get_value (route_cols.port_cols.label)));
+			                                       (*p_it)->get_value (route_cols.port_cols.label)));
 			}
 
 			std::set_intersection (pec->get_ports().begin(), pec->get_ports().end(),
@@ -269,7 +280,9 @@ PortExportChannelSelector::ChannelTreeView::set_config (ChannelConfigPtr c)
 			r_it->set_value (route_cols.get_channel (i).label, label);
 		}
 
-		++i;
+		if (++i > n_channels) {
+			break;
+		}
 	}
 }
 
@@ -450,19 +463,33 @@ PortExportChannelSelector::ChannelTreeView::update_selection_text (std::string c
 	update_config ();
 }
 
+uint32_t
+PortExportChannelSelector::ChannelTreeView::max_route_channel_count () const
+{
+	uint32_t rv = 0;
+	for (Gtk::ListStore::Children::const_iterator it = route_list->children().begin(); it != route_list->children().end(); ++it) {
+		Gtk::TreeModel::Row row = *it;
+		if (!row[route_cols.selected]) {
+			continue;
+		}
+		ARDOUR::IO* io = row[route_cols.io];
+		uint32_t outs = io->n_ports().n_audio();
+		rv = std::max (rv, outs);
+	}
+	return rv;
+}
+
 RegionExportChannelSelector::RegionExportChannelSelector (ARDOUR::Session * _session,
                                                           ProfileManagerPtr manager,
                                                           ARDOUR::AudioRegion const & region,
                                                           ARDOUR::AudioTrack & track) :
-  ExportChannelSelector (_session, manager),
-  region (region),
-  track (track),
-  region_chans (region.n_channels()),
-  track_chans (track.n_outputs().n_audio()),
+	ExportChannelSelector (_session, manager),
+	region (region),
+	track (track),
+	region_chans (region.n_channels()),
 
-  raw_button (type_group),
-  fades_button (type_group),
-  processed_button (type_group)
+	raw_button (type_group),
+	fades_button (type_group)
 {
 	pack_start (vbox);
 
@@ -477,10 +504,6 @@ RegionExportChannelSelector::RegionExportChannelSelector (ARDOUR::Session * _ses
 	fades_button.set_label (string_compose (_("Region contents with fades and region gain (channels: %1)"), region_chans));
 	fades_button.signal_toggled ().connect (sigc::mem_fun (*this, &RegionExportChannelSelector::handle_selection));
 	vbox.pack_start (fades_button, false, false);
-
-	processed_button.set_label (string_compose (_("Track output (channels: %1)"), track_chans));
-	processed_button.signal_toggled ().connect (sigc::mem_fun (*this, &RegionExportChannelSelector::handle_selection));
-	vbox.pack_start (processed_button, false, false);
 
 	sync_with_manager();
 	vbox.show_all_children ();
@@ -504,9 +527,6 @@ RegionExportChannelSelector::sync_with_manager ()
 	case RegionExportChannelFactory::Fades:
 		fades_button.set_active (true);
 		break;
-	case RegionExportChannelFactory::Processed:
-		processed_button.set_active (true);
-		break;
 	}
 
 	handle_selection ();
@@ -526,8 +546,6 @@ RegionExportChannelSelector::handle_selection ()
 		type = RegionExportChannelFactory::Raw;
 	} else if (fades_button.get_active ()) {
 		type = RegionExportChannelFactory::Fades;
-	} else if (processed_button.get_active ()) {
-		type = RegionExportChannelFactory::Processed;
 	} else {
 		CriticalSelectionChanged ();
 		return;
@@ -536,8 +554,7 @@ RegionExportChannelSelector::handle_selection ()
 	factory.reset (new RegionExportChannelFactory (_session, region, track, type));
 	state->config->set_region_processing_type (type);
 
-	const size_t cc = type == RegionExportChannelFactory::Processed ? track_chans : region_chans;
-	for (size_t chan = 0; chan < cc; ++chan) {
+	for (size_t chan = 0; chan < region_chans; ++chan) {
 		state->config->register_channel (factory->create (chan));
 	}
 
@@ -549,18 +566,37 @@ RegionExportChannelSelector::handle_selection ()
 TrackExportChannelSelector::TrackExportChannelSelector (ARDOUR::Session * session, ProfileManagerPtr manager)
   : ExportChannelSelector(session, manager)
   , track_output_button(_("Apply track/bus processing"))
-  , select_tracks_button (_("Select all tracks"))
-  , select_busses_button (_("Select all busses"))
-  , select_none_button (_("Deselect all"))
 {
 	pack_start(main_layout);
 
+	// Populate Selection Menu
+	{
+		using namespace Gtk::Menu_Helpers;
+
+		select_menu.set_text (_("Selection Actions"));
+		select_menu.disable_scrolling ();
+
+		select_menu.AddMenuElem (MenuElem (_("Select tracks"), sigc::mem_fun (*this, &TrackExportChannelSelector::select_tracks)));
+		select_menu.AddMenuElem (MenuElem (_("Select busses"), sigc::mem_fun (*this, &TrackExportChannelSelector::select_busses)));
+		select_menu.AddMenuElem (MenuElem (_("Deselect all"), sigc::mem_fun (*this, &TrackExportChannelSelector::select_none)));
+		select_menu.AddMenuElem (SeparatorElem ());
+
+		exclude_hidden = new Gtk::CheckMenuItem (_("Exclude Hidden"));
+		exclude_hidden->set_active (false);
+		exclude_hidden->show();
+		select_menu.AddMenuElem (*exclude_hidden);
+
+		exclude_muted = new Gtk::CheckMenuItem (_("Exclude Muted"));
+		exclude_muted->set_active (true);
+		exclude_muted->show();
+		select_menu.AddMenuElem (*exclude_muted);
+	}
+
 	// Options
-	options_box.pack_start(track_output_button);
-	options_box.pack_start (select_tracks_button);
-	options_box.pack_start (select_busses_button);
-	options_box.pack_start (select_none_button);
-	main_layout.pack_start(options_box, false, false);
+	options_box.set_spacing (8);
+	options_box.pack_start (track_output_button, false, false);
+	options_box.pack_start (select_menu, false, false);
+	main_layout.pack_start (options_box, false, false);
 
 	// Track scroller
 	track_scroller.add (track_view);
@@ -591,15 +627,17 @@ TrackExportChannelSelector::TrackExportChannelSelector (ARDOUR::Session * sessio
 	column->pack_start (*text_renderer, false);
 	column->add_attribute (text_renderer->property_text(), track_cols.label);
 
-	select_tracks_button.signal_clicked().connect (sigc::mem_fun (*this, &TrackExportChannelSelector::select_tracks));
-	select_busses_button.signal_clicked().connect (sigc::mem_fun (*this, &TrackExportChannelSelector::select_busses));
-	select_none_button.signal_clicked().connect (sigc::mem_fun (*this, &TrackExportChannelSelector::select_none));
-
 	track_output_button.signal_clicked().connect (sigc::mem_fun (*this, &TrackExportChannelSelector::track_outputs_selected));
 
 	fill_list();
 
 	show_all_children ();
+}
+
+TrackExportChannelSelector::~TrackExportChannelSelector ()
+{
+	delete exclude_hidden;
+	delete exclude_muted;
 }
 
 void
@@ -612,11 +650,19 @@ TrackExportChannelSelector::sync_with_manager ()
 void
 TrackExportChannelSelector::select_tracks ()
 {
+	bool excl_hidden = exclude_hidden->get_active ();
+	bool excl_muted  = exclude_muted->get_active ();
+
 	for (Gtk::ListStore::Children::iterator it = track_list->children().begin(); it != track_list->children().end(); ++it) {
 		Gtk::TreeModel::Row row = *it;
 		boost::shared_ptr<Route> route = row[track_cols.route];
 		if (boost::dynamic_pointer_cast<Track> (route)) {
-			// it's a track
+			if (excl_muted && route->muted ()) {
+				continue;
+			}
+			if (excl_hidden && route->is_hidden ()) {
+				continue;
+			}
 			row[track_cols.selected] = true;
 		}
 	}
@@ -626,11 +672,19 @@ TrackExportChannelSelector::select_tracks ()
 void
 TrackExportChannelSelector::select_busses ()
 {
+	bool excl_hidden = exclude_hidden->get_active ();
+	bool excl_muted  = exclude_muted->get_active ();
+
 	for (Gtk::ListStore::Children::iterator it = track_list->children().begin(); it != track_list->children().end(); ++it) {
 		Gtk::TreeModel::Row row = *it;
 		boost::shared_ptr<Route> route = row[track_cols.route];
 		if (!boost::dynamic_pointer_cast<Track> (route)) {
-			// it's not a track, must be a bus
+			if (excl_muted && route->muted ()) {
+				continue;
+			}
+			if (excl_hidden && route->is_hidden ()) {
+				continue;
+			}
 			row[track_cols.selected] = true;
 		}
 	}
@@ -657,7 +711,9 @@ void
 TrackExportChannelSelector::fill_list()
 {
 	track_list->clear();
-	RouteList routes = *_session->get_routes();
+	RouteList routes = _session->get_routelist();
+
+	CoreSelection const& cs (_session->selection());
 
 	for (RouteList::iterator it = routes.begin(); it != routes.end(); ++it) {
 		if (!boost::dynamic_pointer_cast<Track>(*it)) {
@@ -671,7 +727,7 @@ TrackExportChannelSelector::fill_list()
 			}
 
 			// not monitor or master bus
-			add_track (*it);
+			add_track (*it, cs.selected (*it));
 		}
 	}
 	for (RouteList::iterator it = routes.begin(); it != routes.end(); ++it) {
@@ -680,21 +736,21 @@ TrackExportChannelSelector::fill_list()
 				// don't include inactive tracks
 				continue;
 			}
-			add_track (*it);
+			add_track (*it, cs.selected (*it));
 		}
 	}
 }
 
 void
-TrackExportChannelSelector::add_track (boost::shared_ptr<Route> route)
+TrackExportChannelSelector::add_track (boost::shared_ptr<Route> route, bool selected)
 {
 	Gtk::TreeModel::iterator iter = track_list->append();
 	Gtk::TreeModel::Row row = *iter;
 
-	row[track_cols.selected] = false;
+	row[track_cols.selected] = selected;
 	row[track_cols.label] = route->name();
 	row[track_cols.route] = route;
-	row[track_cols.order_key] = route->order_key();
+	row[track_cols.order_key] = route->presentation_info().order();
 }
 
 void
@@ -709,7 +765,7 @@ TrackExportChannelSelector::update_config()
 			continue;
 		}
 
-		ExportProfileManager::ChannelConfigStatePtr state = manager->add_channel_config();
+		ExportProfileManager::ChannelConfigStatePtr state;
 
 		boost::shared_ptr<Route> route = row[track_cols.route];
 
@@ -721,16 +777,29 @@ TrackExportChannelSelector::update_config()
 					ExportChannelPtr channel (new PortExportChannel ());
 					PortExportChannel * pec = static_cast<PortExportChannel *> (channel.get());
 					pec->add_port(port);
+					if (!state) {
+						state = manager->add_channel_config();
+					}
 					state->config->register_channel(channel);
 				}
 			}
 		} else {
 			std::list<ExportChannelPtr> list;
 			RouteExportChannel::create_from_route (list, route);
+			if (list.size () == 0) {
+				continue;
+			}
+			state = manager->add_channel_config();
 			state->config->register_channels (list);
 		}
 
-		state->config->set_name (route->name());
+		if (state) {
+			if (_session->config.get_track_name_number() && route->track_number() > 0) {
+				state->config->set_name (string_compose ("%1-%2", route->track_number(), route->name()));
+			} else {
+				state->config->set_name (route->name());
+			}
+		}
 
 	}
 

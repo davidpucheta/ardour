@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000,2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2000-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2009 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2018 Johannes Mueller <github@johannes-mueller.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_plugin_insert_h__
 #define __ardour_plugin_insert_h__
@@ -24,6 +28,9 @@
 #include <string>
 
 #include <boost/weak_ptr.hpp>
+
+#include "pbd/stack_allocator.h"
+#include "pbd/timing.h"
 
 #include "ardour/ardour.h"
 #include "ardour/libardour_visibility.h"
@@ -34,6 +41,7 @@
 #include "ardour/parameter_descriptor.h"
 #include "ardour/plugin.h"
 #include "ardour/processor.h"
+#include "ardour/readonly_control.h"
 #include "ardour/sidechain.h"
 #include "ardour/automation_control.h"
 
@@ -49,27 +57,37 @@ class Plugin;
  */
 class LIBARDOUR_API PluginInsert : public Processor
 {
-  public:
+public:
 	PluginInsert (Session&, boost::shared_ptr<Plugin> = boost::shared_ptr<Plugin>());
 	~PluginInsert ();
 
+	void drop_references ();
+
 	static const std::string port_automation_node_name;
 
-	XMLNode& state(bool);
-	XMLNode& get_state(void);
 	int set_state(const XMLNode&, int version);
 	void update_id (PBD::ID);
+	void set_owner (SessionObject*);
 	void set_state_dir (const std::string& d = "");
 
-	void run (BufferSet& in, framepos_t start_frame, framepos_t end_frame, pframes_t nframes, bool);
-	void silence (framecnt_t nframes);
+	void run (BufferSet& in, samplepos_t start_sample, samplepos_t end_sample, double speed, pframes_t nframes, bool);
+	void silence (samplecnt_t nframes, samplepos_t start_sample);
 
 	void activate ();
 	void deactivate ();
 	void flush ();
 
+	void enable (bool yn);
+	bool enabled () const;
+	bool bypassable () const;
+
 	bool reset_parameters_to_default ();
 	bool can_reset_all_parameters ();
+
+	bool write_immediate_event (Evoral::EventType event_type, size_t size, const uint8_t* buf);
+
+	void automation_run (samplepos_t, pframes_t, bool only_active = false);
+	bool find_next_event (double, double, Evoral::ControlEvent&, bool only_active = true) const;
 
 	int set_block_size (pframes_t nframes);
 
@@ -93,22 +111,22 @@ class LIBARDOUR_API PluginInsert : public Processor
 		return _thru_map;
 	}
 
+	bool pre_seed (const ChanCount&, const ChanCount&, const ChanMapping&, const ChanMapping&, const ChanMapping&);
+
 	ChanMapping input_map () const; ///< combined (all instances) input map
+	ChanMapping no_sc_input_map () const; ///< combined (all instances) input map w/o sidechain sinks
 	ChanMapping output_map () const; ///< combined (all instances) output map
 	bool has_midi_bypass () const;
 	bool has_midi_thru () const;
 	bool inplace () const { return ! _no_inplace; }
 
-#ifdef MIXBUS
 	bool is_channelstrip () const;
-#endif
 
 	void set_input_map (uint32_t, ChanMapping);
 	void set_output_map (uint32_t, ChanMapping);
 	void set_thru_map (ChanMapping);
 	bool reset_map (bool emit = true);
-	bool sanitize_maps ();
-	bool check_inplace ();
+	bool configured () const { return _configured; }
 
 	// these are ports visible on the outside
 	ChanCount output_streams() const;
@@ -149,8 +167,9 @@ class LIBARDOUR_API PluginInsert : public Processor
 	void set_strict_io  (bool b);
 	void set_custom_cfg (bool b);
 	bool set_preset_out (const ChanCount&);
-	bool add_sidechain  (uint32_t n_audio = 1);
+	bool add_sidechain  (uint32_t n_audio = 1, uint32_t n_midi = 0);
 	bool del_sidechain ();
+	void update_sidechain_name ();
 	boost::shared_ptr<SideChain> sidechain () const { return _sidechain; }
 	// end C++ class slavery!
 
@@ -163,13 +182,23 @@ class LIBARDOUR_API PluginInsert : public Processor
 
 	bool has_no_inputs() const;
 	bool has_no_audio_inputs() const;
-	bool needs_midi_input() const;
+
+	bool is_instrument () const;
+
+	bool has_output_presets (
+			ChanCount in = ChanCount (DataType::MIDI, 1),
+			ChanCount out = ChanCount (DataType::AUDIO, 2)
+			);
 
 	void realtime_handle_transport_stopped ();
-	void realtime_locate ();
+	void realtime_locate (bool);
 	void monitoring_changed ();
 
 	bool load_preset (Plugin::PresetRecord);
+
+	bool provides_stats () const;
+	bool get_stats (uint64_t& min, uint64_t& max, double& avg, double& dev) const;
+	void clear_stats ();
 
 	/** A control that manipulates a plugin parameter (control port). */
 	struct PluginControl : public AutomationControl
@@ -179,15 +208,14 @@ class LIBARDOUR_API PluginInsert : public Processor
 		               const ParameterDescriptor&        desc,
 		               boost::shared_ptr<AutomationList> list=boost::shared_ptr<AutomationList>());
 
-		void set_value (double val, PBD::Controllable::GroupControlDisposition group_override);
-		void set_value_unchecked (double);
 		double get_value (void) const;
 		void catch_up_with_external_value (double val);
 		XMLNode& get_state();
+		std::string get_user_string() const;
 
 	private:
 		PluginInsert* _plugin;
-		void _set_value (double val, PBD::Controllable::GroupControlDisposition group_override);
+		void actually_set_value (double val, PBD::Controllable::GroupControlDisposition group_override);
 	};
 
 	/** A control that manipulates a plugin property (message). */
@@ -198,10 +226,10 @@ class LIBARDOUR_API PluginInsert : public Processor
 		                       const ParameterDescriptor&        desc,
 		                       boost::shared_ptr<AutomationList> list=boost::shared_ptr<AutomationList>());
 
-		void set_value (double val, PBD::Controllable::GroupControlDisposition group_override);
-		void set_value_unchecked (double);
 		double get_value (void) const;
 		XMLNode& get_state();
+	protected:
+		void actually_set_value (double value, PBD::Controllable::GroupControlDisposition);
 
 	private:
 		PluginInsert* _plugin;
@@ -216,7 +244,7 @@ class LIBARDOUR_API PluginInsert : public Processor
 		}
 	}
 
-	framecnt_t plugin_latency () const;
+	samplecnt_t plugin_latency () const;
 
 	bool has_sidechain () const {
 		return _sidechain ? true : false;
@@ -229,15 +257,17 @@ class LIBARDOUR_API PluginInsert : public Processor
 		return boost::shared_ptr<IO> ();
 	}
 
-	PluginType type ();
+	PluginType type () const;
+
+	boost::shared_ptr<ReadOnlyControl> control_output (uint32_t) const;
 
 	std::string describe_parameter (Evoral::Parameter param);
 
-	framecnt_t signal_latency () const;
+	samplecnt_t signal_latency () const;
 
 	boost::shared_ptr<Plugin> get_impulse_analysis_plugin();
 
-	void collect_signal_for_analysis (framecnt_t nframes);
+	void collect_signal_for_analysis (samplecnt_t nframes);
 
 	bool strict_io_configured () const {
 		return _match.strict_io;
@@ -284,13 +314,16 @@ class LIBARDOUR_API PluginInsert : public Processor
 		bool custom_cfg;       ///< custom config (if not strict)
 	};
 
-  private:
+protected:
+	XMLNode& state ();
+
+private:
 	/* disallow copy construction */
 	PluginInsert (const PluginInsert&);
 
 	void parameter_changed_externally (uint32_t, float);
 
-	void set_parameter (Evoral::Parameter param, float val);
+	void set_parameter (Evoral::Parameter param, float val, sampleoffset_t);
 
 	float default_parameter_value (const Evoral::Parameter& param);
 
@@ -298,11 +331,14 @@ class LIBARDOUR_API PluginInsert : public Processor
 	Plugins _plugins;
 
 	boost::shared_ptr<SideChain> _sidechain;
+	uint32_t _sc_playback_latency;
+	uint32_t _sc_capture_latency;
+	uint32_t _plugin_signal_latency;
 
 	boost::weak_ptr<Plugin> _impulseAnalysisPlugin;
 
-	framecnt_t _signal_analysis_collected_nframes;
-	framecnt_t _signal_analysis_collect_nframes_max;
+	samplecnt_t _signal_analysis_collect_nsamples;
+	samplecnt_t _signal_analysis_collect_nsamples_max;
 
 	BufferSet _signal_analysis_inputs;
 	BufferSet _signal_analysis_outputs;
@@ -332,27 +368,78 @@ class LIBARDOUR_API PluginInsert : public Processor
 	/** details of the match currently being used */
 	Match _match;
 
-	typedef std::map <uint32_t, ARDOUR::ChanMapping> PinMappings;
+	/* ordered map [plugin instance ID] => ARDOUR::ChanMapping
+	 * TODO: consider replacing with boost::flat_map<> or std::vector<>.
+	 */
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+	/* Use the older (heap based) mapping for early versions of MSVC.
+	 * In fact it might be safer to use this for all MSVC builds - as
+	 * our StackAllocator class depends on 'boost::aligned_storage'
+	 * which is known to be troublesome with Visual C++ :-
+	 * https://www.boost.org/doc/libs/1_65_0/libs/type_traits/doc/html/boost_typetraits/reference/aligned_storage.html
+	 */
+	class PinMappings : public std::map <uint32_t, ARDOUR::ChanMapping>
+#else
+	class PinMappings : public std::map <uint32_t, ARDOUR::ChanMapping, std::less<uint32_t>, PBD::StackAllocator<std::pair<const uint32_t, ARDOUR::ChanMapping>, 4> >
+#endif
+	{
+		public:
+			/* this emulates C++11's  std::map::at()
+			 * return mapping for given plugin instance */
+			inline ARDOUR::ChanMapping const& p (const uint32_t i) const {
+#ifndef NDEBUG
+				const_iterator x = find (i);
+				assert (x != end ());
+				return x->second;
+#else
+				return find(i)->second;
+#endif
+			}
+	};
+
 	PinMappings _in_map;
 	PinMappings _out_map;
 	ChanMapping _thru_map; // out-idx <=  in-idx
 
-	void automation_run (BufferSet& bufs, framepos_t start, pframes_t nframes);
-	void connect_and_run (BufferSet& bufs, pframes_t nframes, framecnt_t offset, bool with_auto, framepos_t now = 0);
+	void automate_and_run (BufferSet& bufs, samplepos_t start, samplepos_t end, double speed, pframes_t nframes);
+	void connect_and_run (BufferSet& bufs, samplepos_t start, samplecnt_t end, double speed, pframes_t nframes, samplecnt_t offset, bool with_auto);
+	void bypass (BufferSet& bufs, pframes_t nframes);
+	void inplace_silence_unconnected (BufferSet&, const PinMappings&, samplecnt_t nframes, samplecnt_t offset) const;
 
 	void create_automatable_parameters ();
 	void control_list_automation_state_changed (Evoral::Parameter, AutoState);
 	void set_parameter_state_2X (const XMLNode& node, int version);
 	void set_control_ids (const XMLNode&, int version);
+	void update_control_values (const XMLNode&, int version);
+
+	void enable_changed ();
+	void bypassable_changed ();
+
+	bool sanitize_maps ();
+	bool check_inplace ();
+	void mapping_changed ();
 
 	boost::shared_ptr<Plugin> plugin_factory (boost::shared_ptr<Plugin>);
 	void add_plugin (boost::shared_ptr<Plugin>);
+	void plugin_removed (boost::weak_ptr<Plugin>);
+
+	void add_sidechain_from_xml (const XMLNode& node, int version);
 
 	void start_touch (uint32_t param_id);
 	void end_touch (uint32_t param_id);
 
-	void latency_changed (framecnt_t, framecnt_t);
+	void latency_changed ();
 	bool _latency_changed;
+	uint32_t _bypass_port;
+	bool     _inverted_bypass_enable;
+
+	typedef std::map<uint32_t, boost::shared_ptr<ReadOnlyControl> >CtrlOutMap;
+	CtrlOutMap _control_outputs;
+
+	void preset_load_set_value (uint32_t, float);
+
+	PBD::TimingStats _timing_stats;
+	volatile gint _stat_reset;
 };
 
 } // namespace ARDOUR

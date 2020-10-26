@@ -1,21 +1,20 @@
 /*
-    Copyright (C) 2009 John Emmas
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2016 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef COMPILER_MSVC
 
@@ -223,6 +222,63 @@ ssize_t ret;
 	return (ret);
 }
 
+#if defined(_MSC_VER) && (_MSC_VER < 1800)
+//***************************************************************
+//
+//	expm1()
+//
+// Emulates C99 expm1() using exp().
+//
+//	Returns:
+//
+//    On Success: (('e' raised to the power of 'x') - 1)
+//                (e.g. expm1(1) == 1.7182818).
+//    On Failure: None, except that calling exp(x) should generate
+//                an appropriate error for us (such as INF etc).
+//
+LIBPBD_API double PBD_APICALLTYPE
+expm1(double x)
+{
+	return (exp(x) - (double)1.0);
+}
+
+//***************************************************************
+//
+//	log1p()
+//
+// Emulates C99 log1p() using log().
+//
+//	Returns:
+//
+//    On Success: The natural logarithm of (1 + x)
+//                (e.g. log1p(1) == 0.69314718).
+//    On Failure: None, except that calling log(x) should generate
+//                an appropriate error for us (such as ERANGE etc).
+//
+LIBPBD_API double PBD_APICALLTYPE
+log1p(double x)
+{
+	return (log(x + (double)1.0));
+}
+
+//***************************************************************
+//
+//	roundf()
+//
+// Emulates roundf() using floorf().
+//
+//	Returns:
+//
+//    On Success: The largest integer that is less than or
+//                equal to 'x'.
+//    On Failure: None
+//
+LIBPBD_API float PBD_APICALLTYPE
+roundf(float x)
+{
+	return (floorf(x));
+}
+
 //***************************************************************
 //
 //	round()
@@ -239,6 +295,27 @@ LIBPBD_API double PBD_APICALLTYPE
 round(double x)
 {
 	return (floor(x));
+}
+#endif
+
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+//***************************************************************
+//
+//	log2()
+//
+// Emulates C99 log2() using log().
+//
+//	Returns:
+//
+//    On Success: The binary (base-2) logarithm of 'x'
+//                (e.g. log2(1024) == 10).
+//    On Failure: None, except that calling log(x) should generate
+//                an appropriate error for us (such as ERANGE etc).
+//
+LIBPBD_API double PBD_APICALLTYPE
+log2(double x)
+{
+	return (log(x) / log((double)2.0));
 }
 
 //***************************************************************
@@ -261,25 +338,7 @@ trunc(double x)
 
 	return (floor(x));
 }
-
-//***************************************************************
-//
-//	log2()
-//
-// Emulates C99 log2() using log().
-//
-//	Returns:
-//
-//    On Success: The binary (base-2) logarithm of 'x'
-//                (e.g. log2(1024) == 10).
-//    On Failure: None, except that calling log(x) should generate
-//                an appropriate error for us (such as ERANGE etc).
-//
-LIBPBD_API double PBD_APICALLTYPE
-log2(double x)
-{
-	return (log(x) / log((double)2.0));
-}
+#endif
 
 namespace PBD {
 

@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_audiofilesource_h__
 #define __ardour_audiofilesource_h__
@@ -33,6 +36,7 @@ struct LIBARDOUR_API SoundFileInfo {
 	int64_t     length;
 	std::string format_name;
 	int64_t     timecode;
+	bool        seekable; // non-seekable files must be converted/imported
 };
 
 class LIBARDOUR_API AudioFileSource : public AudioSource, public FileSource {
@@ -47,27 +51,25 @@ public:
 		return safe_audio_file_extension(path);
 	}
 
-	/* this block of methods do nothing for regular file sources, but are significant
-	   for files used in destructive recording.
-	*/
-	virtual framepos_t last_capture_start_frame() const { return 0; }
-	virtual void      mark_capture_start (framepos_t) {}
+	virtual samplepos_t last_capture_start_sample() const { return 0; }
+	virtual void      mark_capture_start (samplepos_t) {}
 	virtual void      mark_capture_end () {}
 	virtual void      clear_capture_marks() {}
 	virtual bool      one_of_several_channels () const { return false; }
 
 	virtual void flush () = 0;
-	virtual int update_header (framepos_t when, struct tm&, time_t) = 0;
+	virtual int update_header (samplepos_t when, struct tm&, time_t) = 0;
 	virtual int flush_header () = 0;
 
 	void mark_streaming_write_completed (const Lock& lock);
 
 	int setup_peakfile ();
+	void set_gain (float g, bool temporarily = false);
 
 	XMLNode& get_state ();
 	int set_state (const XMLNode&, int version);
 
-	bool can_truncate_peaks() const { return !destructive(); }
+	bool can_truncate_peaks() const { return true; }
 	bool can_be_analysed() const    { return _length > 0; }
 
 	static bool safe_audio_file_extension (const std::string& path);
@@ -75,7 +77,7 @@ public:
 	static bool is_empty (Session&, std::string path);
 
 	static void set_bwf_serial_number (int);
-	static void set_header_position_offset (framecnt_t offset);
+	static void set_header_position_offset (samplecnt_t offset);
 
 	static PBD::Signal0<void> HeaderPositionOffsetChanged;
 
@@ -98,19 +100,19 @@ protected:
 
 	int init (const std::string& idstr, bool must_exist);
 
-	virtual void set_header_timeline_position () = 0;
+	virtual void set_header_natural_position () = 0;
 	virtual void handle_header_position_change () {}
 
 	int move_dependents_to_trash();
 
-	static Sample* get_interleave_buffer (framecnt_t size);
+	static Sample* get_interleave_buffer (samplecnt_t size);
 
 	static char bwf_country_code[3];
 	static char bwf_organization_code[4];
 	static char bwf_serial_number[13];
 
 	/** Kept up to date with the position of the session location start */
-	static framecnt_t header_position_offset;
+	static samplecnt_t header_position_offset;
 };
 
 } // namespace ARDOUR

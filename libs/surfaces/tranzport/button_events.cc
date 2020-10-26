@@ -26,7 +26,7 @@ using namespace std;
 using namespace sigc;
 using namespace PBD;
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include <pbd/abstract_ui.cc>
 
@@ -243,7 +243,7 @@ TranzportControlProtocol::button_event_prev_release (bool shifted)
 }
 
 // Note - add_marker should adhere to the snap to setting
-// maybe session->audible_frame does that
+// maybe session->audible_sample does that
 
 void
 TranzportControlProtocol::button_event_add_press (bool shifted)
@@ -359,7 +359,7 @@ TranzportControlProtocol::button_event_footswitch_press (bool shifted)
 void
 TranzportControlProtocol::button_event_footswitch_release (bool shifted)
 {
-	if(session->transport_speed() == 0.0)
+	if(get_transport_speed() == 0.0)
 	{
 		transport_play ();
 	}

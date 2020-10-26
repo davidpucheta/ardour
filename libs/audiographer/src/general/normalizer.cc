@@ -1,22 +1,22 @@
 /*
-    Copyright (C) 2012 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "audiographer/general/normalizer.h"
 
@@ -54,23 +54,23 @@ float Normalizer::set_peak (float peak)
   * non-const ProcessContexts are given to \a process() .
   * \n Not RT safe
   */
-void Normalizer::alloc_buffer(framecnt_t frames)
+void Normalizer::alloc_buffer(samplecnt_t samples)
 {
 	delete [] buffer;
-	buffer = new float[frames];
-	buffer_size = frames;
+	buffer = new float[samples];
+	buffer_size = samples;
 }
 
 /// Process a const ProcessContext \see alloc_buffer() \n RT safe
 void Normalizer::process (ProcessContext<float> const & c)
 {
-	if (throw_level (ThrowProcess) && c.frames() > buffer_size) {
-		throw Exception (*this, "Too many frames given to process()");
+	if (throw_level (ThrowProcess) && c.samples() > buffer_size) {
+		throw Exception (*this, "Too many samples given to process()");
 	}
 
 	if (enabled) {
-		memcpy (buffer, c.data(), c.frames() * sizeof(float));
-		Routines::apply_gain_to_buffer (buffer, c.frames(), gain);
+		memcpy (buffer, c.data(), c.samples() * sizeof(float));
+		Routines::apply_gain_to_buffer (buffer, c.samples(), gain);
 	}
 
 	ProcessContext<float> c_out (c, buffer);
@@ -81,7 +81,7 @@ void Normalizer::process (ProcessContext<float> const & c)
 void Normalizer::process (ProcessContext<float> & c)
 {
 	if (enabled) {
-		Routines::apply_gain_to_buffer (c.data(), c.frames(), gain);
+		Routines::apply_gain_to_buffer (c.data(), c.samples(), gain);
 	}
 	ListedSource<float>::output(c);
 }

@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2009 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2012 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/audio_region_importer.h"
 
@@ -33,7 +35,7 @@
 #include "ardour/region_factory.h"
 #include "ardour/session_directory.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -62,7 +64,7 @@ AudioRegionImportHandler::create_regions_from_children (XMLNode const & node, El
 		if (!(*it)->name().compare ("Region") && (!type || type->value() == "audio") ) {
 			try {
 				list.push_back (ElementPtr ( new AudioRegionImporter (source, session, *this, **it)));
-			} catch (failed_constructor err) {
+			} catch (failed_constructor const&) {
 				set_dirty();
 			}
 		}
@@ -127,7 +129,7 @@ AudioRegionImporter::~AudioRegionImporter ()
 string
 AudioRegionImporter::get_info () const
 {
-	framecnt_t length, position;
+	samplecnt_t length, position;
 	Timecode::Time length_time, position_time;
 	std::ostringstream oss;
 
@@ -236,7 +238,7 @@ AudioRegionImporter::parse_source_xml ()
 	char buf[128];
 	std::string source_dir(get_sound_dir (source));
 	XMLNode * source_node;
-	XMLProperty *prop;
+	XMLProperty const * prop;
 
 	// Get XML for sources
 	if (!(source_node = source.root()->child (X_("Sources")))) {

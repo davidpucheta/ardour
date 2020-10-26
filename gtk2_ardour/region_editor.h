@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010 Carl Hetherington <carl@carlh.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_region_edit_h__
 #define __gtk_ardour_region_edit_h__
@@ -51,17 +53,17 @@ class ClockGroup;
 
 class RegionEditor : public ArdourDialog
 {
-  public:
+public:
 	RegionEditor (ARDOUR::Session*, boost::shared_ptr<ARDOUR::Region>);
 	virtual ~RegionEditor ();
 
-  protected:
+protected:
 	virtual void region_changed (const PBD::PropertyChange&);
 
 	Gtk::Table _table;
 	int _table_row;
 
-  private:
+private:
 	boost::shared_ptr<ARDOUR::Region> _region;
 
 	void connect_editor_events ();
@@ -77,7 +79,7 @@ class RegionEditor : public ArdourDialog
 	Gtk::Label sync_absolute_label;
 	Gtk::Label start_label;
 
-        ClockGroup* _clock_group;
+	ClockGroup* _clock_group;
 
 	AudioClock position_clock;
 	AudioClock end_clock;
@@ -115,6 +117,8 @@ class RegionEditor : public ArdourDialog
 
 	Gtk::Label _sources_label;
 	Gtk::ListViewText _sources;
+
+	void set_clock_mode_from_primary ();
 };
 
 #endif /* __gtk_ardour_region_edit_h__ */

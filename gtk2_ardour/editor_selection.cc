@@ -1,37 +1,46 @@
 /*
-    Copyright (C) 2000-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2019 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015 André Nusser <andre.nusser@googlemail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 #include <cstdlib>
 
 #include "pbd/stacktrace.h"
+#include "pbd/unwind.h"
 
+#include "ardour/control_protocol_manager.h"
 #include "ardour/midi_region.h"
 #include "ardour/playlist.h"
 #include "ardour/profile.h"
 #include "ardour/route_group.h"
+#include "ardour/selection.h"
 #include "ardour/session.h"
+#include "ardour/vca.h"
 
-#include "control_protocol/control_protocol.h"
-
-#include "editor_drag.h"
 #include "editor.h"
+#include "editor_drag.h"
+#include "editor_routes.h"
+#include "editor_sources.h"
 #include "actions.h"
 #include "audio_time_axis.h"
 #include "audio_region_view.h"
@@ -40,10 +49,11 @@
 #include "control_point.h"
 #include "editor_regions.h"
 #include "editor_cursors.h"
+#include "keyboard.h"
 #include "midi_region_view.h"
 #include "sfdb_ui.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -87,10 +97,6 @@ Editor::extend_selection_to_track (TimeAxisView& view)
 	bool forwards = true;
 
 	sorted.sort (cmp);
-
-	if (!selection->selected (&view)) {
-		to_be_added.push_back (&view);
-	}
 
 	/* figure out if we should go forward or backwards */
 
@@ -157,6 +163,10 @@ Editor::extend_selection_to_track (TimeAxisView& view)
 		}
 	}
 
+	if (!selection->selected (&view)) {
+		to_be_added.push_back (&view);
+	}
+
 	if (!to_be_added.empty()) {
 		selection->add (to_be_added);
 		return true;
@@ -168,12 +178,27 @@ Editor::extend_selection_to_track (TimeAxisView& view)
 void
 Editor::select_all_tracks ()
 {
+	TrackViewList tracks;
+	for (TrackViewList::iterator i = track_views.begin(); i != track_views.end(); ++i) {
+		RouteTimeAxisView* rtv = dynamic_cast<RouteTimeAxisView*>(*i);
+		if ( rtv && rtv->route()->is_track() ) {
+			tracks.push_back (*i);
+		}
+	}
+	PBD::Unwinder<bool> uw (_track_selection_change_without_scroll, true);
+	selection->set (tracks);
+}
+
+void
+Editor::select_all_visible_lanes ()
+{
 	TrackViewList visible_views;
 	for (TrackViewList::iterator i = track_views.begin(); i != track_views.end(); ++i) {
 		if ((*i)->marked_for_display()) {
 			visible_views.push_back (*i);
 		}
 	}
+	PBD::Unwinder<bool> uw (_track_selection_change_without_scroll, true);
 	selection->set (visible_views);
 }
 
@@ -186,6 +211,8 @@ Editor::set_selected_track_as_side_effect (Selection::Operation op)
 	if (!clicked_axisview) {
 		return;
 	}
+
+	PBD::Unwinder<bool> uw (_editor_track_selection_change_without_scroll, true);
 
 	RouteGroup* group = NULL;
 	if (clicked_routeview) {
@@ -265,9 +292,7 @@ Editor::set_selected_track (TimeAxisView& view, Selection::Operation op, bool no
 		break;
 
 	case Selection::Add:
-		if (!selection->selected (&view)) {
-			selection->add (&view);
-		}
+		selection->add (&view);
 		break;
 
 	case Selection::Set:
@@ -395,7 +420,7 @@ Editor::mapover_tracks (sigc::slot<void, RouteTimeAxisView&, uint32_t> sl, TimeA
 
 	RouteGroup* group = route_basis->route()->route_group();
 
-	if (group && group->enabled_property(prop) && group->enabled_property (Properties::active.property_id) ) {
+	if (group && group->enabled_property(prop) && group->enabled_property (Properties::active.property_id)) {
 
 		/* the basis is a member of an active route group, with the appropriate
 		   properties; find other members */
@@ -439,7 +464,7 @@ Editor::mapover_tracks_with_unique_playlists (sigc::slot<void, RouteTimeAxisView
 
 	RouteGroup* group = route_basis->route()->route_group(); // could be null, not a problem
 
-	if (group && group->enabled_property(prop) && group->enabled_property (Properties::active.property_id) ) {
+	if (group && group->enabled_property(prop) && group->enabled_property (Properties::active.property_id)) {
 
 		/* the basis is a member of an active route group, with the appropriate
 		   properties; find other members */
@@ -621,7 +646,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 				if (press) {
 
 					if (selection->selected (clicked_routeview)) {
-						get_equivalent_regions (clicked_regionview, all_equivalent_regions, ARDOUR::Properties::select.property_id);
+						get_equivalent_regions (clicked_regionview, all_equivalent_regions, ARDOUR::Properties::group_select.property_id);
 					} else {
 						all_equivalent_regions.push_back (clicked_regionview);
 					}
@@ -639,7 +664,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 
 		case Selection::Set:
 			if (!selection->selected (clicked_regionview)) {
-				get_equivalent_regions (clicked_regionview, all_equivalent_regions, ARDOUR::Properties::select.property_id);
+				get_equivalent_regions (clicked_regionview, all_equivalent_regions, ARDOUR::Properties::group_select.property_id);
 				selection->set (all_equivalent_regions);
 				commit = true;
 			} else {
@@ -649,7 +674,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 				else {
 					if (selection->regions.size() > 1) {
 						/* collapse region selection down to just this one region (and its equivalents) */
-						get_equivalent_regions(clicked_regionview, all_equivalent_regions, ARDOUR::Properties::select.property_id);
+						get_equivalent_regions(clicked_regionview, all_equivalent_regions, ARDOUR::Properties::group_select.property_id);
 						selection->set(all_equivalent_regions);
 						commit = true;
 					}
@@ -665,24 +690,24 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 	} else if (op == Selection::Extend) {
 
 		list<Selectable*> results;
-		framepos_t last_frame;
-		framepos_t first_frame;
+		samplepos_t last_sample;
+		samplepos_t first_sample;
 		bool same_track = false;
 
 		/* 1. find the last selected regionview in the track that was clicked in */
 
-		last_frame = 0;
-		first_frame = max_framepos;
+		last_sample = 0;
+		first_sample = max_samplepos;
 
 		for (RegionSelection::iterator x = selection->regions.begin(); x != selection->regions.end(); ++x) {
 			if (&(*x)->get_time_axis_view() == &clicked_regionview->get_time_axis_view()) {
 
-				if ((*x)->region()->last_frame() > last_frame) {
-					last_frame = (*x)->region()->last_frame();
+				if ((*x)->region()->last_sample() > last_sample) {
+					last_sample = (*x)->region()->last_sample();
 				}
 
-				if ((*x)->region()->first_frame() < first_frame) {
-					first_frame = (*x)->region()->first_frame();
+				if ((*x)->region()->first_sample() < first_sample) {
+					first_sample = (*x)->region()->first_sample();
 				}
 
 				same_track = true;
@@ -693,34 +718,34 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 
 			/* 2. figure out the boundaries for our search for new objects */
 
-			switch (clicked_regionview->region()->coverage (first_frame, last_frame)) {
+			switch (clicked_regionview->region()->coverage (first_sample, last_sample)) {
 			case Evoral::OverlapNone:
-				if (last_frame < clicked_regionview->region()->first_frame()) {
-					first_frame = last_frame;
-					last_frame = clicked_regionview->region()->last_frame();
+				if (last_sample < clicked_regionview->region()->first_sample()) {
+					first_sample = last_sample;
+					last_sample = clicked_regionview->region()->last_sample();
 				} else {
-					last_frame = first_frame;
-					first_frame = clicked_regionview->region()->first_frame();
+					last_sample = first_sample;
+					first_sample = clicked_regionview->region()->first_sample();
 				}
 				break;
 
 			case Evoral::OverlapExternal:
-				if (last_frame < clicked_regionview->region()->first_frame()) {
-					first_frame = last_frame;
-					last_frame = clicked_regionview->region()->last_frame();
+				if (last_sample < clicked_regionview->region()->first_sample()) {
+					first_sample = last_sample;
+					last_sample = clicked_regionview->region()->last_sample();
 				} else {
-					last_frame = first_frame;
-					first_frame = clicked_regionview->region()->first_frame();
+					last_sample = first_sample;
+					first_sample = clicked_regionview->region()->first_sample();
 				}
 				break;
 
 			case Evoral::OverlapInternal:
-				if (last_frame < clicked_regionview->region()->first_frame()) {
-					first_frame = last_frame;
-					last_frame = clicked_regionview->region()->last_frame();
+				if (last_sample < clicked_regionview->region()->first_sample()) {
+					first_sample = last_sample;
+					last_sample = clicked_regionview->region()->last_sample();
 				} else {
-					last_frame = first_frame;
-					first_frame = clicked_regionview->region()->first_frame();
+					last_sample = first_sample;
+					first_sample = clicked_regionview->region()->first_sample();
 				}
 				break;
 
@@ -740,15 +765,15 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 			*/
 
 
-			first_frame = clicked_regionview->region()->position();
-			last_frame = clicked_regionview->region()->last_frame();
+			first_sample = clicked_regionview->region()->position();
+			last_sample = clicked_regionview->region()->last_sample();
 
 			for (RegionSelection::iterator i = selection->regions.begin(); i != selection->regions.end(); ++i) {
-				if ((*i)->region()->position() < first_frame) {
-					first_frame = (*i)->region()->position();
+				if ((*i)->region()->position() < first_sample) {
+					first_sample = (*i)->region()->position();
 				}
-				if ((*i)->region()->last_frame() + 1 > last_frame) {
-					last_frame = (*i)->region()->last_frame();
+				if ((*i)->region()->last_sample() + 1 > last_sample) {
+					last_sample = (*i)->region()->last_sample();
 				}
 			}
 		}
@@ -791,7 +816,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 
 					RouteTimeAxisView* closest = 0;
 					int distance = INT_MAX;
-					int key = rtv->route()->order_key ();
+					int key = rtv->route()->presentation_info().order ();
 
 					for (RegionSelection::iterator x = selection->regions.begin(); x != selection->regions.end(); ++x) {
 
@@ -806,7 +831,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 							if (result.second) {
 								/* newly added to already_in_selection */
 
-								int d = artv->route()->order_key ();
+								int d = artv->route()->presentation_info().order ();
 
 								d -= key;
 
@@ -822,7 +847,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 
 						/* now add all tracks between that one and this one */
 
-						int okey = closest->route()->order_key ();
+						int okey = closest->route()->presentation_info().order ();
 
 						if (okey > key) {
 							swap (okey, key);
@@ -832,7 +857,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 							RouteTimeAxisView* artv = dynamic_cast<RouteTimeAxisView*>(*x);
 							if (artv && artv != rtv) {
 
-								int k = artv->route()->order_key ();
+								int k = artv->route()->presentation_info().order ();
 
 								if (k >= okey && k <= key) {
 
@@ -861,7 +886,7 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 		*/
 
 		for (set<RouteTimeAxisView*>::iterator t = relevant_tracks.begin(); t != relevant_tracks.end(); ++t) {
-			(*t)->get_selectables (first_frame, last_frame, -1.0, -1.0, results);
+			(*t)->get_selectables (first_sample, last_sample, -1.0, -1.0, results);
 		}
 
 		/* 4. convert to a vector of regions */
@@ -879,13 +904,56 @@ Editor::set_selected_regionview_from_click (bool press, Selection::Operation op)
 		if (!regions.empty()) {
 			selection->add (regions);
 			commit = true;
+		} else if (selection->regions.empty() && !selection->selected (clicked_regionview)) {
+			/* ensure that at least the clicked regionview is selected. */
+			selection->set (clicked_regionview);
+			commit = true;
 		}
+
 	}
 
 out:
 	return commit;
 }
 
+void
+Editor::set_selected_midi_region_view (MidiRegionView& mrv)
+{
+	/* clear note selection in all currently selected MidiRegionViews */
+
+	if (get_selection().regions.contains (&mrv) && get_selection().regions.size() == 1) {
+		/* Nothing to do */
+		return;
+	}
+
+	midi_action (&MidiRegionView::clear_note_selection);
+	get_selection().set (&mrv);
+}
+
+void
+Editor::set_selection (std::list<Selectable*> s, Selection::Operation op)
+{
+	if (s.empty()) {
+		return;
+	}
+	begin_reversible_selection_op (X_("set selection"));
+	switch (op) {
+		case Selection::Toggle:
+			selection->toggle (s);
+			break;
+		case Selection::Set:
+			selection->set (s);
+			break;
+		case Selection::Extend:
+			selection->add (s);
+			break;
+		case Selection::Add:
+			selection->add (s);
+			break;
+	}
+
+	commit_reversible_selection_op () ;
+}
 
 void
 Editor::set_selected_regionview_from_region_list (boost::shared_ptr<Region> region, Selection::Operation op)
@@ -951,75 +1019,169 @@ Editor::set_selected_regionview_from_map_event (GdkEventAny* /*ev*/, StreamView*
 }
 
 void
-Editor::track_selection_changed ()
+Editor::presentation_info_changed (PropertyChange const & what_changed)
 {
-	switch (selection->tracks.size()) {
-	case 0:
-		break;
-	default:
-		set_selected_mixer_strip (*(selection->tracks.front()));
-		break;
-	}
+	uint32_t n_tracks = 0;
+	uint32_t n_busses = 0;
+	uint32_t n_vcas = 0;
+	uint32_t n_routes = 0;
+	uint32_t n_stripables = 0;
 
-	RouteNotificationListPtr routes (new RouteNotificationList);
+	/* We cannot ensure ordering of the handlers for
+	 * PresentationInfo::Changed, so we have to do everything in order
+	 * here, as a single handler.
+	 */
 
-	for (TrackViewList::iterator i = track_views.begin(); i != track_views.end(); ++i) {
-
-		bool yn = (find (selection->tracks.begin(), selection->tracks.end(), *i) != selection->tracks.end());
-
-		(*i)->set_selected (yn);
-
-		TimeAxisView::Children c = (*i)->get_child_list ();
-		for (TimeAxisView::Children::iterator j = c.begin(); j != c.end(); ++j) {
-			(*j)->set_selected (find (selection->tracks.begin(), selection->tracks.end(), j->get()) != selection->tracks.end());
-		}
-
-		if (yn) {
-			(*i)->reshow_selection (selection->time);
-		} else {
+	if (what_changed.contains (Properties::selected)) {
+		for (TrackViewList::iterator i = selection->tracks.begin(); i != selection->tracks.end(); ++i) {
+			(*i)->set_selected (false);
 			(*i)->hide_selection ();
 		}
-
-
-		if (yn) {
-			RouteTimeAxisView* rtav = dynamic_cast<RouteTimeAxisView*> (*i);
-			if (rtav) {
-				routes->push_back (rtav->route());
-			}
-		}
 	}
 
-	ActionManager::set_sensitive (ActionManager::track_selection_sensitive_actions, !selection->tracks.empty());
+	/* STEP 1: set the GUI selection state (in which TimeAxisViews for the
+	 * currently selected stripable/controllable duples are found and added
+	 */
 
-	/* notify control protocols */
+	selection->core_selection_changed (what_changed);
 
-	ControlProtocol::TrackSelectionChanged (routes);
+	/* STEP 2: update TimeAxisView's knowledge of their selected state
+	 */
 
-	if (sfbrowser && _session && !_session->deletion_in_progress()) {
-		uint32_t audio_track_cnt = 0;
-		uint32_t midi_track_cnt = 0;
+	if (what_changed.contains (Properties::selected)) {
 
-		for (TrackSelection::iterator x = selection->tracks.begin(); x != selection->tracks.end(); ++x) {
-			AudioTimeAxisView* atv = dynamic_cast<AudioTimeAxisView*>(*x);
+		StripableNotificationListPtr stripables (new StripableNotificationList);
 
-			if (atv) {
-				if (atv->is_audio_track()) {
-					audio_track_cnt++;
-				}
+		switch (selection->tracks.size()) {
+		case 0:
+			break;
+		default:
+			set_selected_mixer_strip (*(selection->tracks.back()));
+			if (!_track_selection_change_without_scroll && !_editor_track_selection_change_without_scroll) {
+				ensure_time_axis_view_is_visible (*(selection->tracks.back()), false);
+			}
+			break;
+		}
+
+		CoreSelection::StripableAutomationControls sc;
+		_session->selection().get_stripables (sc);
+
+		for (CoreSelection::StripableAutomationControls::const_iterator i = sc.begin(); i != sc.end(); ++i) {
+
+			AxisView* av = axis_view_by_stripable ((*i).stripable);
+
+			if (!av) {
+				continue;
+			}
+
+			n_stripables++;
+
+			if (boost::dynamic_pointer_cast<Track> ((*i).stripable)) {
+				n_tracks++;
+				n_routes++;
+			} else if (boost::dynamic_pointer_cast<Route> ((*i).stripable)) {
+				n_busses++;
+				n_routes++;
+			} else if (boost::dynamic_pointer_cast<VCA> ((*i).stripable)) {
+				n_vcas++;
+			}
+
+			TimeAxisView* tav = dynamic_cast<TimeAxisView*> (av);
+
+			if (!tav) {
+				assert (0);
+				continue; /* impossible */
+			}
+
+			if (!(*i).controllable) {
+
+				/* "parent" track selected */
+				tav->set_selected (true);
+				tav->reshow_selection (selection->time);
 
 			} else {
-				MidiTimeAxisView* mtv = dynamic_cast<MidiTimeAxisView*>(*x);
 
-				if (mtv) {
-					if (mtv->is_midi_track()) {
-						midi_track_cnt++;
+				/* possibly a child */
+
+				TimeAxisView::Children c = tav->get_child_list ();
+
+				for (TimeAxisView::Children::iterator j = c.begin(); j != c.end(); ++j) {
+
+					boost::shared_ptr<AutomationControl> control = (*j)->control ();
+
+					if (control != (*i).controllable) {
+						continue;
+					}
+
+					(*j)->set_selected (true);
+					(*j)->reshow_selection (selection->time);
+				}
+			}
+
+			stripables->push_back ((*i).stripable);
+		}
+
+		ActionManager::set_sensitive (ActionManager::stripable_selection_sensitive_actions, (n_stripables > 0));
+		ActionManager::set_sensitive (ActionManager::track_selection_sensitive_actions, (n_tracks > 0));
+		ActionManager::set_sensitive (ActionManager::bus_selection_sensitive_actions, (n_busses > 0));
+		ActionManager::set_sensitive (ActionManager::route_selection_sensitive_actions, (n_routes > 0));
+		ActionManager::set_sensitive (ActionManager::vca_selection_sensitive_actions, (n_vcas > 0));
+
+		sensitize_the_right_region_actions (false);
+
+		/* STEP 4: notify control protocols */
+
+		ControlProtocolManager::instance().stripable_selection_changed (stripables);
+
+		if (sfbrowser && _session && !_session->deletion_in_progress()) {
+			uint32_t audio_track_cnt = 0;
+			uint32_t midi_track_cnt = 0;
+
+			for (TrackSelection::iterator x = selection->tracks.begin(); x != selection->tracks.end(); ++x) {
+				AudioTimeAxisView* atv = dynamic_cast<AudioTimeAxisView*>(*x);
+
+				if (atv) {
+					if (atv->is_audio_track()) {
+						audio_track_cnt++;
+					}
+
+				} else {
+					MidiTimeAxisView* mtv = dynamic_cast<MidiTimeAxisView*>(*x);
+
+					if (mtv) {
+						if (mtv->is_midi_track()) {
+							midi_track_cnt++;
+						}
 					}
 				}
 			}
-		}
 
-		sfbrowser->reset (audio_track_cnt, midi_track_cnt);
+			sfbrowser->reset (audio_track_cnt, midi_track_cnt);
+		}
 	}
+
+	/* STEP 4: update EditorRoutes treeview */
+
+	PropertyChange soh;
+
+	soh.add (Properties::selected);
+	soh.add (Properties::order);
+	soh.add (Properties::hidden);
+
+	if (what_changed.contains (soh)) {
+		_routes->sync_treeview_from_presentation_info (what_changed);
+	}
+}
+
+void
+Editor::track_selection_changed ()
+{
+	/* reset paste count, so the plaste location doesn't get incremented
+	 * if we want to paste in the same place, but different track. */
+	paste_count = 0;
+
+	if ( _session->solo_selection_active() )
+		play_solo_selection(false);
 }
 
 void
@@ -1055,7 +1217,7 @@ Editor::time_selection_changed ()
 
 	if (_session && !_drags->active()) {
 		if (selection->time.length() != 0) {
-			_session->set_range_selection (selection->time.start(), selection->time.end_frame());
+			_session->set_range_selection (selection->time.start(), selection->time.end_sample());
 		} else {
 			_session->clear_range_selection ();
 		}
@@ -1075,22 +1237,93 @@ Editor::sensitize_all_region_actions (bool s)
 	_all_region_actions_sensitized = s;
 }
 
-/** Sensitize region-based actions based on the selection ONLY, ignoring the entered_regionview.
- *  This method should be called just before displaying a Region menu.  When a Region menu is not
- *  currently being shown, all region actions are sensitized so that hotkey-triggered actions
- *  on entered_regionviews work without having to check sensitivity every time the selection or
- *  entered_regionview changes.
+/** Sensitize region-based actions.
  *
- *  This method also sets up toggle action state as appropriate.
+ *  This method is called from whenever we leave the canvas, either by moving
+ *  the pointer out of it, or by popping up a context menu. See
+ *  Editor::{entered,left}_track_canvas() for details there.
  */
 void
-Editor::sensitize_the_right_region_actions ()
+Editor::sensitize_the_right_region_actions (bool because_canvas_crossing)
 {
+	bool have_selection = false;
+	bool have_entered = false;
+	bool have_edit_point = false;
+	bool have_selected_source = false;
+	RegionSelection rs;
 
-	RegionSelection rs = get_regions_from_selection_and_entered ();
-	sensitize_all_region_actions (!rs.empty ());
+	// std::cerr << "STRRA: crossing ? " << because_canvas_crossing << " within ? " << within_track_canvas
+	// << std::endl;
+
+	if (!selection->regions.empty()) {
+		have_selection = true;
+		rs = selection->regions;
+	}
+
+	if (entered_regionview) {
+		have_entered = true;
+		rs.add (entered_regionview);
+	}
+
+	if ( _sources->get_single_selection() ) {
+		have_selected_source = true;
+	}
+
+	if (rs.empty() && !selection->tracks.empty()) {
+
+		/* no selected regions, but some selected tracks.
+		 */
+
+		if (_edit_point == EditAtMouse) {
+			if (!within_track_canvas) {
+				/* pointer is not in canvas, so edit point is meaningless */
+				have_edit_point = false;
+			} else {
+				/* inside canvas. we don't know where the edit
+				   point will be when an action is invoked, but
+				   assume it could intersect with a region.
+				*/
+				have_edit_point = true;
+			}
+		} else {
+			RegionSelection at_edit_point;
+			samplepos_t const where = get_preferred_edit_position (Editing::EDIT_IGNORE_NONE, false, !within_track_canvas);
+			get_regions_at (at_edit_point, where, selection->tracks);
+			if (!at_edit_point.empty()) {
+				have_edit_point = true;
+			}
+			if (rs.empty()) {
+				rs.insert (rs.end(), at_edit_point.begin(), at_edit_point.end());
+			}
+		}
+	}
+
+	//std::cerr << "\tfinal have selection: " << have_selection
+	// << " have entered " << have_entered
+	// << " have edit point " << have_edit_point
+	// << " EP = " << enum_2_string (_edit_point)
+	// << std::endl;
+
+	typedef std::map<std::string,RegionAction> RegionActionMap;
 
 	_ignore_region_action = true;
+
+	for (RegionActionMap::iterator x = region_action_map.begin(); x != region_action_map.end(); ++x) {
+		RegionActionTarget tgt = x->second.target;
+		bool sensitive = false;
+
+		if ((tgt & SelectedRegions) && have_selection) {
+			sensitive = true;
+		} else if ((tgt & EnteredRegions) && have_entered) {
+			sensitive = true;
+		} else if ((tgt & EditPointRegions) && have_edit_point) {
+			sensitive = true;
+		} else if ((tgt & ListSelection) && have_selected_source ) {
+			sensitive = true;
+		}
+
+		x->second.action->set_sensitive (sensitive);
+	}
 
 	/* Look through the regions that are selected and make notes about what we have got */
 
@@ -1241,13 +1474,7 @@ Editor::sensitize_the_right_region_actions ()
 		/* others were already marked sensitive */
 	}
 
-	if (_edit_point == EditAtMouse) {
-		_region_actions->get_action("set-region-sync-position")->set_sensitive (false);
-		_region_actions->get_action("trim-front")->set_sensitive (false);
-		_region_actions->get_action("trim-back")->set_sensitive (false);
-		_region_actions->get_action("split-region")->set_sensitive (false);
-		_region_actions->get_action("place-transient")->set_sensitive (false);
-	}
+	/* ok, moving along... */
 
 	if (have_compound_regions) {
 		_region_actions->get_action("uncombine-regions")->set_sensitive (true);
@@ -1294,8 +1521,12 @@ Editor::sensitize_the_right_region_actions ()
 	a = Glib::RefPtr<ToggleAction>::cast_dynamic (_region_actions->get_action("toggle-region-lock-style"));
 	a->set_active (have_position_lock_style_music && !have_position_lock_style_audio);
 
-	if (have_position_lock_style_music && have_position_lock_style_audio) {
-		// a->set_inconsistent ();
+	vector<Widget*> proxies = a->get_proxies();
+	for (vector<Widget*>::iterator p = proxies.begin(); p != proxies.end(); ++p) {
+		Gtk::CheckMenuItem* cmi = dynamic_cast<Gtk::CheckMenuItem*> (*p);
+		if (cmi) {
+			cmi->set_inconsistent (have_position_lock_style_music && have_position_lock_style_audio);
+		}
 	}
 
 	a = Glib::RefPtr<ToggleAction>::cast_dynamic (_region_actions->get_action("toggle-region-mute"));
@@ -1314,12 +1545,15 @@ Editor::sensitize_the_right_region_actions ()
 		_region_actions->get_action("naturalize-region")->set_sensitive (false);
 	}
 
+	/* Todo: insert-region-from-source-list */
 	/* XXX: should also check that there is a track of the appropriate type for the selected region */
+#if 0
 	if (_edit_point == EditAtMouse || _regions->get_single_selection() == 0 || selection->tracks.empty()) {
-		_region_actions->get_action("insert-region-from-region-list")->set_sensitive (false);
+		_region_actions->get_action("insert-region-from-source-list")->set_sensitive (false);
 	} else {
-		_region_actions->get_action("insert-region-from-region-list")->set_sensitive (true);
+		_region_actions->get_action("insert-region-from-source-list")->set_sensitive (true);
 	}
+#endif
 
 	a = Glib::RefPtr<ToggleAction>::cast_dynamic (_region_actions->get_action("toggle-region-fade-in"));
 	a->set_active (have_active_fade_in && !have_inactive_fade_in);
@@ -1349,7 +1583,6 @@ Editor::sensitize_the_right_region_actions ()
 	_all_region_actions_sensitized = false;
 }
 
-
 void
 Editor::region_selection_changed ()
 {
@@ -1371,27 +1604,45 @@ Editor::region_selection_changed ()
 	_regions->block_change_connection (false);
 	editor_regions_selection_changed_connection.block(false);
 
-	if (!_all_region_actions_sensitized) {
-		/* This selection change might have changed what region actions
-		   are allowed, so sensitize them all in case a key is pressed.
-		*/
-		sensitize_all_region_actions (true);
-	}
-
-	if (_session && !_session->transport_rolling() && !selection->regions.empty()) {
-		maybe_locate_with_edit_preroll (selection->regions.start());
-	}
+	sensitize_the_right_region_actions (false);
 
 	/* propagate into backend */
+	assert (_session);
 
-	if (_session) {
-		if (!selection->regions.empty()) {
-			_session->set_object_selection (selection->regions.start(), selection->regions.end_frame());
-		} else {
-			_session->clear_object_selection ();
-		}
+	if (!selection->regions.empty()) {
+		_session->set_object_selection (selection->regions.start(), selection->regions.end_sample());
+	} else {
+		_session->clear_object_selection ();
 	}
 
+	if (_session->solo_selection_active()) {
+		play_solo_selection(false);
+	}
+
+	/* set nudge button color */
+	if (! get_regions_from_selection_and_entered().empty()) {
+		/* nudge regions */
+		nudge_forward_button.set_name ("nudge button");
+		nudge_backward_button.set_name ("nudge button");
+	} else {
+		/* nudge marker or playhead */
+		nudge_forward_button.set_name ("transport button");
+		nudge_backward_button.set_name ("transport button");
+	}
+
+	//there are a few global Editor->Select actions which select regions even if you aren't in Object mode.
+	//if regions are selected, we must always force the mouse mode to Object...
+	//... otherwise the user is confusingly left with selected regions that can't be manipulated.
+	if (!selection->regions.empty() && !internal_editing()) {
+
+		/* if in MouseAudition and there's just 1 region selected
+		 * (i.e. we just clicked on it), leave things as they are
+		 */
+
+		if (selection->regions.size() > 1 || mouse_mode != Editing::MouseAudition) {
+			set_mouse_mode (MouseObject, false);
+		}
+	}
 }
 
 void
@@ -1413,7 +1664,7 @@ Editor::select_all_in_track (Selection::Operation op)
 
 	begin_reversible_selection_op (X_("Select All in Track"));
 
-	clicked_routeview->get_selectables (0, max_framepos, 0, DBL_MAX, touched);
+	clicked_routeview->get_selectables (0, max_samplepos, 0, DBL_MAX, touched);
 
 	switch (op) {
 	case Selection::Toggle:
@@ -1460,20 +1711,24 @@ Editor::select_all_objects (Selection::Operation op)
 {
 	list<Selectable *> touched;
 
-	TrackViewList ts  = track_views;
-
 	if (internal_editing() && select_all_internal_edit(op)) {
 		return;  // Selected notes
+	}
+
+	TrackViewList ts;
+
+	if (selection->tracks.empty()) {
+		ts = track_views;
+	} else {
+		ts = selection->tracks;
 	}
 
 	for (TrackViewList::iterator iter = ts.begin(); iter != ts.end(); ++iter) {
 		if ((*iter)->hidden()) {
 			continue;
 		}
-		(*iter)->get_selectables (0, max_framepos, 0, DBL_MAX, touched);
-		selection->add (*iter);
+		(*iter)->get_selectables (0, max_samplepos, 0, DBL_MAX, touched);
 	}
-
 
 	begin_reversible_selection_op (X_("select all"));
 	switch (op) {
@@ -1481,7 +1736,7 @@ Editor::select_all_objects (Selection::Operation op)
 		selection->add (touched);
 		break;
 	case Selection::Toggle:
-		selection->add (touched);
+		selection->toggle (touched);
 		break;
 	case Selection::Set:
 		selection->set (touched);
@@ -1511,10 +1766,10 @@ Editor::invert_selection_in_track ()
 void
 Editor::invert_selection ()
 {
-	list<Selectable *> touched;
 
 	if (internal_editing()) {
-		for (RegionSelection::iterator i = selection->regions.begin(); i != selection->regions.end(); ++i) {
+		MidiRegionSelection ms = selection->midi_regions();
+		for (MidiRegionSelection::iterator i = ms.begin(); i != ms.end(); ++i) {
 			MidiRegionView* mrv = dynamic_cast<MidiRegionView*>(*i);
 			if (mrv) {
 				mrv->invert_selection ();
@@ -1523,27 +1778,46 @@ Editor::invert_selection ()
 		return;
 	}
 
-	for (TrackViewList::iterator iter = track_views.begin(); iter != track_views.end(); ++iter) {
-		if ((*iter)->hidden()) {
-			continue;
-		}
-		(*iter)->get_inverted_selectables (*selection, touched);
-	}
+	if (!selection->tracks.empty()) {
 
-	begin_reversible_selection_op (X_("Invert Selection"));
-	selection->set (touched);
-	commit_reversible_selection_op ();
+		TrackViewList inverted;
+
+		for (TrackViewList::iterator iter = track_views.begin(); iter != track_views.end(); ++iter) {
+			if (!(*iter)->selected()) {
+				inverted.push_back (*iter);
+			}
+		}
+
+		begin_reversible_selection_op (X_("Invert Track Selection"));
+		selection->set (inverted);
+		commit_reversible_selection_op ();
+
+	} else {
+
+		list<Selectable *> touched;
+
+		for (TrackViewList::iterator iter = track_views.begin(); iter != track_views.end(); ++iter) {
+			if ((*iter)->hidden()) {
+				continue;
+			}
+			(*iter)->get_inverted_selectables (*selection, touched);
+		}
+
+		begin_reversible_selection_op (X_("Invert ObjectSelection"));
+		selection->set (touched);
+		commit_reversible_selection_op ();
+	}
 }
 
-/** @param start Start time in session frames.
- *  @param end End time in session frames.
+/** @param start Start time in session samples.
+ *  @param end End time in session samples.
  *  @param top Top (lower) y limit in trackview coordinates (ie 0 at the top of the track view)
  *  @param bottom Bottom (higher) y limit in trackview coordinates (ie 0 at the top of the track view)
  *  @param preserve_if_selected true to leave the current selection alone if we're adding to the selection and all of the selectables
  *  within the region are already selected.
  */
 void
-Editor::select_all_within (framepos_t start, framepos_t end, double top, double bot, const TrackViewList& tracklist, Selection::Operation op, bool preserve_if_selected)
+Editor::select_all_within (samplepos_t start, samplepos_t end, double top, double bot, const TrackViewList& tracklist, Selection::Operation op, bool preserve_if_selected)
 {
 	list<Selectable*> found;
 
@@ -1564,7 +1838,7 @@ Editor::select_all_within (framepos_t start, framepos_t end, double top, double 
 
 	if (preserve_if_selected && op != Selection::Toggle) {
 		list<Selectable*>::iterator i = found.begin();
-		while (i != found.end() && (*i)->get_selected()) {
+		while (i != found.end() && (*i)->selected()) {
 			++i;
 		}
 
@@ -1612,13 +1886,15 @@ Editor::set_selection_from_region ()
 
 	/* select range (this will clear the region selection) */
 
-	selection->set (selection->regions.start(), selection->regions.end_frame());
+	selection->set (selection->regions.start(), selection->regions.end_sample());
 
 	/* and select the tracks */
 
 	selection->set (tvl);
 
-	set_mouse_mode (Editing::MouseRange, false);
+	if (!get_smart_mode () || !(mouse_mode == Editing::MouseObject) ) {
+		set_mouse_mode (Editing::MouseRange, false);
+	}
 }
 
 void
@@ -1648,10 +1924,20 @@ void
 Editor::set_selection_from_range (Location& loc)
 {
 	begin_reversible_selection_op (X_("set selection from range"));
+
 	selection->set (loc.start(), loc.end());
+
+	// if no tracks are selected, enable all tracks
+	// (_something_ has to be selected for any range selection, otherwise the user won't see anything)
+	if (selection->tracks.empty()) {
+		select_all_visible_lanes();
+	}
+
 	commit_reversible_selection_op ();
 
-	set_mouse_mode (Editing::MouseRange, false);
+	if (!get_smart_mode () || mouse_mode != Editing::MouseObject) {
+		set_mouse_mode (MouseRange, false);
+	}
 }
 
 void
@@ -1663,8 +1949,8 @@ Editor::select_all_selectables_using_time_selection ()
 		return;
 	}
 
-	framepos_t start = selection->time[clicked_selection].start;
-	framepos_t end = selection->time[clicked_selection].end;
+	samplepos_t start = selection->time[clicked_selection].start;
+	samplepos_t end = selection->time[clicked_selection].end;
 
 	if (end - start < 1)  {
 		return;
@@ -1756,17 +2042,17 @@ Editor::select_all_selectables_using_loop()
 void
 Editor::select_all_selectables_using_cursor (EditorCursor *cursor, bool after)
 {
-	framepos_t start;
-	framepos_t end;
+	samplepos_t start;
+	samplepos_t end;
 	list<Selectable *> touched;
 
 	if (after) {
-		start = cursor->current_frame();
-		end = _session->current_end_frame();
+		start = cursor->current_sample();
+		end = _session->current_end_sample();
 	} else {
-		if (cursor->current_frame() > 0) {
+		if (cursor->current_sample() > 0) {
 			start = 0;
-			end = cursor->current_frame() - 1;
+			end = cursor->current_sample() - 1;
 		} else {
 			return;
 		}
@@ -1809,13 +2095,13 @@ Editor::select_all_selectables_using_cursor (EditorCursor *cursor, bool after)
 void
 Editor::select_all_selectables_using_edit (bool after, bool from_context_menu)
 {
-	framepos_t start;
-	framepos_t end;
+	samplepos_t start;
+	samplepos_t end;
 	list<Selectable *> touched;
 
 	if (after) {
 		start = get_preferred_edit_position(EDIT_IGNORE_NONE, from_context_menu);
-		end = _session->current_end_frame();
+		end = _session->current_end_sample();
 	} else {
 		if ((end = get_preferred_edit_position(EDIT_IGNORE_NONE, from_context_menu)) > 1) {
 			start = 0;
@@ -1860,8 +2146,8 @@ Editor::select_all_selectables_using_edit (bool after, bool from_context_menu)
 void
 Editor::select_all_selectables_between (bool within)
 {
-	framepos_t start;
-	framepos_t end;
+	samplepos_t start;
+	samplepos_t end;
 	list<Selectable *> touched;
 
 	if (!get_edit_op_range (start, end)) {
@@ -1899,10 +2185,10 @@ Editor::select_all_selectables_between (bool within)
 void
 Editor::select_range_between ()
 {
-	framepos_t start;
-	framepos_t end;
+	samplepos_t start;
+	samplepos_t end;
 
-	if ( !selection->time.empty() ) {
+	if (!selection->time.empty()) {
 		selection->clear_time ();
 	}
 
@@ -1910,111 +2196,30 @@ Editor::select_range_between ()
 		return;
 	}
 
+	if (!get_smart_mode () || mouse_mode != Editing::MouseObject) {
+		set_mouse_mode (MouseRange, false);
+	}
+
 	begin_reversible_selection_op (X_("Select Range Between"));
-	set_mouse_mode (MouseRange);
 	selection->set (start, end);
 	commit_reversible_selection_op ();
 }
 
 bool
-Editor::get_edit_op_range (framepos_t& start, framepos_t& end) const
+Editor::get_edit_op_range (samplepos_t& start, samplepos_t& end) const
 {
-//	framepos_t m;
-//	bool ignored;
-
 	/* if an explicit range exists, use it */
 
-	if ( (mouse_mode == MouseRange || get_smart_mode() ) &&  !selection->time.empty()) {
+	if ((mouse_mode == MouseRange || get_smart_mode()) &&  !selection->time.empty()) {
 		/* we know that these are ordered */
 		start = selection->time.start();
-		end = selection->time.end_frame();
+		end = selection->time.end_sample();
 		return true;
 	} else {
 		start = 0;
 		end = 0;
 		return false;
 	}
-
-//	if (!mouse_frame (m, ignored)) {
-//		/* mouse is not in a canvas, try playhead+selected marker.
-//		   this is probably most true when using menus.
-//		*/
-//
-//		if (selection->markers.empty()) {
-//			return false;
-//		}
-
-//		start = selection->markers.front()->position();
-//		end = _session->audible_frame();
-
-//	} else {
-
-//		switch (_edit_point) {
-//		case EditAtPlayhead:
-//			if (selection->markers.empty()) {
-//				/* use mouse + playhead */
-//				start = m;
-//				end = _session->audible_frame();
-//			} else {
-//				/* use playhead + selected marker */
-//				start = _session->audible_frame();
-//				end = selection->markers.front()->position();
-//			}
-//			break;
-
-//		case EditAtMouse:
-//			/* use mouse + selected marker */
-//			if (selection->markers.empty()) {
-//				start = m;
-//				end = _session->audible_frame();
-//			} else {
-//				start = selection->markers.front()->position();
-//				end = m;
-//			}
-//			break;
-
-//		case EditAtSelectedMarker:
-//			/* use mouse + selected marker */
-//			if (selection->markers.empty()) {
-
-//				MessageDialog win (_("No edit range defined"),
-//				                   false,
-//				                   MESSAGE_INFO,
-//				                   BUTTONS_OK);
-
-//				win.set_secondary_text (
-//					_("the edit point is Selected Marker\nbut there is no selected marker."));
-
-
-//				win.set_default_response (RESPONSE_CLOSE);
-//				win.set_position (Gtk::WIN_POS_MOUSE);
-//				win.show_all();
-
-//				win.run ();
-
-//				return false; // NO RANGE
-//			}
-//			start = selection->markers.front()->position();
-//			end = m;
-//			break;
-//		}
-//	}
-
-//	if (start == end) {
-//		return false;
-//	}
-
-//	if (start > end) {
-//		swap (start, end);
-//	}
-
-	/* turn range into one delimited by start...end,
-	   not start...end-1
-	*/
-
-//	end++;
-
-//	return true;
 }
 
 void
@@ -2026,7 +2231,7 @@ Editor::deselect_all ()
 }
 
 long
-Editor::select_range (framepos_t s, framepos_t e)
+Editor::select_range (samplepos_t s, samplepos_t e)
 {
 	begin_reversible_selection_op (X_("Select Range"));
 	selection->add (clicked_axisview);
@@ -2034,4 +2239,27 @@ Editor::select_range (framepos_t s, framepos_t e)
 	long ret = selection->set (s, e);
 	commit_reversible_selection_op ();
 	return ret;
+}
+
+void
+Editor::catch_up_on_midi_selection ()
+{
+	RegionSelection regions;
+
+	for (TrackViewList::iterator iter = track_views.begin(); iter != track_views.end(); ++iter) {
+		if ((*iter)->hidden()) {
+			continue;
+		}
+
+		MidiTimeAxisView* matv = dynamic_cast<MidiTimeAxisView*> (*iter);
+		if (!matv) {
+			continue;
+		}
+
+		matv->get_regions_with_selected_data (regions);
+	}
+
+	if (!regions.empty()) {
+		selection->set (regions);
+	}
 }

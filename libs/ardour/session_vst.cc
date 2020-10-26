@@ -1,21 +1,26 @@
 /*
-    Copyright (C) 2004
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015-2018 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef COMPILER_MSVC
 #include <stdbool.h>
@@ -28,13 +33,13 @@
 #include "ardour/tempo.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/windows_vst_plugin.h"
-#include "ardour/vestige/aeffectx.h"
+#include "ardour/vestige/vestige.h"
 #include "ardour/vst_types.h"
 #ifdef WINDOWS_VST_SUPPORT
 #include <fst.h>
 #endif
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -50,7 +55,8 @@ const char* Session::vst_can_do_strings[] = {
 	X_("receiveVstMidiEvent"),
 	X_("supportShell"),
 	X_("shellCategory"),
-	X_("shellCategorycurID")
+	X_("shellCategorycurID"),
+	X_("sizeWindow")
 };
 const int Session::vst_can_do_string_count = sizeof (vst_can_do_strings) / sizeof (char*);
 
@@ -63,20 +69,27 @@ intptr_t Session::vst_callback (
 	float opt
 	)
 {
-	static VstTimeInfo _timeInfo;
 	VSTPlugin* plug;
 	Session* session;
+	static VstTimeInfo _timeinfo; // only uses as fallback
+	VstTimeInfo* timeinfo;
+	int32_t newflags = 0;
 
-	if (effect && effect->user) {
-		plug = (VSTPlugin *) (effect->user);
+	if (effect && effect->ptr1) {
+		plug = (VSTPlugin *) (effect->ptr1);
 		session = &plug->session();
-		DEBUG_TRACE (PBD::DEBUG::VSTCallbacks, string_compose ("am callback 0x%1%2, opcode = %3%4, plugin = \"%5\" ",
+		timeinfo = plug->timeinfo ();
+		DEBUG_TRACE (PBD::DEBUG::VSTCallbacks, string_compose ("am callback 0x%1%2, opcode = %3%4, plugin = \"%5\"\n",
 					std::hex, (void*) DEBUG_THREAD_SELF,
 					std::dec, opcode, plug->name()));
+		if (plug->_for_impulse_analysis) {
+			plug = 0;
+		}
 	} else {
 		plug = 0;
 		session = 0;
-		DEBUG_TRACE (PBD::DEBUG::VSTCallbacks, string_compose ("am callback 0x%1%2, opcode = %3%4",
+		timeinfo = &_timeinfo;
+		DEBUG_TRACE (PBD::DEBUG::VSTCallbacks, string_compose ("am callback 0x%1%2, opcode = %3%4\n",
 					std::hex, (void*) DEBUG_THREAD_SELF,
 					std::dec, opcode));
 	}
@@ -163,67 +176,46 @@ intptr_t Session::vst_callback (
 
 	case audioMasterGetTime:
 		SHOW_CALLBACK ("audioMasterGetTime");
-		// returns const VstTimeInfo* (or 0 if not supported)
-		// <value> should contain a mask indicating which fields are required
-		// (see valid masks above), as some items may require extensive
-		// conversions
-		_timeInfo.flags = 0;
+		newflags = kVstNanosValid | kVstAutomationWriting | kVstAutomationReading;
 
-		if (session) {
-			framepos_t now = session->transport_frame();
+		timeinfo->nanoSeconds = g_get_monotonic_time () * 1000;
 
-			_timeInfo.samplePos = now;
-			_timeInfo.sampleRate = session->frame_rate();
+		if (plug && session) {
+			samplepos_t now = plug->transport_sample();
 
-			const TempoMetric& tm (session->tempo_map().metric_at (now));
+			timeinfo->samplePos = now;
+			timeinfo->sampleRate = session->sample_rate();
 
 			if (value & (kVstTempoValid)) {
-				const Tempo& t (tm.tempo());
-				_timeInfo.tempo = t.beats_per_minute ();
-				_timeInfo.flags |= (kVstTempoValid);
+				const Tempo& t (session->tempo_map().tempo_at_sample (now));
+				timeinfo->tempo = t.quarter_notes_per_minute ();
+				newflags |= (kVstTempoValid);
 			}
 			if (value & (kVstTimeSigValid)) {
-				const Meter& m (tm.meter());
-				_timeInfo.timeSigNumerator = m.divisions_per_bar ();
-				_timeInfo.timeSigDenominator = m.note_divisor ();
-				_timeInfo.flags |= (kVstTimeSigValid);
+				const MeterSection& ms (session->tempo_map().meter_section_at_sample (now));
+				timeinfo->timeSigNumerator = ms.divisions_per_bar ();
+				timeinfo->timeSigDenominator = ms.note_divisor ();
+				newflags |= (kVstTimeSigValid);
 			}
 			if ((value & (kVstPpqPosValid)) || (value & (kVstBarsValid))) {
 				Timecode::BBT_Time bbt;
 
 				try {
-					session->tempo_map().bbt_time_rt (now, bbt);
-
-					/* PPQ = pulse per quarter
-					 * VST's "pulse" is our "division".
-					 *
-					 * 8 divisions per bar, 1 division = quarter, so 8 quarters per bar, ppq = 1
-					 * 8 divisions per bar, 1 division = eighth, so  4 quarters per bar, ppq = 2
-					 * 4 divisions per bar, 1 division = quarter, so  4 quarters per bar, ppq = 1
-					 * 4 divisions per bar, 1 division = half, so 8 quarters per bar, ppq = 0.5
-					 * 4 divisions per bar, 1 division = fifth, so (4 * 5/4) quarters per bar, ppq = 5/4
-					 *
-					 * general: divs_per_bar / (note_type / 4.0)
-					 */
-					double ppq_scaling =  tm.meter().note_divisor() / 4.0;
-
-					/* Note that this assumes constant meter/tempo throughout the session. Stupid VST */
-					double ppqBar = double(bbt.bars - 1) * tm.meter().divisions_per_bar();
-					double ppqBeat = double(bbt.beats - 1);
-					double ppqTick = double(bbt.ticks) / Timecode::BBT_Time::ticks_per_beat;
-
-					ppqBar *= ppq_scaling;
-					ppqBeat *= ppq_scaling;
-					ppqTick *= ppq_scaling;
-
+					bbt = session->tempo_map().bbt_at_sample_rt (now);
+					bbt.beats = 1;
+					bbt.ticks = 0;
+					/* exact quarter note */
+					double ppqBar = session->tempo_map().quarter_note_at_bbt_rt (bbt);
+					/* quarter note at sample position (not rounded to note subdivision) */
+					double ppqPos = session->tempo_map().quarter_note_at_sample_rt (now);
 					if (value & (kVstPpqPosValid)) {
-						_timeInfo.ppqPos = ppqBar + ppqBeat + ppqTick;
-						_timeInfo.flags |= (kVstPpqPosValid);
+						timeinfo->ppqPos = ppqPos;
+						newflags |= kVstPpqPosValid;
 					}
 
 					if (value & (kVstBarsValid)) {
-						_timeInfo.barStartPos = ppqBar;
-						_timeInfo.flags |= (kVstBarsValid);
+						timeinfo->barStartPos = ppqBar;
+						newflags |= kVstBarsValid;
 					}
 
 				} catch (...) {
@@ -236,54 +228,67 @@ intptr_t Session::vst_callback (
 
 				session->timecode_time (now, t);
 
-				_timeInfo.smpteOffset = (t.hours * t.rate * 60.0 * 60.0) +
+				timeinfo->smpteOffset = (t.hours * t.rate * 60.0 * 60.0) +
 					(t.minutes * t.rate * 60.0) +
 					(t.seconds * t.rate) +
 					(t.frames) +
 					(t.subframes);
 
-				_timeInfo.smpteOffset *= 80.0; /* VST spec is 1/80th frames */
+				timeinfo->smpteOffset *= 80.0; /* VST spec is 1/80th samples */
 
 				if (session->timecode_drop_frames()) {
 					if (session->timecode_frames_per_second() == 30.0) {
-						_timeInfo.smpteFrameRate = 5;
+						timeinfo->smpteFrameRate = 5;
 					} else {
-						_timeInfo.smpteFrameRate = 4; /* 29.97 assumed, thanks VST */
+						timeinfo->smpteFrameRate = 4; /* 29.97 assumed, thanks VST */
 					}
 				} else {
 					if (session->timecode_frames_per_second() == 24.0) {
-						_timeInfo.smpteFrameRate = 0;
+						timeinfo->smpteFrameRate = 0;
 					} else if (session->timecode_frames_per_second() == 24.975) {
-						_timeInfo.smpteFrameRate = 2;
+						timeinfo->smpteFrameRate = 2;
 					} else if (session->timecode_frames_per_second() == 25.0) {
-						_timeInfo.smpteFrameRate = 1;
+						timeinfo->smpteFrameRate = 1;
 					} else {
-						_timeInfo.smpteFrameRate = 3; /* 30 fps */
+						timeinfo->smpteFrameRate = 3; /* 30 fps */
 					}
 				}
-				_timeInfo.flags |= (kVstSmpteValid);
+				newflags |= (kVstSmpteValid);
 			}
 
-			//ToDo: 
-			//if this is found to be burdensome to plugins,
-			//we should cache the previous state at a global level,
-			//and only set this flag when the transport changes state
-			_timeInfo.flags |= (kVstTransportChanged);
-
-			if (session->transport_speed() != 0.0f) {
-				_timeInfo.flags |= (kVstTransportPlaying);
+			if (session->actively_recording ()) {
+				newflags |= kVstTransportRecording;
 			}
 
-			if (session->get_play_loop()) {
-				_timeInfo.flags |= (kVstTransportCycleActive);
+			if (plug->transport_speed () != 0.0f) {
+				newflags |= kVstTransportPlaying;
+			}
+
+			if (session->get_play_loop ()) {
+				newflags |= kVstTransportCycleActive;
+				Location * looploc = session->locations ()->auto_loop_location ();
+				if (looploc) try {
+					timeinfo->cycleStartPos = session->tempo_map ().quarter_note_at_sample_rt (looploc->start ());
+					timeinfo->cycleEndPos = session->tempo_map ().quarter_note_at_sample_rt (looploc->end ());
+
+					newflags |= kVstCyclePosValid;
+				} catch (...) { }
 			}
 
 		} else {
-			_timeInfo.samplePos = 0;
-			_timeInfo.sampleRate = AudioEngine::instance()->sample_rate();
+			timeinfo->samplePos = 0;
+			timeinfo->sampleRate = AudioEngine::instance()->sample_rate();
 		}
 
-		return (intptr_t) &_timeInfo;
+		if ((timeinfo->flags & (kVstTransportPlaying | kVstTransportRecording | kVstTransportCycleActive))
+		    !=
+		    (newflags        & (kVstTransportPlaying | kVstTransportRecording | kVstTransportCycleActive)))
+		{
+			newflags |= kVstTransportChanged;
+		}
+
+		timeinfo->flags = newflags;
+		return (intptr_t) timeinfo;
 
 	case audioMasterProcessEvents:
 		SHOW_CALLBACK ("audioMasterProcessEvents");
@@ -293,7 +298,7 @@ intptr_t Session::vst_callback (
 			for (int n = 0 ; n < v->numEvents; ++n) {
 				VstMidiEvent *vme = (VstMidiEvent*) (v->events[n]->dump);
 				if (vme->type == kVstMidiType) {
-					plug->midi_buffer()->push_back(vme->deltaFrames, 3, (uint8_t*)vme->midiData);
+					plug->midi_buffer()->push_back(vme->deltaSamples, Evoral::MIDI_EVENT, 3, (uint8_t*)vme->midiData);
 				}
 			}
 		}
@@ -302,13 +307,14 @@ intptr_t Session::vst_callback (
 	case audioMasterSetTime:
 		SHOW_CALLBACK ("audioMasterSetTime");
 		// VstTimenfo* in <ptr>, filter in <value>, not supported
+		return 0;
 
 	case audioMasterTempoAt:
 		SHOW_CALLBACK ("audioMasterTempoAt");
-		// returns tempo (in bpm * 10000) at sample frame location passed in <value>
+		// returns tempo (in bpm * 10000) at sample sample location passed in <value>
 		if (session) {
-			const Tempo& t (session->tempo_map().tempo_at (value));
-			return t.beats_per_minute() * 1000;
+			const Tempo& t (session->tempo_map().tempo_at_sample (value));
+			return t.quarter_notes_per_minute() * 1000;
 		} else {
 			return 0;
 		}
@@ -341,16 +347,21 @@ intptr_t Session::vst_callback (
 	case audioMasterSizeWindow:
 		SHOW_CALLBACK ("audioMasterSizeWindow");
 		if (plug && plug->state()) {
-			plug->state()->width = index;
-			plug->state()->height = value;
-			plug->state()->want_resize = 1;
+			if (plug->state()->width != index || plug->state()->height != value) {
+				plug->state()->width = index;
+				plug->state()->height = value;
+#ifndef NDEBUG
+				printf ("audioMasterSizeWindow %d %d\n", plug->state()->width, plug->state()->height);
+#endif
+				plug->VSTSizeWindow (); /* EMIT SIGNAL */
+			}
 		}
-		return 0;
+		return 1;
 
 	case audioMasterGetSampleRate:
 		SHOW_CALLBACK ("audioMasterGetSampleRate");
 		if (session) {
-			return session->frame_rate();
+			return session->sample_rate();
 		}
 		return 0;
 
@@ -377,6 +388,7 @@ intptr_t Session::vst_callback (
 	case audioMasterGetNextPlug:
 		SHOW_CALLBACK ("audioMasterGetNextPlug");
 		// output pin in <value> (-1: first to come), returns cEffect*
+		return 0;
 
 	case audioMasterWillReplaceOrAccumulate:
 		SHOW_CALLBACK ("audioMasterWillReplaceOrAccumulate");
@@ -435,13 +447,13 @@ intptr_t Session::vst_callback (
 		SHOW_CALLBACK ("audioMasterGetVendorString");
 		// fills <ptr> with a string identifying the vendor (max 64 char)
 		strcpy ((char*) ptr, "Linux Audio Systems");
-		return 0;
+		return 1;
 
 	case audioMasterGetProductString:
 		SHOW_CALLBACK ("audioMasterGetProductString");
 		// fills <ptr> with a string with product name (max 64 char)
 		strcpy ((char*) ptr, PROGRAM_NAME);
-		return 0;
+		return 1;
 
 	case audioMasterGetVendorVersion:
 		SHOW_CALLBACK ("audioMasterGetVendorVersion");
@@ -490,20 +502,37 @@ intptr_t Session::vst_callback (
 
 	case audioMasterUpdateDisplay:
 		SHOW_CALLBACK ("audioMasterUpdateDisplay");
-		// something has changed, update 'multi-fx' display
-		if (effect) {
-			effect->dispatcher(effect, effEditIdle, 0, 0, NULL, 0.0f);
+		/* Something has changed, update 'multi-fx' display.
+		 * (Ardour watches output ports already, and redraws when idle.)
+		 *
+		 * We assume that the internal state of the plugin has changed,
+		 * and session as well as preset is marked as modified.
+		 */
+		if (plug) {
+			plug->state_changed ();
 		}
 		return 0;
 
 	case audioMasterBeginEdit:
 		SHOW_CALLBACK ("audioMasterBeginEdit");
 		// begin of automation session (when mouse down), parameter index in <index>
+		if (plug && plug->plugin_insert ()) {
+			boost::shared_ptr<AutomationControl> ac = plug->plugin_insert ()->automation_control (Evoral::Parameter (PluginAutomation, 0, index));
+			if (ac) {
+				ac->start_touch (ac->session().transport_sample());
+			}
+		}
 		return 0;
 
 	case audioMasterEndEdit:
 		SHOW_CALLBACK ("audioMasterEndEdit");
 		// end of automation session (when mouse up),     parameter index in <index>
+		if (plug && plug->plugin_insert ()) {
+			boost::shared_ptr<AutomationControl> ac = plug->plugin_insert ()->automation_control (Evoral::Parameter (PluginAutomation, 0, index));
+			if (ac) {
+				ac->stop_touch (ac->session().transport_sample());
+			}
+		}
 		return 0;
 
 	case audioMasterOpenFileSelector:
@@ -518,4 +547,3 @@ intptr_t Session::vst_callback (
 
 	return 0;
 }
-

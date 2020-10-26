@@ -1,28 +1,29 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <glibmm/main.h>
 #include <gtkmm/stock.h>
 #include "gtkmm2ext/utils.h"
 #include "ardour/import_status.h"
 #include "interthread_progress_window.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -35,6 +36,8 @@ InterthreadProgressWindow::InterthreadProgressWindow (ARDOUR::InterThreadInfo* i
 	: ArdourDialog (t, true)
 	, _interthread_info (i)
 {
+	_interthread_info->cancel = false;
+
 	_bar.set_orientation (Gtk::PROGRESS_LEFT_TO_RIGHT);
 
 	set_border_width (12);
@@ -50,9 +53,17 @@ InterthreadProgressWindow::InterthreadProgressWindow (ARDOUR::InterThreadInfo* i
 
 	set_default_size (200, 100);
 	show_all ();
-        hide ();
 
 	Glib::signal_timeout().connect (sigc::mem_fun (*this, &InterthreadProgressWindow::update), 100);
+}
+
+void
+InterthreadProgressWindow::on_hide ()
+{
+	if (_interthread_info && !_interthread_info->done) {
+		//catch user pressing 'esc' or WM close
+		_interthread_info->cancel = true;
+	}
 }
 
 void

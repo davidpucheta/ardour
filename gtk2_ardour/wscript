@@ -31,18 +31,23 @@ gtk2_ardour_sources = [
         'add_route_dialog.cc',
         'ambiguous_file_dialog.cc',
         'analysis_window.cc',
-        'ardour_button.cc',
         'ardour_dialog.cc',
-        'ardour_display.cc',
-        'ardour_dropdown.cc',
-        'ardour_knob.cc',
+        'ardour_http.cc',
+        'ardour_message.cc',
         'ardour_ui.cc',
         'ardour_ui2.cc',
+        'ardour_ui3.cc',
+        'ardour_ui_access_web.cc',
         'ardour_ui_dependents.cc',
         'ardour_ui_dialogs.cc',
         'ardour_ui_ed.cc',
+        'ardour_ui_engine.cc',
+        'ardour_ui_keys.cc',
         'ardour_ui_mixer.cc',
         'ardour_ui_options.cc',
+        'ardour_ui_session.cc',
+        'ardour_ui_startup.cc',
+        'ardour_ui_video.cc',
         'ardour_window.cc',
         'audio_clock.cc',
         'audio_region_editor.cc',
@@ -56,12 +61,14 @@ gtk2_ardour_sources = [
         'automation_time_axis.cc',
         'axis_view.cc',
         'big_clock_window.cc',
+        'big_transport_window.cc',
         'bundle_manager.cc',
-        'button_joiner.cc',
         'clock_group.cc',
+        'color_theme_manager.cc',
         'configinfo.cc',
         'control_point.cc',
         'control_point_dialog.cc',
+        'control_slave_ui.cc',
         'cursor_context.cc',
         'curvetest.cc',
         'debug.cc',
@@ -92,6 +99,7 @@ gtk2_ardour_sources = [
         'editor_rulers.cc',
         'editor_selection.cc',
         'editor_snapshots.cc',
+        'editor_sources.cc',
         'editor_summary.cc',
         'editor_tempodisplay.cc',
         'editor_timefx.cc',
@@ -110,14 +118,15 @@ gtk2_ardour_sources = [
         'fft_graph.cc',
         'fft_result.cc',
         'floating_text_entry.cc',
+        'foldback_strip.cc',
         'sfdb_freesound_mootcher.cc',
         'gain_meter.cc',
         'generic_pluginui.cc',
         'ghostregion.cc',
         'global_port_matrix.cc',
         'group_tabs.cc',
-        'gtk_pianokeyboard.c',
         'gui_object.cc',
+        'idleometer.cc',
         'insert_remove_time_dialog.cc',
         'instrument_selector.cc',
         'interthread_progress_window.cc',
@@ -129,7 +138,9 @@ gtk2_ardour_sources = [
         'led.cc',
         'level_meter.cc',
         'location_ui.cc',
+        'loudness_dialog.cc',
         'lua_script_manager.cc',
+        'luadialog.cc',
         'luainstance.cc',
         'luawindow.cc',
         'main.cc',
@@ -141,7 +152,6 @@ gtk2_ardour_sources = [
         'midi_cut_buffer.cc',
         'midi_export_dialog.cc',
         'midi_list_editor.cc',
-        'midi_port_dialog.cc',
         'midi_region_view.cc',
         'midi_scroomer.cc',
         'midi_selection.cc',
@@ -149,9 +159,10 @@ gtk2_ardour_sources = [
         'midi_time_axis.cc',
         'midi_tracer.cc',
         'midi_velocity_dialog.cc',
+        'mini_timeline.cc',
         'missing_file_dialog.cc',
+        'missing_filesource_dialog.cc',
         'missing_plugin_dialog.cc',
-        'mixer_actor.cc',
         'mixer_group_tabs.cc',
         'mixer_strip.cc',
         'mixer_ui.cc',
@@ -165,6 +176,7 @@ gtk2_ardour_sources = [
         'mouse_cursors.cc',
         'nag.cc',
         'new_plugin_preset_dialog.cc',
+        'new_user_wizard.cc',
         'normalize_dialog.cc',
         'note.cc',
         'note_base.cc',
@@ -179,13 +191,22 @@ gtk2_ardour_sources = [
         'panner_interface.cc',
         'panner_ui.cc',
         'patch_change.cc',
+        'patch_change_widget.cc',
+        'pianokeyboard.cc',
+        'piano_key_bindings.cc',
         'piano_roll_header.cc',
         'pingback.cc',
         'playlist_selector.cc',
+        'plugin_display.cc',
         'plugin_eq_gui.cc',
         'plugin_pin_dialog.cc',
+        'plugin_presets_ui.cc',
+        'plugin_scan_dialog.cc',
+        'plugin_setup_dialog.cc',
         'plugin_selector.cc',
         'plugin_ui.cc',
+        'plugin_dspload_ui.cc',
+        'plugin_dspload_window.cc',
         'port_group.cc',
         'port_insert_ui.cc',
         'port_matrix.cc',
@@ -196,9 +217,10 @@ gtk2_ardour_sources = [
         'port_matrix_labels.cc',
         'port_matrix_row_labels.cc',
         'processor_box.cc',
+        'processor_selection.cc',
         'patch_change_dialog.cc',
         'progress_reporter.cc',
-        'prompter.cc',
+        'pt_import_selector.cc',
         'public_editor.cc',
         'quantize_dialog.cc',
         'rc_option_editor.cc',
@@ -217,11 +239,14 @@ gtk2_ardour_sources = [
         'route_ui.cc',
         'ruler_dialog.cc',
         'save_as_dialog.cc',
+        'save_template_dialog.cc',
         'search_path_option.cc',
+        'screensaver.cc',
         'script_selector.cc',
         'selection.cc',
         'selection_memento.cc',
         'send_ui.cc',
+        'session_archive_dialog.cc',
         'session_dialog.cc',
         'session_import_dialog.cc',
         'session_metadata_dialog.cc',
@@ -231,38 +256,45 @@ gtk2_ardour_sources = [
         'soundcloud_export_selector.cc',
         'splash.cc',
         'speaker_dialog.cc',
-        'startup.cc',
+        'startup_fsm.cc',
         'step_editor.cc',
         'step_entry.cc',
         'stereo_panner.cc',
         'stereo_panner_editor.cc',
         'streamview.cc',
         'strip_silence_dialog.cc',
+        'stripable_colorpicker.cc',
+        'stripable_time_axis.cc',
         'sys_ex.cc',
-        'tape_region_view.cc',
+        'template_dialog.cc',
+        'tempo_curve.cc',
         'tempo_dialog.cc',
-        'tempo_lines.cc',
-        'theme_manager.cc',
+        'grid_lines.cc',
         'time_axis_view.cc',
         'time_axis_view_item.cc',
         'time_fx_dialog.cc',
         'time_info_box.cc',
         'time_selection.cc',
         'timers.cc',
-        'tooltips.cc',
         'track_selection.cc',
         'track_view_list.cc',
         'transform_dialog.cc',
+        'transport_control.cc',
+        'transport_control_ui.cc',
+        'transport_masters_dialog.cc',
         'transpose_dialog.cc',
         'ui_config.cc',
         'utils.cc',
+        'vca_master_strip.cc',
         'verbose_cursor.cc',
+        'virtual_keyboard_window.cc',
         'visibility_group.cc',
         'window_manager.cc',
 # video-timeline related sources:
         'video_image_frame.cc',
         'add_video_dialog.cc',
         'editor_videotimeline.cc',
+        'vca_time_axis.cc',
         'video_timeline.cc',
         'video_monitor.cc',
         'transcode_ffmpeg.cc',
@@ -270,8 +302,7 @@ gtk2_ardour_sources = [
         'video_server_dialog.cc',
         'utils_videotl.cc',
         'export_video_dialog.cc',
-        'export_video_infobox.cc',
-        'video_tool_paths.cc'
+        'export_video_infobox.cc'
 ]
 
 def enoify (major, minor):
@@ -299,8 +330,44 @@ def enoify (major, minor):
             return "\\n\\\"Evening Star\\\""
         elif minor == 7:
             return "\\n\\\"Cluster and Eno\\\""
-        elif minor == 8:
+    elif major == 5:
+        if minor == 0:
             return "\\n\\\"Before and After Science\\\""
+        elif minor == 1:
+            return "\\n\\\"After the Heat\\\""
+        elif minor == 2:
+            return "\\n\\\"Music for Airports\\\""
+        elif minor == 3:
+            return "\\n\\\"Music for Films\\\""
+        elif minor == 4:
+            return "\\n\\\"In a Land of Clear Colours\\\""
+        elif minor == 5:
+            return "\\n\\\"The Plateaux of Mirror\\\""
+        elif minor == 6:
+            return "\\n\\\"Possible Musics\\\"" # 1980 Collaborative
+        elif minor == 7:
+            return "\\n\\\"My Life in the Bush of Ghosts\\\"" # 1981
+        elif minor == 8:
+            return "\\n\\\"Music for Airplay\\\"" # 1981 Compilation
+        elif minor == 9:
+            return "\\n\\\"On Land\\\"" # 1982
+        elif minor == 10:
+            return "\\n\\\"Atmospheres and Soundtracks\\\"" # 1983
+        elif minor == 11:
+            return "\\n\\\"More Music for Films\\\"" # 1983
+        elif minor == 12:
+            return "\\n\\\"Working Backwards\\\"" # 1984 Compilation
+    elif major == 6:
+        if minor == 0:
+            return "\\n\\\"The Pearl\\\"" # 1984 Collaborative
+        elif minor == 1:
+            return "\\n\\\"Begegnungen\\\"" # 1984 Compilation
+        elif minor == 2:
+            return "\\n\\\"Thursday Afternoon\\\"" # 1985
+        elif minor == 3:
+            return "\\n\\\"Hybrid\\\"" # 1985 Collaborative
+        elif minor == 4:
+            return "\\n\\\"Old Land\\\"" # 1985 Compilation
     return "\\\"\\\""
 
 def options(opt):
@@ -315,8 +382,6 @@ def configure(conf):
 
     autowaf.check_pkg(conf, 'fftw3f', uselib_store='FFTW3F',
                       mandatory=True)
-    autowaf.check_pkg(conf, 'fftw3f', uselib_store='FFTW35F',
-                      atleast_version='3.3.5', mandatory=False)
     autowaf.check_pkg(conf, 'flac', uselib_store='FLAC',
                       atleast_version='1.2.1')
     autowaf.check_pkg(conf, 'gthread-2.0', uselib_store='GTHREAD',
@@ -327,24 +392,26 @@ def configure(conf):
                       atleast_version='2.18')
     autowaf.check_pkg(conf, 'ogg', uselib_store='OGG', atleast_version='1.1.2')
     autowaf.check_pkg(conf, 'x11', uselib_store='X11', atleast_version='1.1', mandatory=False)
+    autowaf.check_pkg(conf, 'pangoft2', uselib_store='PANGOFT2', atleast_version='1.36.8', mandatory=False)
     autowaf.check_pkg(conf, 'fontconfig', uselib_store='FONTCONFIG')
 
+    if conf.env.CC_NAME == 'gcc' and Options.options.strict:
+        conf.define('GLIB_DISABLE_DEPRECATION_WARNINGS', 1)
+        for var in ['CFLAGS', 'CXXFLAGS']:
+            for lib in ['GTK', 'GTKMM']:
+                for d in conf.env['INCLUDES_' + lib]:
+                    conf.env.append_value(var, ['-isystem', d])
 
     if sys.platform == 'darwin':
-        retval = conf.run_c_code (code='#include <AppKit/NSWindow.h>\n\
-        int main(void) { (void) NSWindowWillStartLiveResizeNotification; return 0; }\n',
-                                  env = conf.env.derive (),
-                                  features = [ 'c' ],
-                                  compiler = 'cc',
-                                  compile_filename='test.m',
-                                  mandatory = False,
-            )
-
-        if retval == 0:
-            autowaf.display_msg (conf, 'Checking for Cocoa live resizing constants', 'ok')
-            conf.define ('HAVE_COCOA_LIVE_RESIZING', 1)
-        else:
-            autowaf.display_msg (conf, 'Checking for Cocoa live resizing constants', 'too old - AU plugin windows will be fixed size')
+        conf.check(
+                msg              ='Checking for Cocoa live resizing constants',
+                fragment         = '#include <AppKit/NSWindow.h>\n int main(void) { (void) NSWindowWillStartLiveResizeNotification; return 0; }\n',
+                define_name      = 'HAVE_COCOA_LIVE_RESIZING',
+                uselib_store     = 'COCOA_LIVE_RESIZING',
+                compiler         = 'cc',
+                compile_filename = 'test.m',
+                execute          = True,
+                mandatory        = False)
 
     conf.write_config_header('gtk2ardour-config.h', remove=False)
 
@@ -436,16 +503,18 @@ def build(bld):
         obj.install_path = None
         obj.source    = list(gtk2_ardour_sources)
         obj.target    = 'luadoc'
-        obj.includes  = ['.', '../libs']
+        obj.includes  = ['.', '../libs', '../libs/vst3']
         obj.ldflags   = ['-no-undefined']
         obj.use       = [
                 'libpbd',
                 'libardour',
                 'libardour_cp',
-                'libtimecode',
+                'libtemporal',
                 'libmidipp',
                 'libgtkmm2ext',
                 'libcanvas',
+                'libwaveview',
+                'libwidgets',
                 'libptformat',
                 ]
         obj.defines = [
@@ -456,7 +525,7 @@ def build(bld):
                 'LOCALEDIR="' + os.path.normpath(bld.env['LOCALEDIR']) + '"',
                 ]
         obj.linkflags = ''
-        obj.uselib    = 'UUID FLAC FONTCONFIG GLIBMM GTHREAD GTK OGG CURL DL GTKMM CANVAS FFTW3F LO TAGLIB XML '
+        obj.uselib       = 'UUID FLAC FONTCONFIG GLIBMM GTHREAD GTK OGG CURL DL GTKMM CANVAS FFTW3F LO TAGLIB XML LILV RUBBERBAND AUBIO LRDF ARCHIVE VAMPSDK VAMPHOSTSDK'
         obj.source += [ 'luadoc.cc', 'bundle_env_linux.cc' ]
         if bld.is_defined('HAVE_SUIL'):
             obj.source += [ 'lv2_plugin_ui.cc' ]
@@ -466,6 +535,45 @@ def build(bld):
             obj.source += [ 'linux_vst_gui_support.cc', 'lxvst_plugin_ui.cc' ]
             obj.defines += [ 'LXVST_SUPPORT' ]
             obj.use += [ 'X11' ]
+
+        if bld.is_defined('VST3_SUPPORT'):
+            obj.source += [ 'vst3_plugin_ui.cc' ]
+            if sys.platform == 'darwin':
+                obj.source += [ 'vst3_nsview_plugin_ui.mm' ]
+            elif bld.env['build_target'] == 'mingw':
+                obj.source += [ 'vst3_hwnd_plugin_ui.cc' ]
+            else:
+                obj.source += [ 'vst3_x11_plugin_ui.cc' ]
+
+#    # Tool to test libcanvas
+#    if re.search ("linux", sys.platform) != None and bld.env['CANVASTESTUI']:
+#        obj = bld (features = 'cxx c cxxprogram')
+#        obj.install_path = None
+#        obj.source    = list(gtk2_ardour_sources)
+#        obj.source    = [ 'ardour_button.cc', 'ui_config.cc', 'tooltips.cc' ]
+#        obj.target    = 'canvas_test'
+#        obj.includes  = ['.', '../libs']
+#        obj.use       = [
+#                'libpbd',
+#                'libardour',
+#                'libardour_cp',
+#                'libtemporal',
+#                'libmidipp',
+#                'libgtkmm2ext',
+#                'libcanvas',
+#                'libptformat',
+#                ]
+#        obj.defines = [
+#                'NOMAIN',
+#                'PACKAGE="' + I18N_PACKAGE + '"',
+#                'DATA_DIR="' + os.path.normpath(bld.env['DATADIR']) + '"',
+#                'CONFIG_DIR="' + os.path.normpath(bld.env['SYSCONFDIR']) + '"',
+#                'LOCALEDIR="' + os.path.normpath(bld.env['LOCALEDIR']) + '"',
+#                ]
+#        obj.linkflags = ''
+#        obj.uselib    = 'UUID FLAC FONTCONFIG GLIBMM GTHREAD GTK OGG CURL DL GTKMM CANVAS FFTW3F LO TAGLIB XML '
+#        # obj.source += [ 'canvas_test.cc', ]
+#        obj.source += [ 'toolbar_test.cc', 'enums.cc']
 
 
     if bld.is_defined('WINDOWS_VST_SUPPORT') and bld.env['build_target'] != 'mingw':
@@ -481,11 +589,13 @@ def build(bld):
                              'libmidipp',
                              'libardour',
                              'libardour_cp',
-                             'libtimecode',
+                             'libtemporal',
                              'libmidipp',
                              'libgtk2_ardour',
                              'libgtkmm2ext',
                              'libcanvas',
+                             'libwaveview',
+                             'libwidgets',
                              'libptformat',
                              ]
         obj.target = 'ardour-' + str (bld.env['VERSION']) + '-vst.exe.so'
@@ -493,6 +603,7 @@ def build(bld):
         obj.linkflags = ['-mwindows', '-Wl,--export-dynamic']
         obj.linkflags += bld.env['LDFLAGS']
         obj.defines = ['_POSIX_SOURCE', 'USE_WS_PREFIX']
+        obj.uselib       = 'GLIB'
         obj.install_path = bld.env['DLLDIR']
         # end of the wine executable
 
@@ -503,7 +614,7 @@ def build(bld):
         obj.includes  = [ '../libs/fst', '.' ]
         obj.name      = 'libgtk2_ardour'
         obj.target    = 'gtk2_ardour'
-        obj.cflags  = [ '-fPIC' ]
+        obj.cflags    = [ bld.env['compiler_flags_dict']['pic'] ]
 
     else:
         # just the normal executable version of the GTK GUI
@@ -513,9 +624,8 @@ def build(bld):
             obj = bld (features = 'cxx c cxxprogram')
         # operate on copy to avoid adding sources twice
         obj.source    = list(gtk2_ardour_sources)
-        obj.target = 'ardour-' + str (bld.env['VERSION'])
-        obj.includes = ['.']
-        obj.ldflags = ['-no-undefined']
+        obj.target    = 'ardour-' + str (bld.env['VERSION'])
+        obj.includes  = ['.']
 
         if bld.is_defined('WINDOWS_VST_SUPPORT'):
         # Windows VST support mingw
@@ -527,10 +637,12 @@ def build(bld):
     obj.use      = [ 'libpbd',
                      'libardour',
                      'libardour_cp',
-                     'libtimecode',
+                     'libtemporal',
                      'libmidipp',
                      'libgtkmm2ext',
                      'libcanvas',
+                     'libwaveview',
+                     'libwidgets',
                      'libptformat',
                      ]
 
@@ -542,7 +654,7 @@ def build(bld):
         ]
     obj.install_path = bld.env['DLLDIR']
     obj.linkflags    = ''
-    obj.uselib       = 'UUID FLAC FONTCONFIG GLIBMM GTHREAD GTK OGG CURL DL GTKMM CANVAS FFTW3F LO TAGLIB XML '
+    obj.uselib       = 'UUID FLAC FONTCONFIG GLIBMM GTHREAD GTK OGG CURL DL GTKMM CANVAS FFTW3F LO TAGLIB XML LILV RUBBERBAND AUBIO LRDF ARCHIVE VAMPSDK VAMPHOSTSDK'
 
     if sys.platform == 'darwin':
         obj.uselib += ' AUDIOUNITS OSX '
@@ -551,15 +663,18 @@ def build(bld):
     elif bld.env['build_target'] == 'mingw':
         obj.source += [ 'bundle_env_mingw.cc' ]
         obj.source += [ 'windows_icon.rc' ]
+        obj.uselib += ' DRMINGW '
     else:
         obj.source += [ 'bundle_env_linux.cc' ]
 
     obj.includes += ['../libs']
+    obj.includes += ['../libs/vst3']
 
     obj.use += 'libptformat'
 
     if bld.env['build_target'] == 'mingw':
         obj.linkflags += ' -mwindows'
+        obj.use += [ 'PANGOFT2' ]
 
     if bld.is_defined('HAVE_SUIL'):
         obj.source += [ 'lv2_plugin_ui.cc' ]
@@ -582,7 +697,11 @@ def build(bld):
         obj.defines += [ 'LXVST_SUPPORT' ]
         obj.use += [ 'X11' ]
 
-    if bld.is_defined('WINDOWS_VST_SUPPORT') or bld.is_defined('LXVST_SUPPORT'):
+    if bld.is_defined('MACVST_SUPPORT'):
+        obj.source += [ 'mac_vst_plugin_ui.mm' ]
+        obj.defines += [ 'MACVST_SUPPORT' ]
+
+    if bld.is_defined('WINDOWS_VST_SUPPORT') or bld.is_defined('LXVST_SUPPORT') or bld.is_defined ('MACVST_SUPPORT'):
         obj.source += [ 'vst_plugin_ui.cc' ]
 
     if bld.is_defined('PHONE_HOME'):
@@ -594,6 +713,15 @@ def build(bld):
 
     if bld.is_defined('AUDIOUNIT_SUPPORT'):
         obj.source += [ 'au_pluginui.mm' ]
+
+    if bld.is_defined('VST3_SUPPORT'):
+        obj.source += [ 'vst3_plugin_ui.cc' ]
+        if sys.platform == 'darwin':
+            obj.source += [ 'vst3_nsview_plugin_ui.mm' ]
+        elif bld.env['build_target'] == 'mingw':
+            obj.source += [ 'vst3_hwnd_plugin_ui.cc' ]
+        else:
+            obj.source += [ 'vst3_x11_plugin_ui.cc' ]
 
     # Wrappers
 
@@ -655,21 +783,19 @@ def build(bld):
                 'HUGER' : '36',
                 'MASSIVE' : '60',
         }
-
-        # There is no acceptable monospace font available on older versions of OS X
-        # and no API on those versions to load TTF files that will work with
-        # GTK/fontconfig/pango.
-        #
-        # In addition, the ArdourMono font gets clipped for some reason on OS X
-        #
-        # Moreover, Lucida Grande just seems to work even though it is not monospace
-        # so just use it.
-        #
-        font_names = {
-            'MONOSPACE' : 'Monaco',
-            'CLOCKFONT' : 'Lucida Grande',
-        }
-    else: # Linux/X11 fonts
+        if bld.env['build_target'] in ['panther', 'tiger', 'leopard'] or (Options.options.ppc and bld.env['build_target'] == 'snowleopard'):
+            # CTFontManagerRegisterFontsForURL for ArdourMono is 10.6 or newer
+            # "Lucida Grande" is not mono-spaced, but works for most cases, except big-clock-window
+            font_names = {
+                    'MONOSPACE' : 'Monaco',
+                    'CLOCKFONT' : 'Lucida Grande',
+                    }
+        else:
+            font_names = {
+                    'MONOSPACE' : 'Monaco',
+                    'CLOCKFONT' : 'ArdourMono',
+                    }
+    else: # Linux/X11 & Windows fonts
         basefont = '' # unspecified - use system defaults
         font_sizes = {
                 'SMALLER' : '6',
@@ -710,11 +836,20 @@ def build(bld):
         key = font_sym
         font_subst_dict[key] = text
 
+    font_subst_dict['FONTFAMILY'] = ''
     # RC file
 
     obj              = bld(features = 'subst')
     obj.source       = [ 'clearlooks.rc.in' ]
     obj.target       = 'clearlooks.rc'
+    obj.install_path = bld.env['CONFDIR']
+    set_subst_dict(obj, font_subst_dict)
+
+    font_subst_dict['FONTFAMILY'] = 'ArdourSans'
+
+    obj              = bld(features = 'subst')
+    obj.source       = [ 'clearlooks.rc.in' ]
+    obj.target       = 'clearlooks.ardoursans.rc'
     obj.install_path = bld.env['CONFDIR']
     set_subst_dict(obj, font_subst_dict)
 
@@ -731,6 +866,9 @@ def build(bld):
     else:
         menus_argv = [ '-E', '-P' ]
 
+    if bld.is_defined('MIXBUS'):
+        menus_argv += [ '-DMIXBUS' ]
+
     if bld.is_defined('PTFORMAT'):
         menus_argv += [ '-DPTFORMAT' ]
 
@@ -742,7 +880,7 @@ def build(bld):
         obj.command_is_external = True
         obj.no_inputs = True
         obj.argv = menus_argv
-        obj.dep_vars = ['PTFORMAT', 'GTKOSX', 'WINDOWS']
+        obj.dep_vars = ['PTFORMAT', 'MIXBUS', 'WINDOWS']
         obj.stdin = program + '.menus.in'
         obj.stdout = program + '.menus'
         bld.install_files (bld.env['CONFDIR'], program + '.menus')
@@ -752,6 +890,7 @@ def build(bld):
                     'ARDOUR_EXEC' : str (bld.env['lwrcase_dirname']),
                     'ARDOUR_ICON' : str (bld.env['lwrcase_dirname']),
                     'VERSION': str (bld.env['VERSION']),
+                    'DATE': str (bld.env['DATE']),
     }
 
     if bld.env['FREEDESKTOP']:
@@ -781,8 +920,8 @@ def build(bld):
 
     # NATIVE ARDOUR BINDING FILES
     # explicitly state the use of perl here so that it works on windows too
-    # 
-    a_rule = 'perl ../tools/fmt-bindings --platform="%s" --winkey="%s" --accelmap ${SRC[0].abspath()} >${TGT}' % (sys.platform, bld.env['WINDOWS_KEY'] )
+    #
+    a_rule = 'perl %s/tools/fmt-bindings --platform="%s" --winkey="%s" --accelmap ${SRC[0].abspath()} >${TGT}' % (bld.top_dir, sys.platform, bld.env['WINDOWS_KEY'] )
     for b in [ 'ardour' ] :
         obj = bld(
             target = b + '.keys',
@@ -790,13 +929,15 @@ def build(bld):
             rule = a_rule
             )
         obj.install_path = bld.env['CONFDIR']
-        
+
     # Icons/Images
     bld.install_files(os.path.join (bld.env['DATADIR'], 'icons'), bld.path.ant_glob('icons/*.png'))
-    bld.install_files(os.path.join (bld.env['DATADIR'], 'pixmaps'), bld.path.ant_glob('pixmaps/*.xpm'))
-    bld.install_files(bld.env['DATADIR'], 'splash.png')
-    bld.install_files(bld.env['DATADIR'], 'small-splash.png')
     bld.install_files(bld.env['DATADIR'], 'ArdourMono.ttf')
+    bld.install_files(bld.env['DATADIR'], 'ArdourSans.ttf')
+
+    # Application/Product specific resources (icon, splash)
+    pgmname = bld.env['PROGRAM_NAME']
+    bld.install_files(os.path.join(bld.env['DATADIR'], 'resources'), bld.path.ant_glob('resources/' + pgmname + '*'))
 
     if bld.env['build_target'] == 'mingw':
         # These icons need to overwrite the files already installed in the icons
@@ -806,8 +947,9 @@ def build(bld):
 
     # Default UI configuration
     bld.install_files(bld.env['CONFDIR'], 'default_ui_config')
-    # Color Themes
-    bld.install_files(bld.env['CONFDIR'], 'dark.colors')
+    # Color Themes. Find each color file for this program only
+    # and install
+    bld.install_files (os.path.join(bld.env['DATADIR'], 'themes'), bld.path.ant_glob ('themes/*-' + pgmname.lower() + '.colors'));
 
     # Default export stuff
     bld.install_files(os.path.join(bld.env['CONFDIR'], 'export'), bld.path.ant_glob('export/*.format'))
@@ -847,13 +989,16 @@ def i18n_mo(bld):
 def appdata_i18n_pot(bld):
     potfile = os.path.join(bld.top_dir, 'gtk2_ardour', 'appdata',
             'ardour.appdata.pot')
-    if bld.cmd == 'build':
+    if bld.cmd == 'i18n_pot':
         Logs.info('Generating pot file from Ardour appdata')
         itsfile = os.path.join(bld.top_dir, 'tools', 'as-metainfo.its')
         adsource = os.path.join(bld.top_dir, 'gtk2_ardour',
                 'ardour.appdata.xml.in.in')
         Logs.info('Updating ' + potfile)
-        subprocess.call(('itstool', '-i', itsfile, '-o', potfile, adsource))
+        try:
+                subprocess.call(('itstool', '-i', itsfile, '-o', potfile, adsource))
+        except:
+                print ('Error processing appdata pot file - ignored')
     elif bld.cmd == 'clean' and os.path.exists(potfile):
         Logs.info('Removing Ardour appdata pot file')
         os.remove(potfile)

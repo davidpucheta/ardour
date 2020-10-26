@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <glibmm/module.h>
 
@@ -32,16 +36,33 @@
 #include "ardour/control_protocol_manager.h"
 
 #include "ardour/search_paths.h"
-
+#include "ardour/selection.h"
+#include "ardour/session.h"
 
 using namespace ARDOUR;
 using namespace std;
 using namespace PBD;
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 ControlProtocolManager* ControlProtocolManager::_instance = 0;
 const string ControlProtocolManager::state_node_name = X_("ControlProtocols");
+PBD::Signal1<void,StripableNotificationListPtr> ControlProtocolManager::StripableSelectionChanged;
+
+ControlProtocolInfo::~ControlProtocolInfo ()
+{
+	if (protocol && descriptor) {
+		descriptor->destroy (descriptor, protocol);
+		protocol = 0;
+	}
+
+	delete state; state = 0;
+
+	if (descriptor) {
+		delete (Glib::Module*) descriptor->module;
+		descriptor = 0;
+	}
+}
 
 ControlProtocolManager::ControlProtocolManager ()
 {
@@ -49,7 +70,7 @@ ControlProtocolManager::ControlProtocolManager ()
 
 ControlProtocolManager::~ControlProtocolManager()
 {
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
+	Glib::Threads::RWLock::WriterLock lm (protocols_lock);
 
 	for (list<ControlProtocol*>::iterator i = control_protocols.begin(); i != control_protocols.end(); ++i) {
 		delete (*i);
@@ -59,6 +80,7 @@ ControlProtocolManager::~ControlProtocolManager()
 
 
 	for (list<ControlProtocolInfo*>::iterator p = control_protocol_info.begin(); p != control_protocol_info.end(); ++p) {
+		(*p)->protocol = 0; // protocol was already destroyed above.
 		delete (*p);
 	}
 
@@ -70,13 +92,32 @@ ControlProtocolManager::set_session (Session* s)
 {
 	SessionHandlePtr::set_session (s);
 
-	if (_session) {
-		Glib::Threads::Mutex::Lock lm (protocols_lock);
+	if (!_session) {
+		return;
+	}
+
+	{
+		Glib::Threads::RWLock::ReaderLock lm (protocols_lock);
 
 		for (list<ControlProtocolInfo*>::iterator i = control_protocol_info.begin(); i != control_protocol_info.end(); ++i) {
 			if ((*i)->requested || (*i)->mandatory) {
 				(void) activate (**i);
 			}
+		}
+	}
+
+	CoreSelection::StripableAutomationControls sac;
+	_session->selection().get_stripables (sac);
+
+	if (!sac.empty()) {
+		StripableNotificationListPtr v (new StripableNotificationList);
+		for (CoreSelection::StripableAutomationControls::iterator i = sac.begin(); i != sac.end(); ++i) {
+			if ((*i).stripable) {
+				v->push_back (boost::weak_ptr<Stripable> ((*i).stripable));
+			}
+		}
+		if (!v->empty()) {
+			StripableSelectionChanged (v); /* EMIT SIGNAL */
 		}
 	}
 }
@@ -87,6 +128,11 @@ ControlProtocolManager::activate (ControlProtocolInfo& cpi)
 	ControlProtocol* cp;
 
 	cpi.requested = true;
+
+	if (cpi.protocol && cpi.protocol->active()) {
+		warning << string_compose (_("Control protocol %1 was already active."), cpi.name) << endmsg;
+		return 0;
+	}
 
 	if ((cp = instantiate (cpi)) == 0) {
 		return -1;
@@ -111,7 +157,10 @@ ControlProtocolManager::activate (ControlProtocolInfo& cpi)
 		cp->set_state (XMLNode(""), Stateful::loading_state_version);
 	}
 
-	cp->set_active (true);
+	if (cp->set_active (true)) {
+		error << string_compose (_("Control protocol support for %1 failed to activate"), cpi.name) << endmsg;
+		teardown (cpi, false);
+	}
 
 	return 0;
 }
@@ -120,7 +169,7 @@ int
 ControlProtocolManager::deactivate (ControlProtocolInfo& cpi)
 {
 	cpi.requested = false;
-	return teardown (cpi);
+	return teardown (cpi, true);
 }
 
 void
@@ -139,13 +188,7 @@ ControlProtocolManager::drop_protocols ()
 	 * before the process cycle stops and ports vanish.
 	 */
 
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
-
-	for (list<ControlProtocol*>::iterator p = control_protocols.begin(); p != control_protocols.end(); ++p) {
-		delete *p;
-	}
-
-	control_protocols.clear ();
+	Glib::Threads::RWLock::WriterLock lm (protocols_lock);
 
 	for (list<ControlProtocolInfo*>::iterator p = control_protocol_info.begin(); p != control_protocol_info.end(); ++p) {
 		// mark existing protocols as requested
@@ -153,8 +196,15 @@ ControlProtocolManager::drop_protocols ()
 		if ((*p)->protocol) {
 			(*p)->requested = true;
 			(*p)->protocol = 0;
+			ProtocolStatusChange (*p); /* EMIT SIGNAL */
 		}
 	}
+
+	for (list<ControlProtocol*>::iterator p = control_protocols.begin(); p != control_protocols.end(); ++p) {
+		delete *p;
+	}
+
+	control_protocols.clear ();
 }
 
 ControlProtocol*
@@ -168,7 +218,7 @@ ControlProtocolManager::instantiate (ControlProtocolInfo& cpi)
 
 	cpi.descriptor = get_descriptor (cpi.path);
 
- 	DEBUG_TRACE (DEBUG::ControlProtocols, string_compose ("instantiating %1\n", cpi.name));
+	DEBUG_TRACE (DEBUG::ControlProtocols, string_compose ("instantiating %1\n", cpi.name));
 
 	if (cpi.descriptor == 0) {
 		error << string_compose (_("control protocol name \"%1\" has no descriptor"), cpi.name) << endmsg;
@@ -190,7 +240,7 @@ ControlProtocolManager::instantiate (ControlProtocolInfo& cpi)
 }
 
 int
-ControlProtocolManager::teardown (ControlProtocolInfo& cpi)
+ControlProtocolManager::teardown (ControlProtocolInfo& cpi, bool lock_required)
 {
 	if (!cpi.protocol) {
 
@@ -220,12 +270,20 @@ ControlProtocolManager::teardown (ControlProtocolInfo& cpi)
 
 	delete cpi.state;
 	cpi.state = new XMLNode (cpi.protocol->get_state());
-	cpi.state->add_property (X_("active"), "no");
+	cpi.state->set_property (X_("active"), false);
 
 	cpi.descriptor->destroy (cpi.descriptor, cpi.protocol);
 
-	{
-		Glib::Threads::Mutex::Lock lm (protocols_lock);
+	if (lock_required) {
+		/* the lock is required when the protocol is torn down by a user from the GUI. */
+		Glib::Threads::RWLock::WriterLock lm (protocols_lock);
+		list<ControlProtocol*>::iterator p = find (control_protocols.begin(), control_protocols.end(), cpi.protocol);
+		if (p != control_protocols.end()) {
+			control_protocols.erase (p);
+		} else {
+			cerr << "Programming error: ControlProtocolManager::teardown() called for " << cpi.name << ", but it was not found in control_protocols" << endl;
+		}
+	} else {
 		list<ControlProtocol*>::iterator p = find (control_protocols.begin(), control_protocols.end(), cpi.protocol);
 		if (p != control_protocols.end()) {
 			control_protocols.erase (p);
@@ -236,8 +294,6 @@ ControlProtocolManager::teardown (ControlProtocolInfo& cpi)
 
 	cpi.protocol = 0;
 
-	delete cpi.state;
-	cpi.state = 0;
 	delete (Glib::Module*) cpi.descriptor->module;
 	/* cpi->descriptor is now inaccessible since dlclose() or equivalent
 	 * has been performed, and the descriptor is (or could be) a static
@@ -257,7 +313,7 @@ ControlProtocolManager::load_mandatory_protocols ()
 		return;
 	}
 
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
+	Glib::Threads::RWLock::ReaderLock lm (protocols_lock);
 
 	for (list<ControlProtocolInfo*>::iterator i = control_protocol_info.begin(); i != control_protocol_info.end(); ++i) {
 		if ((*i)->mandatory && ((*i)->protocol == 0)) {
@@ -267,6 +323,13 @@ ControlProtocolManager::load_mandatory_protocols ()
 		}
 	}
 }
+
+struct ControlProtocolOrderByName
+{
+	bool operator() (ControlProtocolInfo* const & a, ControlProtocolInfo* const & b) const {
+		return a->name < b->name;
+	}
+};
 
 void
 ControlProtocolManager::discover_control_protocols ()
@@ -311,6 +374,9 @@ ControlProtocolManager::discover_control_protocols ()
 	for (vector<std::string>::iterator i = cp_modules.begin(); i != cp_modules.end(); ++i) {
 		control_protocol_discover (*i);
 	}
+
+	ControlProtocolOrderByName cpn;
+	control_protocol_info.sort (cpn);
 }
 
 int
@@ -330,8 +396,7 @@ ControlProtocolManager::control_protocol_discover (string path)
 	if ((descriptor = get_descriptor (path)) != 0) {
 
 		if (!descriptor->probe (descriptor)) {
-			DEBUG_TRACE (DEBUG::ControlProtocols,
-				     string_compose (_("Control protocol %1 not usable"), descriptor->name));
+			warning << string_compose (_("Control protocol %1 not usable"), descriptor->name) << endmsg;
 		} else {
 
 			ControlProtocolInfo* cpi = new ControlProtocolInfo ();
@@ -406,47 +471,54 @@ ControlProtocolManager::cpi_by_name (string name)
 }
 
 int
-ControlProtocolManager::set_state (const XMLNode& node, int /*version*/)
+ControlProtocolManager::set_state (const XMLNode& node, int session_specific_state /* here: not version */)
 {
 	XMLNodeList clist;
 	XMLNodeConstIterator citer;
-	XMLProperty* prop;
 
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
+	Glib::Threads::RWLock::WriterLock lm (protocols_lock);
 
 	clist = node.children();
 
 	for (citer = clist.begin(); citer != clist.end(); ++citer) {
-		if ((*citer)->name() == X_("Protocol")) {
+		XMLNode const * child = *citer;
 
-			if ((prop = (*citer)->property (X_("active"))) == 0) {
+		if (child->name() == X_("Protocol")) {
+
+			bool active;
+			std::string name;
+			if (!child->get_property (X_("active"), active) ||
+			    !child->get_property (X_("name"), name)) {
 				continue;
 			}
 
-			bool active = string_is_affirmative (prop->value());
-
-			if ((prop = (*citer)->property (X_("name"))) == 0) {
-				continue;
-			}
-
-			ControlProtocolInfo* cpi = cpi_by_name (prop->value());
+			ControlProtocolInfo* cpi = cpi_by_name (name);
 
 			if (cpi) {
-				cpi->state = new XMLNode (**citer);
+				DEBUG_TRACE (DEBUG::ControlProtocols, string_compose ("Protocolstate %1 %2\n", name, active ? "active" : "inactive"));
 
 				if (active) {
+					delete cpi->state;
+					cpi->state = new XMLNode (**citer);
+					cpi->state->set_property (X_("session-state"), session_specific_state ? true : false);
 					if (_session) {
 						instantiate (*cpi);
 					} else {
 						cpi->requested = true;
 					}
 				} else {
+					if (!cpi->state) {
+						cpi->state = new XMLNode (**citer);
+						cpi->state->set_property (X_("active"), false);
+						cpi->state->set_property (X_("session-state"), session_specific_state ? true : false);
+					}
+					cpi->requested = false;
 					if (_session) {
-						teardown (*cpi);
-					} else {
-						cpi->requested = false;
+						teardown (*cpi, false);
 					}
 				}
+			} else {
+				std::cerr << "protocol " << name << " not found\n";
 			}
 		}
 	}
@@ -458,22 +530,24 @@ XMLNode&
 ControlProtocolManager::get_state ()
 {
 	XMLNode* root = new XMLNode (state_node_name);
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
+	Glib::Threads::RWLock::ReaderLock lm (protocols_lock);
 
 	for (list<ControlProtocolInfo*>::iterator i = control_protocol_info.begin(); i != control_protocol_info.end(); ++i) {
 
 		if ((*i)->protocol) {
 			XMLNode& child_state ((*i)->protocol->get_state());
-			child_state.add_property (X_("active"), "yes");
+			child_state.set_property (X_("active"), true);
+			delete ((*i)->state);
+			(*i)->state = new XMLNode (child_state);
 			root->add_child_nocopy (child_state);
 		} else if ((*i)->state) {
 			XMLNode* child_state = new XMLNode (*(*i)->state);
-			child_state->add_property (X_("active"), "no");
+			child_state->set_property (X_("active"), false);
 			root->add_child_nocopy (*child_state);
 		} else {
 			XMLNode* child_state = new XMLNode (X_("Protocol"));
-			child_state->add_property (X_("name"), (*i)->name);
-			child_state->add_property (X_("active"), "no");
+			child_state->set_property (X_("name"), (*i)->name);
+			child_state->set_property (X_("active"), false);
 			root->add_child_nocopy (*child_state);
 		}
 
@@ -496,7 +570,7 @@ ControlProtocolManager::instance ()
 void
 ControlProtocolManager::midi_connectivity_established ()
 {
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
+	Glib::Threads::RWLock::ReaderLock lm (protocols_lock);
 
 	for (list<ControlProtocol*>::iterator p = control_protocols.begin(); p != control_protocols.end(); ++p) {
 		(*p)->midi_connectivity_established ();
@@ -506,7 +580,7 @@ ControlProtocolManager::midi_connectivity_established ()
 void
 ControlProtocolManager::register_request_buffer_factories ()
 {
-	Glib::Threads::Mutex::Lock lm (protocols_lock);
+	Glib::Threads::RWLock::ReaderLock lm (protocols_lock);
 
 	for (list<ControlProtocolInfo*>::iterator i = control_protocol_info.begin(); i != control_protocol_info.end(); ++i) {
 
@@ -517,6 +591,29 @@ ControlProtocolManager::register_request_buffer_factories ()
 
 		if ((*i)->descriptor->request_buffer_factory) {
 			EventLoop::register_request_buffer_factory ((*i)->descriptor->name, (*i)->descriptor->request_buffer_factory);
+		}
+	}
+}
+
+void
+ControlProtocolManager::stripable_selection_changed (StripableNotificationListPtr sp)
+{
+	/* this sets up the (static) data structures owned by ControlProtocol
+	   that are "shared" across all control protocols.
+	*/
+
+	DEBUG_TRACE (DEBUG::Selection, string_compose ("Surface manager: selection changed, now %1 stripables\n", sp ? sp->size() : -1));
+	StripableSelectionChanged (sp); /* EMIT SIGNAL */
+
+	/* now give each protocol the chance to respond to the selection change
+	 */
+
+	{
+		Glib::Threads::RWLock::ReaderLock lm (protocols_lock);
+
+		for (list<ControlProtocol*>::iterator p = control_protocols.begin(); p != control_protocols.end(); ++p) {
+			DEBUG_TRACE (DEBUG::Selection, string_compose ("selection change notification for surface \"%1\"\n", (*p)->name()));
+			(*p)->stripable_selection_changed ();
 		}
 	}
 }

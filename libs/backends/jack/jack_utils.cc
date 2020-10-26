@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Copyright (C) 2011 Tim Mayberry
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2013 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2014-2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef HAVE_ALSA
 #include "ardouralsautil/devicelist.h"
@@ -32,6 +34,7 @@
 #ifdef PLATFORM_WINDOWS
 #include <shobjidl.h>  //  Needed for
 #include <shlguid.h>   // 'IShellLink'
+#include "pbd/windows_special_dirs.h"
 #endif
 
 #if (defined PLATFORM_WINDOWS && defined HAVE_PORTAUDIO)
@@ -45,7 +48,7 @@
 
 #include "pbd/epa.h"
 #include "pbd/error.h"
-#include "pbd/convert.h"
+#include "pbd/string_convert.h"
 #include "pbd/file_utils.h"
 #include "pbd/search_path.h"
 
@@ -55,7 +58,7 @@
 #include <CFBundle.h>
 #endif
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -66,6 +69,7 @@ namespace ARDOUR {
 	const char * const coreaudio_driver_name = X_("CoreAudio");
 	const char * const alsa_driver_name = X_("ALSA");
 	const char * const oss_driver_name = X_("OSS");
+	const char * const sun_driver_name = X_("Sun");
 	const char * const freebob_driver_name = X_("FreeBoB");
 	const char * const ffado_driver_name = X_("FFADO");
 	const char * const netjack_driver_name = X_("NetJACK");
@@ -79,6 +83,7 @@ namespace {
 	const char * const coreaudio_driver_command_line_name = X_("coreaudio");
 	const char * const alsa_driver_command_line_name = X_("alsa");
 	const char * const oss_driver_command_line_name = X_("oss");
+	const char * const sun_driver_command_line_name = X_("sun");
 	const char * const freebob_driver_command_line_name = X_("freebob");
 	const char * const ffado_driver_command_line_name = X_("firewire");
 	const char * const netjack_driver_command_line_name = X_("netjack");
@@ -116,6 +121,9 @@ ARDOUR::get_jack_audio_driver_names (vector<string>& audio_driver_names)
 	audio_driver_names.push_back (alsa_driver_name);
 #endif
 	audio_driver_names.push_back (oss_driver_name);
+#if defined(__NetBSD__) || defined(__sun)
+	audio_driver_names.push_back (sun_driver_name);
+#endif
 	audio_driver_names.push_back (freebob_driver_name);
 	audio_driver_names.push_back (ffado_driver_name);
 #endif
@@ -216,6 +224,9 @@ get_jack_command_line_audio_driver_name (const string& driver_name, string& comm
 	} else if (driver_name == oss_driver_name) {
 		command_line_name = oss_driver_command_line_name;
 		return true;
+	} else if (driver_name == sun_driver_name) {
+		command_line_name = sun_driver_command_line_name;
+		return true;
 	} else if (driver_name == freebob_driver_name) {
 		command_line_name = freebob_driver_command_line_name;
 		return true;
@@ -273,7 +284,7 @@ void
 ARDOUR::get_jack_alsa_device_names (device_map_t& devices)
 {
 #ifdef HAVE_ALSA
-	get_alsa_audio_device_names(devices);
+	get_alsa_audio_device_names(devices, HalfDuplexOut);
 #else
 	/* silence a compiler unused variable warning */
 	(void) devices;
@@ -404,6 +415,13 @@ ARDOUR::get_jack_oss_device_names (device_map_t& devices)
 }
 
 void
+ARDOUR::get_jack_sun_device_names (device_map_t& devices)
+{
+	devices.insert (make_pair (default_device_name, default_device_name));
+}
+
+
+void
 ARDOUR::get_jack_freebob_device_names (device_map_t& devices)
 {
 	devices.insert (make_pair (default_device_name, default_device_name));
@@ -440,6 +458,8 @@ ARDOUR::get_jack_device_names_for_audio_driver (const string& driver_name, devic
 		get_jack_alsa_device_names (devices);
 	} else if (driver_name == oss_driver_name) {
 		get_jack_oss_device_names (devices);
+	} else if (driver_name == sun_driver_name) {
+		get_jack_sun_device_names (devices);
 	} else if (driver_name == freebob_driver_name) {
 		get_jack_freebob_device_names (devices);
 	} else if (driver_name == ffado_driver_name) {
@@ -472,7 +492,8 @@ ARDOUR::get_jack_device_names_for_audio_driver (const string& driver_name)
 bool
 ARDOUR::get_jack_audio_driver_supports_two_devices (const string& driver)
 {
-	return (driver == alsa_driver_name || driver == oss_driver_name);
+	return (driver == alsa_driver_name || driver == oss_driver_name ||
+			driver == sun_driver_name);
 }
 
 bool
@@ -585,6 +606,11 @@ ARDOUR::get_jack_server_dir_paths (vector<std::string>& server_dir_paths)
 
 	if (pISL)
 		pISL->Release();
+#else
+	std::string reg;
+	if (PBD::windows_query_registry ("Software\\JACK", "Location", reg)) {
+		sp.push_back (reg);
+	}
 #endif
 
 	gchar *install_dir = g_win32_get_package_installation_directory_of_module (NULL);
@@ -714,7 +740,7 @@ ARDOUR::get_jack_command_line_string (JackCommandLineOptions& options, string& c
 
 	if (options.timeout) {
 		args.push_back ("-t");
-		args.push_back (to_string (options.timeout, std::dec));
+		args.push_back (to_string (options.timeout));
 	}
 
 	if (options.no_mlock) {
@@ -722,13 +748,13 @@ ARDOUR::get_jack_command_line_string (JackCommandLineOptions& options, string& c
 	}
 
 	args.push_back ("-p");
-	args.push_back (to_string(options.ports_max, std::dec));
+	args.push_back (to_string(options.ports_max));
 
 	if (options.realtime) {
 		args.push_back ("-R");
 		if (options.priority != 0) {
 			args.push_back ("-P");
-			args.push_back (to_string(options.priority, std::dec));
+			args.push_back (to_string(options.priority));
 		}
 	} else {
 		args.push_back ("-r");
@@ -810,45 +836,45 @@ ARDOUR::get_jack_command_line_string (JackCommandLineOptions& options, string& c
 
 		if (options.input_channels) {
 			args.push_back ("-i");
-			args.push_back (to_string (options.input_channels, std::dec));
+			args.push_back (to_string (options.input_channels));
 		}
 
 		if (options.output_channels) {
 			args.push_back ("-o");
-			args.push_back (to_string (options.output_channels, std::dec));
+			args.push_back (to_string (options.output_channels));
 		}
 
 		if (get_jack_audio_driver_supports_setting_period_count (options.driver)) {
 			args.push_back ("-n");
-			args.push_back (to_string (options.num_periods, std::dec));
+			args.push_back (to_string (options.num_periods));
 		}
 	} else {
 		// jackd dummy backend
 		if (options.input_channels) {
 			args.push_back ("-C");
-			args.push_back (to_string (options.input_channels, std::dec));
+			args.push_back (to_string (options.input_channels));
 		}
 
 		if (options.output_channels) {
 			args.push_back ("-P");
-			args.push_back (to_string (options.output_channels, std::dec));
+			args.push_back (to_string (options.output_channels));
 		}
 	}
 
 	args.push_back ("-r");
-	args.push_back (to_string (options.samplerate, std::dec));
+	args.push_back (to_string (options.samplerate));
 
 	args.push_back ("-p");
-	args.push_back (to_string (options.period_size, std::dec));
+	args.push_back (to_string (options.period_size));
 
 	if (get_jack_audio_driver_supports_latency_adjustment (options.driver)) {
 		if (options.input_latency) {
 			args.push_back ("-I");
-			args.push_back (to_string (options.input_latency, std::dec));
+			args.push_back (to_string (options.input_latency));
 		}
 		if (options.output_latency) {
 			args.push_back ("-O");
-			args.push_back (to_string (options.output_latency, std::dec));
+			args.push_back (to_string (options.output_latency));
 		}
 	}
 

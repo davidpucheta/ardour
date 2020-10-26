@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __CANVAS_TYPES_H__
 #define __CANVAS_TYPES_H__
@@ -28,10 +29,12 @@
 
 #include <cairomm/refptr.h>
 
+#include "gtkmm2ext/colors.h"
+
 #include "canvas/visibility.h"
 
 namespace Cairo {
- 	class Context;
+	class Context;
 }
 
 namespace ArdourCanvas
@@ -39,7 +42,6 @@ namespace ArdourCanvas
 
 typedef double Coord;
 typedef double Distance;
-typedef uint32_t Color;
 
 extern LIBCANVAS_API Coord const COORD_MAX;
 
@@ -117,15 +119,15 @@ struct LIBCANVAS_API Rect
 	Coord x1;
 	Coord y1;
 
-	boost::optional<Rect> intersection (Rect const & o) const throw () {
+	Rect intersection (Rect const & o) const throw () {
 		Rect i (std::max (x0, o.x0), std::max (y0, o.y0),
 			std::min (x1, o.x1), std::min (y1, o.y1));
 
 		if (i.x0 > i.x1 || i.y0 > i.y1) {
-			return boost::optional<Rect> ();
+			return Rect();
 		}
 
-		return boost::optional<Rect> (i);
+		return i;
 	}
 
 	Rect extend (Rect const & o) const throw () {
@@ -140,6 +142,11 @@ struct LIBCANVAS_API Rect
 		return Rect (x0 - amount, y0 - amount,
 			     canvas_safe_add (x1, amount),
 			     canvas_safe_add (y1, amount));
+	}
+	Rect expand (Distance top, Distance right, Distance bottom, Distance left) const throw () {
+		return Rect (x0 - left, y0 - top,
+			     canvas_safe_add (x1, right),
+			     canvas_safe_add (y1, bottom));
 	}
 
 	Rect shrink (Distance amount) const throw () {
@@ -160,6 +167,7 @@ struct LIBCANVAS_API Rect
 	}
 
 	bool empty() const throw () { return (x0 == x1 && y0 == y1); }
+	operator bool() const throw () { return !empty(); }
 
 	Distance width () const  throw () {
 		return x1 - x0;

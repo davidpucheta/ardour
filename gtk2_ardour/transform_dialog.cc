@@ -1,21 +1,21 @@
 /*
-   Copyright (C) 2009-2014 Paul Davis
-   Author: David Robillard
-
-   This program is free software; you can redistribute it and/or modify
-   it under the terms of the GNU General Public License as published by
-   the Free Software Foundation; either version 2 of the License, or
-   (at your option) any later version.
-
-   This program is distributed in the hope that it will be useful,
-   but WITHOUT ANY WARRANTY; without even the implied warranty of
-   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-   GNU General Public License for more details.
-
-   You should have received a copy of the GNU General Public License
-   along with this program; if not, write to the Free Software
-   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2014-2019 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/box.h>
 #include <gtkmm/label.h>
@@ -23,10 +23,8 @@
 
 #include "transform_dialog.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
-using namespace std;
-using namespace Gtk;
 using namespace ARDOUR;
 
 TransformDialog::Model::Model()
@@ -99,7 +97,7 @@ TransformDialog::TransformDialog()
 
 	Gtk::HBox* add_hbox = Gtk::manage(new Gtk::HBox);
 	_add_button.add(
-		*manage(new Gtk::Image(Gtk::Stock::ADD, Gtk::ICON_SIZE_BUTTON)));
+		*Gtk::manage(new Gtk::Image(Gtk::Stock::ADD, Gtk::ICON_SIZE_BUTTON)));
 	add_hbox->pack_start(_add_button, false, false);
 	_add_button.signal_clicked().connect(
 		sigc::mem_fun(*this, &TransformDialog::add_clicked));
@@ -109,7 +107,7 @@ TransformDialog::TransformDialog()
 	get_vbox()->pack_start(_operations_box, false, false);
 	get_vbox()->pack_start(*add_hbox, false, false);
 
-	add_button(Stock::CANCEL, Gtk::RESPONSE_CANCEL);
+	add_button(Gtk::Stock::CANCEL, Gtk::RESPONSE_CANCEL);
 	add_button(_("Transform"), Gtk::RESPONSE_OK);
 
 	show_all();
@@ -173,8 +171,8 @@ set_spinner_for(Gtk::SpinButton&                     spinner,
 		spinner.set_digits(2);
 		break;
 	case MidiModel::NoteDiffCommand::Channel:
-		spinner.get_adjustment()->set_lower(0);
-		spinner.get_adjustment()->set_upper(15);
+		spinner.get_adjustment()->set_lower(1);
+		spinner.get_adjustment()->set_upper(16);
 		spinner.get_adjustment()->set_step_increment(1);
 		spinner.get_adjustment()->set_page_increment(10);
 		spinner.set_digits(0);
@@ -228,6 +226,20 @@ TransformDialog::ValueChooser::source_changed()
 	}
 }
 
+double
+TransformDialog::ValueChooser::get_value() const
+{
+	const bool is_channel = target_property == MidiModel::NoteDiffCommand::Channel;
+	return value_spinner.get_value() + (is_channel ? -1.0 : 0.0);
+}
+
+double
+TransformDialog::ValueChooser::get_max() const
+{
+	const bool is_channel = target_property == MidiModel::NoteDiffCommand::Channel;
+	return max_spinner.get_value() + (is_channel ? -1.0 : 0.0);
+}
+
 void
 TransformDialog::ValueChooser::get(std::list<Operation>& ops)
 {
@@ -237,8 +249,8 @@ TransformDialog::ValueChooser::get(std::list<Operation>& ops)
 	if (source == Transform::Value::RANDOM) {
 		/* Special case: a RANDOM value is always 0..1, so here we produce some
 		   code to produce a random number in a range: "rand value *". */
-		const double a     = value_spinner.get_value();
-		const double b     = max_spinner.get_value();
+		const double a     = get_value();
+		const double b     = get_max();
 		const double min   = std::min(a, b);
 		const double max   = std::max(a, b);
 		const double range = max - min;
@@ -254,8 +266,8 @@ TransformDialog::ValueChooser::get(std::list<Operation>& ops)
 		/* Special case: hijack NOWHERE for ramps (see above).  The language
 		   knows nothing of ramps, we generate code to calculate the
 		   appropriate value here. */
-		const double first = value_spinner.get_value();
-		const double last  = max_spinner.get_value();
+		const double first = get_value();
+		const double last  = get_max();
 		const double rise  = last - first;
 
 		// "index rise * n_notes 1 - / first +" (index * rise / (n_notes - 1) + first)
@@ -280,7 +292,7 @@ TransformDialog::ValueChooser::get(std::list<Operation>& ops)
 	} else if (val.source == Transform::Value::LITERAL) {
 		val.value = Variant(
 			MidiModel::NoteDiffCommand::value_type(target_property),
-			value_spinner.get_value());
+			get_value());
 	}
 	ops.push_back(Operation(Operation::PUSH, val));
 }
@@ -299,7 +311,7 @@ TransformDialog::OperationChooser::OperationChooser(const Model& model)
 	pack_start(remove_button, false, false);
 
 	remove_button.add(
-		*manage(new Gtk::Image(Gtk::Stock::REMOVE, Gtk::ICON_SIZE_BUTTON)));
+		*Gtk::manage(new Gtk::Image(Gtk::Stock::REMOVE, Gtk::ICON_SIZE_BUTTON)));
 
 	remove_button.signal_clicked().connect(
 		sigc::mem_fun(*this, &TransformDialog::OperationChooser::remove_clicked));

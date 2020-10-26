@@ -1,22 +1,25 @@
 /*
-    Copyright (C) 2009 Paul Davis
+ * Copyright (C) 2009-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
+#include <gtkmm/window.h>
 #include <gtkmm/box.h>
 
 #include "gtkmm2ext/visibility.h"
@@ -127,8 +130,19 @@ public:
 	}
 
 	/** @return Selected children */
-	std::list<T*> selection () const {
-		return _selection;
+	std::list<T*> selection (bool sorted = false) const {
+		if (!sorted) {
+			return _selection;
+		} else {
+			/* simple insertion-sort */
+			std::list<T*> rv;
+			for (typename std::list<T*>::const_iterator i = _children.begin(); i != _children.end(); ++i) {
+				if (selected (*i)) {
+					rv.push_back (*i);
+				}
+			}
+			return rv;
+		}
 	}
 
 	/** Set the `active' child; this is simply a child which is set to have the
@@ -406,8 +420,6 @@ private:
 		} else {
 
 			/* drag started in another DnDVBox; raise a signal to say what happened */
-
-			std::list<T*> dropped = _drag_source->selection ();
 			DropFromAnotherBox (_drag_source, drop.first, context);
 		}
 
@@ -418,6 +430,7 @@ private:
 	{
 		delete _drag_icon;
 		_drag_icon = 0;
+		_drag_source = 0;
 
 		_drag_child = 0;
 		remove_placeholder ();

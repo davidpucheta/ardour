@@ -1,25 +1,27 @@
 /*
-    Copyright (C) 20002-2013 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 #include <string>
 #include <vector>
+
+#include "gtkmm2ext/utils.h"
 
 #include "ardour_ui.h"
 #include "audio_clock.h"
@@ -27,7 +29,7 @@
 #include "public_editor.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using std::min;
 using std::string;
@@ -37,7 +39,7 @@ BigClockWindow::BigClockWindow (AudioClock& c)
 	: ArdourWindow (_("Big Clock"))
 	, clock (c)
 {
-	ARDOUR_UI::Clock.connect (sigc::mem_fun (clock, &AudioClock::set));
+	ARDOUR_UI::Clock.connect (sigc::bind (sigc::mem_fun (clock, &AudioClock::set), false, 0));
 
 	clock.set_corner_radius (0.0);
 
@@ -55,7 +57,7 @@ void
 BigClockWindow::on_unmap ()
 {
 	ArdourWindow::on_unmap ();
-	PublicEditor::instance().reset_focus (&clock);
+	ARDOUR_UI::instance()->reset_focus (this);
 }
 
 bool

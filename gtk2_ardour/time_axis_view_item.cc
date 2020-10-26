@@ -1,21 +1,29 @@
 /*
-    Copyright (C) 2003 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2014 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <utility>
 
@@ -32,7 +40,7 @@
 #include "canvas/rectangle.h"
 #include "canvas/debug.h"
 #include "canvas/text.h"
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 
 #include "ardour/profile.h"
 
@@ -43,7 +51,7 @@
 #include "utils.h"
 #include "rgb_macros.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Editing;
@@ -66,22 +74,22 @@ double TimeAxisViewItem::NAME_HIGHLIGHT_THRESH;
 void
 TimeAxisViewItem::set_constant_heights ()
 {
-        NAME_FONT = Pango::FontDescription (UIConfiguration::instance().get_SmallFont());
+	NAME_FONT = Pango::FontDescription (UIConfiguration::instance().get_SmallFont());
 
-        Gtk::Window win;
-        Gtk::Label foo;
-        win.add (foo);
+	Gtk::Window win;
+	Gtk::Label foo;
+	win.add (foo);
 
-        Glib::RefPtr<Pango::Layout> layout = foo.create_pango_layout (X_("Hg")); /* ascender + descender */
-        int width = 0;
-        int height = 0;
+	Glib::RefPtr<Pango::Layout> layout = foo.create_pango_layout (X_("Hg")); /* ascender + descender */
+	int width = 0;
+	int height = 0;
 
-        layout->set_font_description (NAME_FONT);
-        get_pixel_size (layout, width, height);
+	layout->set_font_description (NAME_FONT);
+	get_pixel_size (layout, width, height);
 
-        layout = foo.create_pango_layout (X_("H")); /* just the ascender */
+	layout = foo.create_pango_layout (X_("H")); /* just the ascender */
 
-        NAME_HEIGHT = height;
+	NAME_HEIGHT = height;
 
 	/* Config->get_show_name_highlight) == true:
 	        Y_OFFSET is measured from bottom of the time axis view item.
@@ -96,7 +104,7 @@ TimeAxisViewItem::set_constant_heights ()
 		NAME_Y_OFFSET = 3;
 		NAME_HIGHLIGHT_SIZE = 0;
 	}
-        NAME_HIGHLIGHT_THRESH = NAME_HIGHLIGHT_SIZE * 3;
+	NAME_HIGHLIGHT_THRESH = NAME_HIGHLIGHT_SIZE * 3;
 }
 
 /**
@@ -114,10 +122,10 @@ TimeAxisViewItem::set_constant_heights ()
  */
 TimeAxisViewItem::TimeAxisViewItem(
 	const string & it_name, ArdourCanvas::Item& parent, TimeAxisView& tv, double spu, uint32_t base_color,
-	framepos_t start, framecnt_t duration, bool recording, bool automation, Visibility vis
+	samplepos_t start, samplecnt_t duration, bool recording, bool automation, Visibility vis
 	)
 	: trackview (tv)
-	, frame_position (-1)
+	, sample_position (-1)
 	, item_name (it_name)
 	, selection_frame (0)
 	, _height (1.0)
@@ -134,7 +142,7 @@ TimeAxisViewItem::TimeAxisViewItem (const TimeAxisViewItem& other)
 	, Selectable (other)
 	, PBD::ScopedConnectionList()
 	, trackview (other.trackview)
-	, frame_position (-1)
+	, sample_position (-1)
 	, item_name (other.item_name)
 	, selection_frame (0)
 	, _height (1.0)
@@ -149,27 +157,26 @@ TimeAxisViewItem::TimeAxisViewItem (const TimeAxisViewItem& other)
 
 	_selected = other._selected;
 
-	init (parent, other.samples_per_pixel, other.fill_color, other.frame_position,
+	init (parent, other.samples_per_pixel, other.fill_color, other.sample_position,
 	      other.item_duration, other.visibility, other.wide_enough_for_name, other.high_enough_for_name);
 }
 
 void
 TimeAxisViewItem::init (ArdourCanvas::Item* parent, double fpp, uint32_t base_color,
-			framepos_t start, framepos_t duration, Visibility vis,
+			samplepos_t start, samplepos_t duration, Visibility vis,
 			bool wide, bool high)
 {
 	group = new ArdourCanvas::Container (parent);
 	CANVAS_DEBUG_NAME (group, string_compose ("TAVI group for %1", get_item_name()));
-	group->Event.connect (sigc::mem_fun (*this, &TimeAxisViewItem::canvas_group_event));
 
 	fill_color = base_color;
 	fill_color_name = "time axis view item base";
 	samples_per_pixel = fpp;
-	frame_position = start;
+	sample_position = start;
 	item_duration = duration;
 	name_connected = false;
 	position_locked = false;
-	max_item_duration = ARDOUR::max_framepos;
+	max_item_duration = Temporal::max_samplepos;
 	min_item_duration = 0;
 	visibility = vis;
 	_sensitive = true;
@@ -184,9 +191,9 @@ TimeAxisViewItem::init (ArdourCanvas::Item* parent, double fpp, uint32_t base_co
 
 	if (visibility & ShowFrame) {
 		frame = new ArdourCanvas::Rectangle (group,
-						     ArdourCanvas::Rect (0.0, 0.0,
-									 trackview.editor().sample_to_pixel(duration),
-									 trackview.current_height()));
+		                                     ArdourCanvas::Rect (0.0, 0.0,
+		                                                         trackview.editor().sample_to_pixel(duration),
+		                                                         trackview.current_height()));
 
 		frame->set_outline_what (ArdourCanvas::Rectangle::What (ArdourCanvas::Rectangle::LEFT|ArdourCanvas::Rectangle::RIGHT));
 		frame->show ();
@@ -206,8 +213,8 @@ TimeAxisViewItem::init (ArdourCanvas::Item* parent, double fpp, uint32_t base_co
 		name_highlight = new ArdourCanvas::Rectangle (group);
 		CANVAS_DEBUG_NAME (name_highlight, string_compose ("name highlight for %1", get_item_name()));
 		name_highlight->set_data ("timeaxisviewitem", this);
-                name_highlight->set_outline_what (ArdourCanvas::Rectangle::TOP);
-                name_highlight->set_outline_color (RGBA_TO_UINT (0,0,0,255)); // this should use a theme color
+		name_highlight->set_outline_what (ArdourCanvas::Rectangle::TOP);
+		name_highlight->set_outline_color (RGBA_TO_UINT (0,0,0,255)); // this should use a theme color
 
 	} else {
 		name_highlight = 0;
@@ -247,12 +254,13 @@ TimeAxisViewItem::init (ArdourCanvas::Item* parent, double fpp, uint32_t base_co
 		frame_handle_start = frame_handle_end = 0;
 	}
 
-	set_color (base_color);
+	//set_color (base_color);
 
-	set_duration (item_duration, this);
-	set_position (start, this);
+	//set_duration (item_duration, this);
+	//set_position (start, this);
 
-	Config->ParameterChanged.connect (*this, invalidator (*this), boost::bind (&TimeAxisViewItem::parameter_changed, this, _1), gui_context ());
+	group->Event.connect (sigc::mem_fun (*this, &TimeAxisViewItem::canvas_group_event));
+	//Config->ParameterChanged.connect (*this, invalidator (*this), boost::bind (&TimeAxisViewItem::parameter_changed, this, _1), gui_context ());
 	UIConfiguration::instance().ParameterChanged.connect (sigc::mem_fun (*this, &TimeAxisViewItem::parameter_changed));
 }
 
@@ -276,13 +284,13 @@ TimeAxisViewItem::canvas_group_event (GdkEvent* /*ev*/)
  */
 
 bool
-TimeAxisViewItem::set_position(framepos_t pos, void* src, double* delta)
+TimeAxisViewItem::set_position(samplepos_t pos, void* src, double* delta)
 {
 	if (position_locked) {
 		return false;
 	}
 
-	frame_position = pos;
+	sample_position = pos;
 
 	double new_unit_pos = trackview.editor().sample_to_pixel (pos);
 
@@ -298,16 +306,16 @@ TimeAxisViewItem::set_position(framepos_t pos, void* src, double* delta)
 	}
 
 	group->set_x_position (new_unit_pos);
-	PositionChanged (frame_position, src); /* EMIT_SIGNAL */
+	PositionChanged (sample_position, src); /* EMIT_SIGNAL */
 
 	return true;
 }
 
 /** @return position of this item on the timeline */
-framepos_t
+samplepos_t
 TimeAxisViewItem::get_position() const
 {
-	return frame_position;
+	return sample_position;
 }
 
 /**
@@ -319,11 +327,11 @@ TimeAxisViewItem::get_position() const
  */
 
 bool
-TimeAxisViewItem::set_duration (framecnt_t dur, void* src)
+TimeAxisViewItem::set_duration (samplecnt_t dur, void* src)
 {
 	if ((dur > max_item_duration) || (dur < min_item_duration)) {
 		warning << string_compose (
-				P_("new duration %1 frame is out of bounds for %2", "new duration of %1 frames is out of bounds for %2", dur),
+				P_("new duration %1 frame is out of bounds for %2", "new duration of %1 samples is out of bounds for %2", dur),
 				get_item_name(), dur)
 			<< endmsg;
 		return false;
@@ -335,8 +343,8 @@ TimeAxisViewItem::set_duration (framecnt_t dur, void* src)
 
 	item_duration = dur;
 
-	double end_pixel = trackview.editor().sample_to_pixel (frame_position + dur);
-	double first_pixel = trackview.editor().sample_to_pixel (frame_position);
+	double end_pixel = trackview.editor().sample_to_pixel (sample_position + dur);
+	double first_pixel = trackview.editor().sample_to_pixel (sample_position);
 
 	reset_width_dependent_items (end_pixel - first_pixel);
 
@@ -345,7 +353,7 @@ TimeAxisViewItem::set_duration (framecnt_t dur, void* src)
 }
 
 /** @return duration of this item */
-framepos_t
+samplepos_t
 TimeAxisViewItem::get_duration() const
 {
 	return item_duration;
@@ -358,14 +366,14 @@ TimeAxisViewItem::get_duration() const
  * @param src the identity of the object that initiated the change
  */
 void
-TimeAxisViewItem::set_max_duration(framecnt_t dur, void* src)
+TimeAxisViewItem::set_max_duration(samplecnt_t dur, void* src)
 {
 	max_item_duration = dur;
 	MaxDurationChanged(max_item_duration, src); /* EMIT_SIGNAL */
 }
 
 /** @return the maximum duration that this item may have */
-framecnt_t
+samplecnt_t
 TimeAxisViewItem::get_max_duration() const
 {
 	return max_item_duration;
@@ -378,14 +386,14 @@ TimeAxisViewItem::get_max_duration() const
  * @param src the identity of the object that initiated the change
  */
 void
-TimeAxisViewItem::set_min_duration(framecnt_t dur, void* src)
+TimeAxisViewItem::set_min_duration(samplecnt_t dur, void* src)
 {
 	min_item_duration = dur;
 	MinDurationChanged(max_item_duration, src); /* EMIT_SIGNAL */
 }
 
 /** @return the minimum duration that this item mey have */
-framecnt_t
+samplecnt_t
 TimeAxisViewItem::get_min_duration() const
 {
 	return min_item_duration;
@@ -532,7 +540,7 @@ TimeAxisViewItem::set_name_text(const string& new_name)
 	name_text_width = pixel_width (new_name, NAME_FONT) + 2;
 	name_text->set (new_name);
 	manage_name_text ();
-
+	manage_name_highlight ();
 }
 
 /**
@@ -543,7 +551,7 @@ TimeAxisViewItem::set_name_text(const string& new_name)
 void
 TimeAxisViewItem::set_height (double height)
 {
-        _height = height;
+	_height = height;
 
 	manage_name_highlight ();
 
@@ -569,8 +577,6 @@ TimeAxisViewItem::set_height (double height)
 			selection_frame->set (frame->get().shrink (1.0));
 		}
 	}
-
-	set_colors ();
 }
 
 void
@@ -639,7 +645,7 @@ TimeAxisViewItem::set_colors()
 	set_frame_color ();
 
 	if (name_highlight) {
-                name_highlight->set_fill_color (fill_color);
+		name_highlight->set_fill_color (fill_color);
 	}
 
 	set_name_text_color ();
@@ -668,16 +674,16 @@ TimeAxisViewItem::set_name_text_color ()
 		f = get_fill_color ();
 	}
 
-	name_text->set_color (ArdourCanvas::contrasting_text_color (f));
+	name_text->set_color (contrasting_text_color (f));
 }
 
-ArdourCanvas::Color
+Gtkmm2ext::Color
 TimeAxisViewItem::get_fill_color () const
 {
 	const std::string mod_name = (_dragging ? "dragging region" : fill_color_name);
 
 	if (_selected) {
-		return UIConfiguration::instance().color_mod ("selected region base", mod_name);
+		return UIConfiguration::instance().color ("selected region base");
 	} else if (_recregion) {
 		return UIConfiguration::instance().color ("recording rect");
 	} else if ((!UIConfiguration::instance().get_show_name_highlight() || high_enough_for_name) &&
@@ -716,20 +722,20 @@ TimeAxisViewItem::set_frame_gradient ()
 	ArdourCanvas::Fill::StopList stops;
 	double r, g, b, a;
 	double h, s, v;
-	ArdourCanvas::Color f (get_fill_color());
+	Color f (get_fill_color());
 
 	/* need to get alpha value */
-	ArdourCanvas::color_to_rgba (f, r, g, b, a);
+	color_to_rgba (f, r, g, b, a);
 
 	stops.push_back (std::make_pair (0.0, f));
 
 	/* now a darker version */
 
-	ArdourCanvas::color_to_hsv (f, h, s, v);
+	color_to_hsv (f, h, s, v);
 
 	v = min (1.0, v * (1.0 - UIConfiguration::instance().get_timeline_item_gradient_depth()));
 
-	ArdourCanvas::Color darker = ArdourCanvas::hsva_to_color (h, s, v, a);
+	Color darker = hsva_to_color (h, s, v, a);
 	stops.push_back (std::make_pair (1.0, darker));
 
 	frame->set_gradient (stops, true);
@@ -782,18 +788,18 @@ TimeAxisViewItem::frame_handle_crossing (GdkEvent* ev, ArdourCanvas::Rectangle* 
 	return false;
 }
 
-/** @return the frames per pixel */
+/** @return the samples per pixel */
 double
 TimeAxisViewItem::get_samples_per_pixel () const
 {
 	return samples_per_pixel;
 }
 
-/** Set the frames per pixel of this item.
+/** Set the samples per pixel of this item.
  *  This item is used to determine the relative visual size and position of this item
  *  based upon its duration and start value.
  *
- *  @param fpp the new frames per pixel
+ *  @param fpp the new samples per pixel
  */
 void
 TimeAxisViewItem::set_samples_per_pixel (double fpp)
@@ -801,8 +807,8 @@ TimeAxisViewItem::set_samples_per_pixel (double fpp)
 	samples_per_pixel = fpp;
 	set_position (this->get_position(), this);
 
-	double end_pixel = trackview.editor().sample_to_pixel (frame_position + get_duration());
-	double first_pixel = trackview.editor().sample_to_pixel (frame_position);
+	double end_pixel = trackview.editor().sample_to_pixel (sample_position + get_duration());
+	double first_pixel = trackview.editor().sample_to_pixel (sample_position);
 
 	reset_width_dependent_items (end_pixel - first_pixel);
 }
@@ -855,6 +861,9 @@ TimeAxisViewItem::reset_width_dependent_items (double pixel_width)
 				frame_handle_end->set_x0 (pixel_width - (TimeAxisViewItem::GRAB_HANDLE_WIDTH));
 				frame_handle_end->set_x1 (pixel_width);
 				frame_handle_end->show();
+
+				frame_handle_start->raise_to_top ();
+				frame_handle_end->raise_to_top ();
 			}
 		}
 	}
@@ -869,7 +878,7 @@ TimeAxisViewItem::manage_name_text ()
 		return;
 	}
 
-	if (!wide_enough_for_name || !high_enough_for_name) {
+	if (!(visibility & ShowNameText) || (!wide_enough_for_name || !high_enough_for_name)) {
 		name_text->hide ();
 		return;
 	}

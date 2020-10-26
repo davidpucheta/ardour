@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gdk/gdk.h>
 
@@ -27,8 +28,7 @@
 
 #include "canvas/text.h"
 #include "canvas/canvas.h"
-#include "canvas/utils.h"
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 
 using namespace std;
 using namespace ArdourCanvas;
@@ -70,6 +70,10 @@ Text::~Text ()
 void
 Text::set (string const & text)
 {
+	if (text == _text) {
+		return;
+	}
+
 	begin_change ();
 
 	_text = text;
@@ -80,14 +84,33 @@ Text::set (string const & text)
 	end_change ();
 }
 
+double
+Text::width () const
+{
+	if (_need_redraw) {
+		_redraw  ();
+	}
+	return _width;
+}
+
+double
+Text::height () const
+{
+	if (_need_redraw) {
+		_redraw  ();
+	}
+	return _height;
+}
+
 void
 Text::_redraw () const
 {
 	assert (!_text.empty());
-	Glib::RefPtr<Pango::Context> context = Glib::wrap (gdk_pango_context_get());
+	assert (_canvas);
+	Glib::RefPtr<Pango::Context> context = _canvas->get_pango_context();
 	Glib::RefPtr<Pango::Layout> layout = Pango::Layout::create (context);
 
-#ifdef __APPLE__
+#if 0 // def __APPLE__ // Looks like this is no longer needed 2017-03-11, pango 1.36.8, pangomm 2.34.0
 	if (_width_correction < 0.0) {
 		// Pango returns incorrect text width on some OS X
 		// So we have to make a correction
@@ -146,14 +169,14 @@ Text::_redraw () const
 	/* and draw, in the appropriate color of course */
 
 	if (_outline) {
-		set_source_rgba (img_context, _outline_color);
+		Gtkmm2ext::set_source_rgba (img_context, _outline_color);
 		layout->update_from_cairo_context (img_context);
 		pango_cairo_layout_path (img_context->cobj(), layout->gobj());
 		img_context->stroke_preserve ();
-		set_source_rgba (img_context, _color);
+		Gtkmm2ext::set_source_rgba (img_context, _color);
 		img_context->fill ();
 	} else {
-		set_source_rgba (img_context, _color);
+		Gtkmm2ext::set_source_rgba (img_context, _color);
 		layout->show_in_cairo_context (img_context);
 	}
 
@@ -172,7 +195,7 @@ Text::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 	}
 
 	Rect self = item_to_window (Rect (0, 0, min (_clamped_width, (double)_image->get_width ()), _image->get_height ()));
-	boost::optional<Rect> i = self.intersection (area);
+	Rect i = self.intersection (area);
 
 	if (!i) {
 		return;
@@ -182,7 +205,7 @@ Text::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 		_redraw ();
 	}
 
-	Rect intersection (i.get());
+	Rect intersection (i);
 
 	context->rectangle (intersection.x0, intersection.y0, intersection.width(), intersection.height());
 #ifdef __APPLE__
@@ -215,7 +238,7 @@ void
 Text::compute_bounding_box () const
 {
 	if (!_canvas || _text.empty()) {
-		_bounding_box = boost::optional<Rect> ();
+		_bounding_box = Rect ();
 		_bounding_box_dirty = false;
 		return;
 	}
@@ -237,6 +260,10 @@ Text::compute_bounding_box () const
 void
 Text::set_alignment (Pango::Alignment alignment)
 {
+	if (alignment == _alignment) {
+		return;
+	}
+
 	begin_change ();
 
 	_alignment = alignment;
@@ -259,13 +286,17 @@ Text::set_font_description (Pango::FontDescription font_description)
 }
 
 void
-Text::set_color (Color color)
+Text::set_color (Gtkmm2ext::Color color)
 {
+	if (color == _color) {
+		return;
+	}
+
 	begin_change ();
 
 	_color = color;
 	if (_outline) {
-		set_outline_color (contrasting_text_color (_color));
+		set_outline_color (Gtkmm2ext::contrasting_text_color (_color));
 	}
 	_need_redraw = true;
 

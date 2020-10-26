@@ -1,22 +1,20 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #ifndef __ardour_video_monitor_h__
 #define __ardour_video_monitor_h__
 
@@ -67,8 +65,8 @@ class VideoMonitor : public sigc::trackable , public ARDOUR::SessionHandlePtr, p
 	void restore_settings_mask (int i)  { _restore_settings_mask = i;}
 	int restore_settings_mask () const { return _restore_settings_mask;}
 
-	void set_offset (ARDOUR::frameoffset_t);
-	void manual_seek (ARDOUR::framepos_t, bool, ARDOUR::frameoffset_t);
+	void set_offset (ARDOUR::sampleoffset_t);
+	void manual_seek (ARDOUR::samplepos_t, bool, ARDOUR::sampleoffset_t);
 	void srsupdate ();
 	void querystate ();
 	bool synced_by_manual_seeks() { return sync_by_manual_seek; }
@@ -98,8 +96,8 @@ class VideoMonitor : public sigc::trackable , public ARDOUR::SessionHandlePtr, p
 	XJSettings xjadeo_settings;
 
 	void xjadeo_sync_setup ();
-	ARDOUR::framepos_t manually_seeked_frame;
-	ARDOUR::frameoffset_t video_offset;
+	ARDOUR::samplepos_t manually_seeked_frame;
+	ARDOUR::sampleoffset_t video_offset;
 	bool sync_by_manual_seek;
 	sigc::connection clock_connection;
 	sigc::connection state_connection;

@@ -1,29 +1,32 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm.h>
 #include "gtkmm2ext/keyboard.h"
 #include "gtkmm2ext/persistent_tooltip.h"
+
+#include "pbd/controllable.h"
+
 #include "panner_interface.h"
 #include "panner_editor.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -36,13 +39,13 @@ PannerInterface::PannerInterface (boost::shared_ptr<Panner> p)
 	, _send_mode (false)
 	, _editor (0)
 {
-        set_flags (Gtk::CAN_FOCUS);
+	set_flags (Gtk::CAN_FOCUS);
 
-        add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK|
-                    Gdk::KEY_PRESS_MASK|Gdk::KEY_RELEASE_MASK|
-                    Gdk::BUTTON_PRESS_MASK|Gdk::BUTTON_RELEASE_MASK|
-                    Gdk::SCROLL_MASK|
-                    Gdk::POINTER_MOTION_MASK);
+	add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK|
+	            Gdk::KEY_PRESS_MASK|Gdk::KEY_RELEASE_MASK|
+	            Gdk::BUTTON_PRESS_MASK|Gdk::BUTTON_RELEASE_MASK|
+	            Gdk::SCROLL_MASK|
+	            Gdk::POINTER_MOTION_MASK);
 
 }
 
@@ -56,6 +59,10 @@ PannerInterface::on_enter_notify_event (GdkEventCrossing *)
 {
 	grab_focus ();
 	Keyboard::magic_widget_grab_focus ();
+
+	if (!proxy_controllable ().expired ()) {
+		PBD::Controllable::GUIFocusChanged (proxy_controllable ());
+	}
 	return false;
 }
 
@@ -63,6 +70,9 @@ bool
 PannerInterface::on_leave_notify_event (GdkEventCrossing *)
 {
 	Keyboard::magic_widget_drop_focus ();
+	if (!proxy_controllable ().expired ()) {
+		PBD::Controllable::GUIFocusChanged (boost::weak_ptr<PBD::Controllable> ());
+	}
 	return false;
 }
 

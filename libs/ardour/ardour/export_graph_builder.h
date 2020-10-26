@@ -1,22 +1,23 @@
 /*
-    Copyright (C) 2009 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2010-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2016-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_export_graph_builder_h__
 #define __ardour_export_graph_builder_h__
@@ -35,10 +36,12 @@ namespace AudioGrapher {
 	class LoudnessReader;
 	class Normalizer;
 	class Analyser;
+	class DemoNoiseAdder;
 	template <typename T> class Chunker;
 	template <typename T> class SampleFormatConverter;
 	template <typename T> class Interleaver;
 	template <typename T> class SndfileWriter;
+	template <typename T> class CmdPipeWriter;
 	template <typename T> class SilenceTrimmer;
 	template <typename T> class TmpFile;
 	template <typename T> class Threader;
@@ -67,15 +70,16 @@ class LIBARDOUR_API ExportGraphBuilder
 	ExportGraphBuilder (Session const & session);
 	~ExportGraphBuilder ();
 
-	int process (framecnt_t frames, bool last_cycle);
-	bool process_normalize (); // returns true when finished
-	bool will_normalize() { return !normalizers.empty(); }
-	unsigned get_normalize_cycle_count() const;
+	samplecnt_t process (samplecnt_t samples, bool last_cycle);
+	bool post_process (); // returns true when finished
+	bool need_postprocessing () const { return !intermediates.empty(); }
+	bool realtime() const { return _realtime; }
+	unsigned get_postprocessing_cycle_count() const;
 
 	void reset ();
 	void cleanup (bool remove_out_files = false);
 	void set_current_timespan (boost::shared_ptr<ExportTimespan> span);
-	void add_config (FileSpec const & config);
+	void add_config (FileSpec const & config, bool rt);
 	void get_analysis_results (AnalysisResults& results);
 
   private:
@@ -101,7 +105,11 @@ class LIBARDOUR_API ExportGraphBuilder
 		typedef boost::shared_ptr<AudioGrapher::SndfileWriter<int> >    IntWriterPtr;
 		typedef boost::shared_ptr<AudioGrapher::SndfileWriter<short> >  ShortWriterPtr;
 
+		typedef boost::shared_ptr<AudioGrapher::CmdPipeWriter<Sample> > FloatPipePtr;
+
 		template<typename T> void init_writer (boost::shared_ptr<AudioGrapher::SndfileWriter<T> > & writer);
+		template<typename T> void init_writer (boost::shared_ptr<AudioGrapher::CmdPipeWriter<T> > & writer);
+
 		void copy_files (std::string orig_path);
 
 		FileSpec               config;
@@ -114,13 +122,14 @@ class LIBARDOUR_API ExportGraphBuilder
 		FloatWriterPtr float_writer;
 		IntWriterPtr   int_writer;
 		ShortWriterPtr short_writer;
+		FloatPipePtr   pipe_writer;
 	};
 
 	// sample format converter
 	class SFC {
             public:
 		// This constructor so that this can be constructed like a Normalizer
-		SFC (ExportGraphBuilder &, FileSpec const & new_config, framecnt_t max_frames);
+		SFC (ExportGraphBuilder &, FileSpec const & new_config, samplecnt_t max_samples);
 		FloatSinkPtr sink ();
 		void add_child (FileSpec const & new_config);
 		void remove_children (bool remove_out_files);
@@ -129,6 +138,7 @@ class LIBARDOUR_API ExportGraphBuilder
 
 	                                        private:
 		typedef boost::shared_ptr<AudioGrapher::Chunker<float> > ChunkerPtr;
+		typedef boost::shared_ptr<AudioGrapher::DemoNoiseAdder> DemoNoisePtr;
 		typedef boost::shared_ptr<AudioGrapher::SampleFormatConverter<Sample> > FloatConverterPtr;
 		typedef boost::shared_ptr<AudioGrapher::SampleFormatConverter<int> >   IntConverterPtr;
 		typedef boost::shared_ptr<AudioGrapher::SampleFormatConverter<short> > ShortConverterPtr;
@@ -137,6 +147,7 @@ class LIBARDOUR_API ExportGraphBuilder
 		boost::ptr_list<Encoder> children;
 		int                data_width;
 
+		DemoNoisePtr    demo_noise_adder;
 		ChunkerPtr      chunker;
 		AnalysisPtr     analyser;
 		bool            _analyse;
@@ -146,15 +157,15 @@ class LIBARDOUR_API ExportGraphBuilder
 		ShortConverterPtr short_converter;
 	};
 
-	class Normalizer {
+	class Intermediate {
 	                                        public:
-		Normalizer (ExportGraphBuilder & parent, FileSpec const & new_config, framecnt_t max_frames);
+		Intermediate (ExportGraphBuilder & parent, FileSpec const & new_config, samplecnt_t max_samples);
 		FloatSinkPtr sink ();
 		void add_child (FileSpec const & new_config);
 		void remove_children (bool remove_out_files);
 		bool operator== (FileSpec const & other_config) const;
 
-		unsigned get_normalize_cycle_count() const;
+		unsigned get_postprocessing_cycle_count() const;
 
 		/// Returns true when finished
 		bool process ();
@@ -167,28 +178,31 @@ class LIBARDOUR_API ExportGraphBuilder
 		typedef boost::shared_ptr<AudioGrapher::Threader<Sample> > ThreaderPtr;
 		typedef boost::shared_ptr<AudioGrapher::AllocatingProcessContext<Sample> > BufferPtr;
 
-		void start_post_processing();
+		void prepare_post_processing ();
+		void start_post_processing ();
 
 		ExportGraphBuilder & parent;
 
 		FileSpec        config;
-		framecnt_t      max_frames_out;
+		samplecnt_t     max_samples_out;
 		bool            use_loudness;
+		bool            use_peak;
 		BufferPtr       buffer;
 		PeakReaderPtr   peak_reader;
 		TmpFilePtr      tmp_file;
 		NormalizerPtr   normalizer;
 		ThreaderPtr     threader;
+
 		LoudnessReaderPtr    loudness_reader;
 		boost::ptr_list<SFC> children;
 
-		PBD::ScopedConnection post_processing_connection;
+		PBD::ScopedConnectionList post_processing_connection;
 	};
 
 	// sample rate converter
 	class SRC {
             public:
-		SRC (ExportGraphBuilder & parent, FileSpec const & new_config, framecnt_t max_frames);
+		SRC (ExportGraphBuilder & parent, FileSpec const & new_config, samplecnt_t max_samples);
 		FloatSinkPtr sink ();
 		void add_child (FileSpec const & new_config);
 		void remove_children (bool remove_out_files);
@@ -204,15 +218,15 @@ class LIBARDOUR_API ExportGraphBuilder
 		ExportGraphBuilder &  parent;
 		FileSpec              config;
 		boost::ptr_list<SFC>  children;
-		boost::ptr_list<Normalizer> normalized_children;
+		boost::ptr_list<Intermediate> intermediate_children;
 		SRConverterPtr        converter;
-		framecnt_t            max_frames_out;
+		samplecnt_t           max_samples_out;
 	};
 
 	// Silence trimmer + adder
 	class SilenceHandler {
 	    public:
-		SilenceHandler (ExportGraphBuilder & parent, FileSpec const & new_config, framecnt_t max_frames);
+		SilenceHandler (ExportGraphBuilder & parent, FileSpec const & new_config, samplecnt_t max_samples);
 		FloatSinkPtr sink ();
 		void add_child (FileSpec const & new_config);
 		void remove_children (bool remove_out_files);
@@ -225,7 +239,7 @@ class LIBARDOUR_API ExportGraphBuilder
 		FileSpec             config;
 		boost::ptr_list<SRC> children;
 		SilenceTrimmerPtr    silence_trimmer;
-		framecnt_t           max_frames_in;
+		samplecnt_t          max_samples_in;
 	};
 
 	// channel configuration
@@ -245,7 +259,7 @@ class LIBARDOUR_API ExportGraphBuilder
 		boost::ptr_list<SilenceHandler> children;
 		InterleaverPtr            interleaver;
 		ChunkerPtr                chunker;
-		framecnt_t                max_frames_out;
+		samplecnt_t               max_samples_out;
 	};
 
 	Session const & session;
@@ -258,13 +272,17 @@ class LIBARDOUR_API ExportGraphBuilder
 	// The sources of all data, each channel is read only once
 	ChannelMap channels;
 
-	framecnt_t process_buffer_frames;
+	samplecnt_t process_buffer_samples;
 
-	std::list<Normalizer *> normalizers;
+	std::list<Intermediate *> intermediates;
 
 	AnalysisMap analysis_map;
 
-	Glib::ThreadPool thread_pool;
+	bool        _realtime;
+	samplecnt_t _master_align;
+
+	Glib::ThreadPool     thread_pool;
+	Glib::Threads::Mutex engine_request_lock;
 };
 
 } // namespace ARDOUR

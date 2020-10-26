@@ -1,28 +1,35 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
+ * Copyright (C) 2008-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
+#include <gtkmm/filechooserdialog.h>
 #include <gtkmm/messagedialog.h>
+#include <gtkmm/stock.h>
+
+#include "pbd/openuri.h"
+
+#include "gtkmm2ext/utils.h"
 
 #include "export_filename_selector.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -30,24 +37,29 @@ ExportFilenameSelector::ExportFilenameSelector () :
 	include_label ("", Gtk::ALIGN_LEFT),
 
 	label_label (_("Label:"), Gtk::ALIGN_LEFT),
-	session_checkbox (_("Session Name")),
 	timespan_checkbox (_("Timespan Name")),
 	revision_checkbox (_("Revision:")),
 
 	path_label (_("Folder:"), Gtk::ALIGN_LEFT),
 	browse_button (_("Browse")),
+	open_button (_("Open Folder")),
 
 	example_filename_label ("", Gtk::ALIGN_LEFT),
 	_require_timespan (false)
 {
 	include_label.set_markup (_("Build filename(s) from these components:"));
 
+	session_snap_name.append_text (_("No Name"));
+	session_snap_name.append_text (_("Session Name"));
+	session_snap_name.append_text (_("Snapshot Name"));
+	session_snap_name.set_active (0);
+
 	pack_start (path_hbox, false, false, 12);
 	pack_start (include_label, false, false, 6);
 	pack_start (include_hbox, false, false, 0);
 	pack_start (example_filename_label, false, false, 12);
 
-	include_hbox.pack_start (session_checkbox, false, false, 3);
+	include_hbox.pack_start (session_snap_name, false, false, 3);
 	include_hbox.pack_start (label_label, false, false, 3);
 	include_hbox.pack_start (label_entry, false, false, 3);
 	include_hbox.pack_start (revision_checkbox, false, false, 3);
@@ -61,6 +73,7 @@ ExportFilenameSelector::ExportFilenameSelector () :
 	path_hbox.pack_start (path_label, false, false, 3);
 	path_hbox.pack_start (path_entry, true, true, 3);
 	path_hbox.pack_start (browse_button, false, false, 3);
+	path_hbox.pack_start (open_button, false, false, 3); // maybe Mixbus only ?
 
 	path_entry.set_activates_default ();
 
@@ -97,13 +110,14 @@ ExportFilenameSelector::ExportFilenameSelector () :
 	path_entry.signal_changed().connect (sigc::mem_fun (*this, &ExportFilenameSelector::update_folder));
 	path_entry.signal_activate().connect (sigc::mem_fun (*this, &ExportFilenameSelector::check_folder), false);
 
-	session_checkbox.signal_toggled().connect (sigc::mem_fun (*this, &ExportFilenameSelector::change_session_selection));
+	session_snap_name.signal_changed().connect (sigc::mem_fun (*this, &ExportFilenameSelector::change_session_selection));
 	timespan_checkbox.signal_toggled().connect (sigc::mem_fun (*this, &ExportFilenameSelector::change_timespan_selection));
 
 	revision_checkbox.signal_toggled().connect (sigc::mem_fun (*this, &ExportFilenameSelector::change_revision_selection));
 	revision_spinbutton.signal_value_changed().connect (sigc::mem_fun (*this, &ExportFilenameSelector::change_revision_value));
 
 	browse_button.signal_clicked().connect (sigc::mem_fun (*this, &ExportFilenameSelector::open_browse_dialog));
+	open_button.signal_clicked().connect (sigc::mem_fun (*this, &ExportFilenameSelector::open_folder));
 }
 
 ExportFilenameSelector::~ExportFilenameSelector ()
@@ -119,7 +133,15 @@ ExportFilenameSelector::load_state ()
 	}
 
 	label_entry.set_text (filename->include_label ? filename->get_label() : "");
-	session_checkbox.set_active (filename->include_session);
+	if (filename->include_session) {
+		if (filename->use_session_snapshot_name) {
+			session_snap_name.set_active (2);
+		} else {
+			session_snap_name.set_active (1);
+		}
+	} else {
+		session_snap_name.set_active (0);
+	}
 	timespan_checkbox.set_active (filename->include_timespan);
 	revision_checkbox.set_active (filename->include_revision);
 	revision_spinbutton.set_value (filename->get_revision());
@@ -337,7 +359,20 @@ ExportFilenameSelector::change_session_selection ()
 		return;
 	}
 
-	filename->include_session = session_checkbox.get_active();
+	switch (session_snap_name.get_active_row_number ()) {
+		case 1:
+			filename->include_session = true;
+			filename->use_session_snapshot_name = false;
+			break;
+		case 2:
+			filename->include_session = true;
+			filename->use_session_snapshot_name = true;
+			break;
+		default:
+			filename->include_session = false;
+			filename->use_session_snapshot_name = false;
+			break;
+	}
 	CriticalSelectionChanged();
 }
 
@@ -367,9 +402,22 @@ ExportFilenameSelector::change_revision_value ()
 }
 
 void
+ExportFilenameSelector::open_folder ()
+{
+	const std::string& dir (path_entry.get_text());
+	if (!Glib::file_test (dir, Glib::FILE_TEST_IS_DIR|Glib::FILE_TEST_EXISTS)) {
+		Gtk::MessageDialog msg (string_compose (_("%1: this is not a valid directory/folder."), dir));
+		msg.run ();
+		return;
+	}
+	PBD::open_folder (dir);
+}
+
+void
 ExportFilenameSelector::open_browse_dialog ()
 {
 	Gtk::FileChooserDialog dialog(_("Choose export folder"), Gtk::FILE_CHOOSER_ACTION_SELECT_FOLDER);
+	Gtkmm2ext::add_volume_shortcuts (dialog);
 	//dialog.set_transient_for(*this);
 	dialog.set_filename (path_entry.get_text());
 

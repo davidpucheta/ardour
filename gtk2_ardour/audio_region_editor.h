@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2013 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_audio_region_edit_h__
 #define __gtk_ardour_audio_region_edit_h__
@@ -36,11 +39,7 @@
 
 
 #include "pbd/signals.h"
-#ifdef PLATFORM_WINDOWS
-#include "pbd/semutils.h"
-#else
 #include "pbd/crossthread.h"
-#endif
 
 #include "audio_clock.h"
 #include "ardour_dialog.h"
@@ -55,13 +54,13 @@ class AudioRegionView;
 
 class AudioRegionEditor : public RegionEditor
 {
-  public:
+public:
 	AudioRegionEditor (ARDOUR::Session*, boost::shared_ptr<ARDOUR::AudioRegion>);
 	~AudioRegionEditor ();
 
 	void peak_amplitude_thread ();
 
-  private:
+private:
 
 	void region_changed (PBD::PropertyChange const &);
 
@@ -78,16 +77,11 @@ class AudioRegionEditor : public RegionEditor
 	Gtk::Entry _peak_amplitude;
 
 	void signal_peak_thread ();
-	void wait_for_signal ();
 	pthread_t _peak_amplitude_thread_handle;
 	void peak_amplitude_found (double);
 	PBD::Signal1<void, double> PeakAmplitudeFound;
 	PBD::ScopedConnection _peak_amplitude_connection;
-#ifdef PLATFORM_WINDOWS
-	PBD::Semaphore m_peak_sem;
-#else
 	CrossThreadChannel _peak_channel;
-#endif
 };
 
 #endif /* __gtk_ardour_audio_region_edit_h__ */

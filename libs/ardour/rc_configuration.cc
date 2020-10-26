@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 1999-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1999-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <unistd.h>
 #include <cstdio> /* for snprintf, grrr */
@@ -29,14 +32,18 @@
 #include "pbd/replace_all.h"
 
 #include "ardour/audioengine.h"
+#include "ardour/disk_reader.h"
+#include "ardour/disk_writer.h"
 #include "ardour/control_protocol_manager.h"
-#include "ardour/diskstream.h"
+#include "ardour/filename_extensions.h"
 #include "ardour/filesystem_paths.h"
 #include "ardour/port.h"
 #include "ardour/rc_configuration.h"
 #include "ardour/session_metadata.h"
+#include "ardour/transport_master_manager.h"
+#include "ardour/types_convert.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace std;
@@ -64,12 +71,14 @@ RCConfiguration::RCConfiguration ()
 #undef  CONFIG_VARIABLE
 #undef  CONFIG_VARIABLE_SPECIAL
 	_control_protocol_state (0)
+      , _transport_master_state (0)
 {
 }
 
 RCConfiguration::~RCConfiguration ()
 {
 	delete _control_protocol_state;
+	delete _transport_master_state;
 }
 
 int
@@ -89,7 +98,7 @@ RCConfiguration::load_state ()
 		}
 
 		if (statbuf.st_size != 0) {
-			info << string_compose (_("Loading system configuration file %1"), rcfile) << endl;
+			info << string_compose (_("Loading system configuration file %1"), rcfile) << endmsg;
 
 			XMLTree tree;
 			if (!tree.read (rcfile.c_str())) {
@@ -117,7 +126,7 @@ RCConfiguration::load_state ()
 		}
 
 		if (statbuf.st_size != 0) {
-			info << string_compose (_("Loading user configuration file %1"), rcfile) << endl;
+			info << string_compose (_("Loading user configuration file %1"), rcfile) << endmsg;
 
 			XMLTree tree;
 			if (!tree.read (rcfile)) {
@@ -141,15 +150,24 @@ int
 RCConfiguration::save_state()
 {
 	const std::string rcfile = Glib::build_filename (user_config_directory(), user_config_file_name);
+	const std::string tmpfile = rcfile + temp_suffix;
 
-	// this test seems bogus?
-	if (!rcfile.empty()) {
-		XMLTree tree;
-		tree.set_root (&get_state());
-		if (!tree.write (rcfile.c_str())){
-			error << string_compose (_("Config file %1 not saved"), rcfile) << endmsg;
-			return -1;
+	XMLTree tree;
+	tree.set_root (&get_state());
+	if (!tree.write (tmpfile.c_str())){
+		error << string_compose (_("Config file %1 not saved"), rcfile) << endmsg;
+		if (g_remove (tmpfile.c_str()) != 0) {
+			error << string_compose(_("Could not remove temporary config file at path \"%1\" (%2)"), tmpfile, g_strerror (errno)) << endmsg;
 		}
+		return -1;
+	}
+
+	if (::g_rename (tmpfile.c_str(), rcfile.c_str()) != 0) {
+		error << string_compose (_("Could not rename temporary config file %1 to %2 (%3)"), tmpfile, rcfile, g_strerror(errno)) << endmsg;
+		if (g_remove (tmpfile.c_str()) != 0) {
+			error << string_compose(_("Could not remove temporary config file at path \"%1\" (%2)"), tmpfile, g_strerror (errno)) << endmsg;
+		}
+		return -1;
 	}
 
 	return 0;
@@ -172,7 +190,6 @@ XMLNode&
 RCConfiguration::get_state ()
 {
 	XMLNode* root;
-	LocaleGuard lg (X_("C"));
 
 	root = new XMLNode("Ardour");
 
@@ -186,6 +203,10 @@ RCConfiguration::get_state ()
 
 	root->add_child_nocopy (ControlProtocolManager::instance().get_state());
 
+	if (TransportMasterManager::exists()) {
+		root->add_child_nocopy (TransportMasterManager::instance().get_state());
+	}
+
 	return *root;
 }
 
@@ -193,7 +214,6 @@ XMLNode&
 RCConfiguration::get_variables ()
 {
 	XMLNode* node;
-	LocaleGuard lg (X_("C"));
 
 	node = new XMLNode ("Config");
 
@@ -233,11 +253,13 @@ RCConfiguration::set_state (const XMLNode& root, int version)
 			SessionMetadata::Metadata()->set_state (*node, version);
 		} else if (node->name() == ControlProtocolManager::state_node_name) {
 			_control_protocol_state = new XMLNode (*node);
+		} else if (node->name() == TransportMasterManager::state_node_name) {
+			_transport_master_state = new XMLNode (*node);
 		}
 	}
 
-	Diskstream::set_disk_read_chunk_frames (minimum_disk_read_bytes.get() / sizeof (Sample));
-	Diskstream::set_disk_write_chunk_frames (minimum_disk_write_bytes.get() / sizeof (Sample));
+	DiskReader::set_chunk_samples (minimum_disk_read_bytes.get() / sizeof (Sample));
+	DiskWriter::set_chunk_samples (minimum_disk_write_bytes.get() / sizeof (Sample));
 
 	return 0;
 }
@@ -248,13 +270,14 @@ RCConfiguration::set_variables (const XMLNode& node)
 #undef  CONFIG_VARIABLE
 #undef  CONFIG_VARIABLE_SPECIAL
 #define CONFIG_VARIABLE(type,var,name,value) \
-	if (var.set_from_node (node)) { \
-		ParameterChanged (name);		  \
-	}
+  if (var.set_from_node (node)) {            \
+    ParameterChanged (name);                 \
+  }
+
 #define CONFIG_VARIABLE_SPECIAL(type,var,name,value,mutator) \
-	if (var.set_from_node (node)) {    \
-		ParameterChanged (name);		     \
-	}
+  if (var.set_from_node (node)) {                            \
+    ParameterChanged (name);                                 \
+  }
 
 #include "ardour/rc_configuration_vars.h"
 #undef  CONFIG_VARIABLE

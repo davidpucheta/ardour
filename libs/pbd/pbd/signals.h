@@ -1,24 +1,28 @@
 /*
-    Copyright (C) 2009-2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __pbd_signals_h__
 #define __pbd_signals_h__
+
+#include <csignal>
 
 #include <list>
 #include <map>
@@ -67,7 +71,7 @@ public:
 #endif
 
 protected:
-        Glib::Threads::Mutex _mutex;
+	mutable Glib::Threads::Mutex _mutex;
 #ifdef DEBUG_PBD_SIGNAL_CONNECTIONS
 	bool _debug_connection;
 #endif
@@ -76,7 +80,12 @@ protected:
 class LIBPBD_API Connection : public boost::enable_shared_from_this<Connection>
 {
 public:
-	Connection (SignalBase* b) : _signal (b) {}
+	Connection (SignalBase* b, PBD::EventLoop::InvalidationRecord* ir) : _signal (b), _invalidation_record (ir)
+	{
+		if (_invalidation_record) {
+			_invalidation_record->ref ();
+		}
+	}
 
 	void disconnect ()
 	{
@@ -87,15 +96,26 @@ public:
 		}
 	}
 
+	void disconnected ()
+	{
+		if (_invalidation_record) {
+			_invalidation_record->unref ();
+		}
+	}
+
 	void signal_going_away ()
 	{
 		Glib::Threads::Mutex::Lock lm (_mutex);
+		if (_invalidation_record) {
+			_invalidation_record->unref ();
+		}
 		_signal = 0;
 	}
 
 private:
         Glib::Threads::Mutex _mutex;
 	SignalBase* _signal;
+	PBD::EventLoop::InvalidationRecord* _invalidation_record;
 };
 
 template<typename R>
@@ -173,10 +193,10 @@ class LIBPBD_API ScopedConnectionList  : public boost::noncopyable
 	       one from another.
 	 */
 
-	Glib::Threads::Mutex _lock;
+	Glib::Threads::Mutex _scoped_connection_lock;
 
 	typedef std::list<ScopedConnection*> ConnectionList;
-	ConnectionList _list;
+	ConnectionList _scoped_connection_list;
 };
 
 #include "pbd/signals_generated.h"

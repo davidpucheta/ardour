@@ -1,20 +1,24 @@
 /*
-    Copyright (C) 2006-2008 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2008-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/compose.h"
 #include "pbd/enumwriter.h"
@@ -37,13 +41,14 @@ namespace ARDOUR {
  */
 template<typename T>
 size_t
-MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, framecnt_t offset, bool stop_on_overflow_in_dst)
+MidiRingBuffer<T>::read (MidiBuffer& dst, samplepos_t start, samplepos_t end, samplecnt_t offset, bool stop_on_overflow_in_dst)
 {
 	if (this->read_space() == 0) {
 		return 0;
 	}
 
 	T                 ev_time;
+	Evoral::EventType ev_type;
 	uint32_t          ev_size;
 	size_t            count = 0;
 	const size_t      prefix_size = sizeof(T) + sizeof(Evoral::EventType) + sizeof(uint32_t);
@@ -58,6 +63,7 @@ MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, frame
 		this->peek (peekbuf, prefix_size);
 
 		ev_time = *(reinterpret_cast<T*>((uintptr_t)peekbuf));
+		ev_type = *(reinterpret_cast<Evoral::EventType*>((uintptr_t)(peekbuf + sizeof(T))));
 		ev_size = *(reinterpret_cast<uint32_t*>((uintptr_t)(peekbuf + sizeof(T) + sizeof (Evoral::EventType))));
 
 		if (this->read_space() < ev_size) {
@@ -65,13 +71,13 @@ MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, frame
 		}
 
 		if (ev_time >= end) {
-			DEBUG_TRACE (DEBUG::MidiDiskstreamIO, string_compose ("MRB event @ %1 past end @ %2\n", ev_time, end));
+			DEBUG_TRACE (DEBUG::MidiRingBuffer, string_compose ("MRB event @ %1 past end @ %2\n", ev_time, end));
 			break;
 		} else if (ev_time < start) {
-			DEBUG_TRACE (DEBUG::MidiDiskstreamIO, string_compose ("MRB event @ %1 before start @ %2\n", ev_time, start));
+			DEBUG_TRACE (DEBUG::MidiRingBuffer, string_compose ("MRB event @ %1 before start @ %2\n", ev_time, start));
 			break;
 		} else {
-			DEBUG_TRACE (DEBUG::MidiDiskstreamIO, string_compose ("MRB event @ %1 in range %2 .. %3\n", ev_time, start, end));
+			DEBUG_TRACE (DEBUG::MidiRingBuffer, string_compose ("MRB event @ %1 in range %2 .. %3\n", ev_time, start, end));
 		}
 
 		ev_time -= start;
@@ -88,10 +94,10 @@ MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, frame
 
 		/* lets see if we are going to be able to write this event into dst.
 		 */
-		uint8_t* write_loc = dst.reserve (ev_time, ev_size);
+		uint8_t* write_loc = dst.reserve (ev_time, ev_type, ev_size);
 		if (write_loc == 0) {
 			if (stop_on_overflow_in_dst) {
-				DEBUG_TRACE (DEBUG::MidiDiskstreamIO, string_compose ("MidiRingBuffer: overflow in destination MIDI buffer, stopped after %1 events\n", count));
+				DEBUG_TRACE (DEBUG::MidiRingBuffer, string_compose ("MidiRingBuffer: overflow in destination MIDI buffer, stopped after %1 events\n", count));
 				break;
 			}
 			error << "MRB: Unable to reserve space in buffer, event skipped" << endmsg;
@@ -100,12 +106,12 @@ MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, frame
 		}
 
 		// write MIDI buffer contents
-		bool success = read_contents (ev_size, write_loc);
 
+		bool success = read_contents (ev_size, write_loc);
 #ifndef NDEBUG
-		if (DEBUG_ENABLED (DEBUG::MidiDiskstreamIO)) {
+		if (DEBUG_ENABLED (DEBUG::MidiRingBuffer)) {
 			DEBUG_STR_DECL(a);
-			DEBUG_STR_APPEND(a, string_compose ("wrote MidiEvent to Buffer (time=%1, start=%2 offset=%3)", ev_time, start, offset));
+			DEBUG_STR_APPEND(a, string_compose ("wrote MidiEvent to Buffer (time=%1, start=%2 offset=%3) ", ev_time, start, offset));
 			for (size_t i=0; i < ev_size; ++i) {
 				DEBUG_STR_APPEND(a,hex);
 				DEBUG_STR_APPEND(a,"0x");
@@ -113,10 +119,9 @@ MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, frame
 				DEBUG_STR_APPEND(a,' ');
 			}
 			DEBUG_STR_APPEND(a,'\n');
-			DEBUG_TRACE (DEBUG::MidiDiskstreamIO, DEBUG_STR(a).str());
+			DEBUG_TRACE (DEBUG::MidiRingBuffer, DEBUG_STR(a).str());
 		}
 #endif
-
 		if (success) {
 			_tracker.track(write_loc);
 			++count;
@@ -130,7 +135,7 @@ MidiRingBuffer<T>::read(MidiBuffer& dst, framepos_t start, framepos_t end, frame
 
 template<typename T>
 size_t
-MidiRingBuffer<T>::skip_to(framepos_t start)
+MidiRingBuffer<T>::skip_to(samplepos_t start)
 {
 	if (this->read_space() == 0) {
 		return 0;
@@ -144,7 +149,8 @@ MidiRingBuffer<T>::skip_to(framepos_t start)
 	while (this->read_space() >= prefix_size) {
 
 		uint8_t peekbuf[prefix_size];
-		this->peek (peekbuf, prefix_size);
+		bool r = this->peek (peekbuf, prefix_size);
+		assert (r);
 
 		ev_time = *(reinterpret_cast<T*>((uintptr_t)peekbuf));
 		ev_size = *(reinterpret_cast<uint32_t*>((uintptr_t)(peekbuf + sizeof(T) + sizeof (Evoral::EventType))));
@@ -160,7 +166,7 @@ MidiRingBuffer<T>::skip_to(framepos_t start)
 		this->increment_read_ptr (prefix_size);
 
 		uint8_t status;
-		bool r = this->peek (&status, sizeof(uint8_t));
+		r = this->peek (&status, sizeof(uint8_t));
 		assert (r); // If this failed, buffer is corrupt, all hope is lost
 
 		++count;
@@ -195,7 +201,7 @@ MidiRingBuffer<T>::skip_to(framepos_t start)
 
 template<typename T>
 void
-MidiRingBuffer<T>::flush (framepos_t /*start*/, framepos_t end)
+MidiRingBuffer<T>::flush (samplepos_t /*start*/, samplepos_t end)
 {
 	const size_t prefix_size = sizeof(T) + sizeof(Evoral::EventType) + sizeof(uint32_t);
 
@@ -230,7 +236,7 @@ MidiRingBuffer<T>::dump(ostream& str)
 	size_t rspace;
 
 	if ((rspace = this->read_space()) == 0) {
-		str << "MRB::dump: empty\n";
+		str << this << " MRB::dump: empty\n";
 		return;
 	}
 
@@ -310,18 +316,18 @@ MidiRingBuffer<T>::reset_tracker ()
 
 template<typename T>
 void
-MidiRingBuffer<T>::resolve_tracker (MidiBuffer& dst, framepos_t t)
+MidiRingBuffer<T>::resolve_tracker (MidiBuffer& dst, samplepos_t t)
 {
 	_tracker.resolve_notes (dst, t);
 }
 
 template<typename T>
 void
-MidiRingBuffer<T>::resolve_tracker (Evoral::EventSink<framepos_t>& dst, framepos_t t)
+MidiRingBuffer<T>::resolve_tracker (Evoral::EventSink<samplepos_t>& dst, samplepos_t t)
 {
 	_tracker.resolve_notes(dst, t);
 }
 
-template class MidiRingBuffer<framepos_t>;
+template class MidiRingBuffer<samplepos_t>;
 
 }  // namespace ARDOUR

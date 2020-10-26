@@ -1,22 +1,22 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2009 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/export_channel_configuration.h"
 
@@ -45,15 +45,15 @@ ExportChannelConfiguration::get_state ()
 	XMLNode * root = new XMLNode ("ExportChannelConfiguration");
 	XMLNode * channel;
 
-	root->add_property ("split", get_split() ? "true" : "false");
-	root->add_property ("channels", to_string (get_n_chans(), std::dec));
+	root->set_property ("split", get_split());
+	root->set_property ("channels", get_n_chans());
 
 	switch (region_type) {
 	case RegionExportChannelFactory::None:
 		// Do nothing
 		break;
 	default:
-		root->add_property ("region-processing", enum_2_string (region_type));
+		root->set_property ("region-processing", enum_2_string (region_type));
 		break;
 	}
 
@@ -62,7 +62,7 @@ ExportChannelConfiguration::get_state ()
 		channel = root->add_child ("Channel");
 		if (!channel) { continue; }
 
-		channel->add_property ("number", to_string (i, std::dec));
+		channel->set_property ("number", i);
 		(*c_it)->get_state (channel);
 
 		++i;
@@ -74,15 +74,15 @@ ExportChannelConfiguration::get_state ()
 int
 ExportChannelConfiguration::set_state (const XMLNode & root)
 {
-	XMLProperty const * prop;
-
-	if ((prop = root.property ("split"))) {
-		set_split (!prop->value().compare ("true"));
+	bool yn;
+	if (root.get_property ("split", yn)) {
+		set_split (yn);
 	}
 
-	if ((prop = root.property ("region-processing"))) {
+	std::string str;
+	if (root.get_property ("region-processing", str)) {
 		set_region_processing_type ((RegionExportChannelFactory::Type)
-			string_2_enum (prop->value(), RegionExportChannelFactory::Type));
+			string_2_enum (str, RegionExportChannelFactory::Type));
 	}
 
 	XMLNodeList channels = root.children ("Channel");

@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2011-2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/table.h>
 #include <gtkmm/stock.h>
@@ -31,7 +33,7 @@
 #include "region_layering_order_editor.h"
 #include "region_view.h"
 #include "utils.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -42,9 +44,9 @@ RegionLayeringOrderEditor::RegionLayeringOrderEditor (PublicEditor& pe)
 	: ArdourWindow (_("RegionLayeringOrderEditor"))
 	, position (0)
 	, in_row_change (false)
-        , regions_at_position (0)
+	, regions_at_position (0)
 	, layering_order_model (Gtk::ListStore::create (layering_order_columns))
-        , clock ("layer dialog", true, "", false, false, false)
+	, clock ("layer dialog", true, "", false, false, false)
 	, editor (pe)
 	, _time_axis_view (0)
 {
@@ -62,29 +64,29 @@ RegionLayeringOrderEditor::RegionLayeringOrderEditor (PublicEditor& pe)
 
 	clock.set_mode (AudioClock::BBT);
 
-        Gtk::Table* scroller_table = manage (new Gtk::Table);
-        scroller_table->set_size_request (300, 250);
-        scroller_table->attach (scroller, 0, 1, 0, 1);
-        scroller_table->set_col_spacings (5);
-        scroller_table->set_row_spacings (5);
+	Gtk::Table* scroller_table = manage (new Gtk::Table);
+	scroller_table->set_size_request (300, 250);
+	scroller_table->attach (scroller, 0, 1, 0, 1);
+	scroller_table->set_col_spacings (5);
+	scroller_table->set_row_spacings (5);
 
-        track_label.set_name ("RegionLayeringOrderEditorLabel");
-        track_label.set_text (_("Track:"));
+	track_label.set_name ("RegionLayeringOrderEditorLabel");
+	track_label.set_text (_("Track:"));
 	track_label.set_alignment (0, 0.5);
-        clock_label.set_name ("RegionLayeringOrderEditorLabel");
-        clock_label.set_text (_("Position:"));
+	clock_label.set_name ("RegionLayeringOrderEditorLabel");
+	clock_label.set_text (_("Position:"));
 	clock_label.set_alignment (0, 0.5);
-        track_name_label.set_name ("RegionLayeringOrderEditorNameLabel");
+	track_name_label.set_name ("RegionLayeringOrderEditorNameLabel");
 	track_name_label.set_alignment (0, 0.5);
-        clock.set_mode (AudioClock::BBT);
+	clock.set_mode (AudioClock::BBT);
 
-        Gtk::Table* info_table = manage (new Gtk::Table (2, 2));
-        info_table->set_col_spacings (5);
-        info_table->set_row_spacings (5);
-        info_table->attach (track_label, 0, 1, 0, 1, FILL, FILL);
-        info_table->attach (track_name_label, 1, 2, 0, 1, FILL, FILL);
-        info_table->attach (clock_label, 0, 1, 1, 2, FILL, FILL);
-        info_table->attach (clock, 1, 2, 1, 2, Gtk::AttachOptions(0), FILL);
+	Gtk::Table* info_table = manage (new Gtk::Table (2, 2));
+	info_table->set_col_spacings (5);
+	info_table->set_row_spacings (5);
+	info_table->attach (track_label, 0, 1, 0, 1, FILL, FILL);
+	info_table->attach (track_name_label, 1, 2, 0, 1, FILL, FILL);
+	info_table->attach (clock_label, 0, 1, 1, 2, FILL, FILL);
+	info_table->attach (clock, 1, 2, 1, 2, Gtk::AttachOptions(0), FILL);
 
 	Gtk::VBox* vbox = Gtk::manage (new Gtk::VBox ());
 	vbox->set_spacing (12);
@@ -92,8 +94,8 @@ RegionLayeringOrderEditor::RegionLayeringOrderEditor (PublicEditor& pe)
 	vbox->pack_start (*scroller_table, true, true);
 	add (*vbox);
 
-        info_table->set_name ("RegionLayeringOrderTable");
-        scroller_table->set_name ("RegionLayeringOrderTable");
+	info_table->set_name ("RegionLayeringOrderTable");
+	scroller_table->set_name ("RegionLayeringOrderTable");
 
 	layering_order_display.set_name ("RegionLayeringOrderDisplay");
 	layering_order_display.get_selection()->set_mode (SELECTION_SINGLE);
@@ -128,7 +130,7 @@ RegionLayeringOrderEditor::row_selected ()
 	RegionView* rv = row[layering_order_columns.region_view];
 
 	vector<RegionView*> eq;
-	editor.get_equivalent_regions (rv, eq, Properties::select.property_id);
+	editor.get_equivalent_regions (rv, eq, Properties::group_select.property_id);
 
 	/* XXX this should be reversible, really */
 
@@ -177,18 +179,18 @@ RegionLayeringOrderEditor::refill ()
 		newrow[layering_order_columns.name] = (*i)->region()->name();
 		newrow[layering_order_columns.region_view] = *i;
 
-               if (i == region_list.begin()) {
-                       layering_order_display.get_selection()->select(newrow);
-               }
+	       if (i == region_list.begin()) {
+		       layering_order_display.get_selection()->select(newrow);
+	       }
 	}
 
 	in_row_change = false;
 }
 
 void
-RegionLayeringOrderEditor::set_context (const string& a_name, Session* s, TimeAxisView* tav, boost::shared_ptr<Playlist> pl, framepos_t pos)
+RegionLayeringOrderEditor::set_context (const string& a_name, Session* s, TimeAxisView* tav, boost::shared_ptr<Playlist> pl, samplepos_t pos)
 {
-        track_name_label.set_text (a_name);
+	track_name_label.set_text (a_name);
 
 	clock.set_session (s);
 	clock.set (pos, true);

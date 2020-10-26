@@ -1,31 +1,36 @@
 /*
-    Copyright (C) 2006 Paul Davis
+ * Copyright (C) 2006-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it
-    and/or modify it under the terms of the GNU Lesser
-    General Public License as published by the Free Software
-    Foundation; either version 2 of the License, or (at your
-    option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
+#include "pbd/convert.h"
 #include "pbd/error.h"
 
+#include "ardour/control_protocol_manager.h"
 #include "ardour/gain_control.h"
 #include "ardour/session.h"
+#include "ardour/record_enable_control.h"
 #include "ardour/route.h"
 #include "ardour/audio_track.h"
 #include "ardour/meter.h"
 #include "ardour/amp.h"
+#include "ardour/selection.h"
 #include "control_protocol/control_protocol.h"
 
 using namespace ARDOUR;
@@ -45,14 +50,12 @@ PBD::Signal0<void> ControlProtocol::VerticalZoomInAll;
 PBD::Signal0<void> ControlProtocol::VerticalZoomOutAll;
 PBD::Signal0<void> ControlProtocol::VerticalZoomInSelected;
 PBD::Signal0<void> ControlProtocol::VerticalZoomOutSelected;
-PBD::Signal1<void,RouteNotificationListPtr> ControlProtocol::TrackSelectionChanged;
-PBD::Signal1<void,uint32_t> ControlProtocol::AddRouteToSelection;
-PBD::Signal1<void,uint32_t> ControlProtocol::SetRouteSelection;
-PBD::Signal1<void,uint32_t> ControlProtocol::ToggleRouteSelection;
-PBD::Signal1<void,uint32_t> ControlProtocol::RemoveRouteFromSelection;
-PBD::Signal0<void>          ControlProtocol::ClearRouteSelection;
 PBD::Signal0<void>          ControlProtocol::StepTracksDown;
 PBD::Signal0<void>          ControlProtocol::StepTracksUp;
+
+StripableNotificationList ControlProtocol::_last_selected;
+PBD::ScopedConnection ControlProtocol::selection_connection;
+bool ControlProtocol::selection_connected = false;
 
 const std::string ControlProtocol::state_node_name ("Protocol");
 
@@ -61,6 +64,11 @@ ControlProtocol::ControlProtocol (Session& s, string str)
 	, _name (str)
 	, _active (false)
 {
+	if (!selection_connected) {
+		/* this is all static, connect it only once (and early), for all ControlProtocols */
+		ControlProtocolManager::StripableSelectionChanged.connect_same_thread (selection_connection, boost::bind (&ControlProtocol::notify_stripable_selection_changed, _1));
+		selection_connected = true;
+	}
 }
 
 ControlProtocol::~ControlProtocol ()
@@ -77,81 +85,17 @@ ControlProtocol::set_active (bool yn)
 void
 ControlProtocol::next_track (uint32_t initial_id)
 {
-	uint32_t limit = session->nroutes();
-	boost::shared_ptr<Route> cr = route_table[0];
-	uint32_t id;
-
-	if (cr) {
-		id = cr->remote_control_id ();
-	} else {
-		id = 0;
-	}
-
-	if (id == limit) {
-		id = 0;
-	} else {
-		id++;
-	}
-
-	while (id <= limit) {
-		if ((cr = session->route_by_remote_id (id)) != 0) {
-			break;
-		}
-		id++;
-	}
-
-	if (id >= limit) {
-		id = 0;
-		while (id != initial_id) {
-			if ((cr = session->route_by_remote_id (id)) != 0) {
-				break;
-			}
-			id++;
-		}
-	}
-
-	route_table[0] = cr;
+	// STRIPABLE route_table[0] = _session->get_nth_stripable (++initial_id, RemoteControlID::Route);
 }
 
 void
 ControlProtocol::prev_track (uint32_t initial_id)
 {
-	uint32_t limit = session->nroutes();
-	boost::shared_ptr<Route> cr = route_table[0];
-	int32_t id;
-
-	if (cr) {
-		id = cr->remote_control_id ();
-	} else {
-		id = 0;
+	if (!initial_id) {
+		return;
 	}
-
-	if (id == 0) {
-		id = limit;
-	} else {
-		id--;
-	}
-
-	while (id >= 0) {
-		if ((cr = session->route_by_remote_id (id)) != 0) {
-			break;
-		}
-		id--;
-	}
-
-	if (id < 0) {
-		uint32_t i = limit;
-		while (i > initial_id) {
-			if ((cr = session->route_by_remote_id (i)) != 0) {
-				break;
-			}
-			i--;
-		}
-	}
-
-	route_table[0] = cr;
+	// STRIPABLE route_table[0] = _session->get_nth_stripable (--initial_id, RemoteControlID::Route);
 }
-
 
 void
 ControlProtocol::set_route_table_size (uint32_t size)
@@ -176,6 +120,7 @@ ControlProtocol::set_route_table (uint32_t table_index, boost::shared_ptr<ARDOUR
 bool
 ControlProtocol::set_route_table (uint32_t table_index, uint32_t remote_control_id)
 {
+#if 0 // STRIPABLE
 	boost::shared_ptr<Route> r = session->route_by_remote_id (remote_control_id);
 
 	if (!r) {
@@ -183,7 +128,7 @@ ControlProtocol::set_route_table (uint32_t table_index, uint32_t remote_control_
 	}
 
 	set_route_table (table_index, r);
-
+#endif
 	return true;
 }
 
@@ -199,7 +144,7 @@ ControlProtocol::route_set_rec_enable (uint32_t table_index, bool yn)
 	boost::shared_ptr<AudioTrack> at = boost::dynamic_pointer_cast<AudioTrack>(r);
 
 	if (at) {
-		at->set_record_enabled (yn, Controllable::NoGroup);
+		at->rec_enable_control()->set_value (1.0, Controllable::UseGroup);
 	}
 }
 
@@ -215,7 +160,7 @@ ControlProtocol::route_get_rec_enable (uint32_t table_index)
 	boost::shared_ptr<AudioTrack> at = boost::dynamic_pointer_cast<AudioTrack>(r);
 
 	if (at) {
-		return at->record_enabled ();
+		return at->rec_enable_control()->get_value();
 	}
 
 	return false;
@@ -248,7 +193,7 @@ ControlProtocol::route_set_gain (uint32_t table_index, float gain)
 	boost::shared_ptr<Route> r = route_table[table_index];
 
 	if (r != 0) {
-		r->set_gain (gain, Controllable::UseGroup);
+		r->gain_control()->set_value (gain, Controllable::UseGroup);
 	}
 }
 
@@ -282,9 +227,8 @@ ControlProtocol::route_get_peak_input_power (uint32_t table_index, uint32_t whic
 		return 0.0f;
 	}
 
-	return r->peak_meter().meter_level (which_input, MeterPeak);
+	return r->peak_meter()->meter_level (which_input, MeterPeak);
 }
-
 
 bool
 ControlProtocol::route_get_muted (uint32_t table_index)
@@ -299,7 +243,7 @@ ControlProtocol::route_get_muted (uint32_t table_index)
 		return false;
 	}
 
-	return r->muted ();
+	return r->mute_control()->muted ();
 }
 
 void
@@ -312,7 +256,7 @@ ControlProtocol::route_set_muted (uint32_t table_index, bool yn)
 	boost::shared_ptr<Route> r = route_table[table_index];
 
 	if (r != 0) {
-		r->set_mute (yn, Controllable::UseGroup);
+		r->mute_control()->set_value (yn ? 1.0 : 0.0, Controllable::UseGroup);
 	}
 }
 
@@ -343,7 +287,7 @@ ControlProtocol::route_set_soloed (uint32_t table_index, bool yn)
 	boost::shared_ptr<Route> r = route_table[table_index];
 
 	if (r != 0) {
-		r->set_solo (yn, Controllable::UseGroup);
+		session->set_control (r->solo_control(), yn ? 1.0 : 0.0, Controllable::UseGroup);
 	}
 }
 
@@ -374,8 +318,8 @@ ControlProtocol::get_state ()
 {
 	XMLNode* node = new XMLNode (state_node_name);
 
-	node->add_property ("name", _name);
-	node->add_property ("feedback", get_feedback() ? "yes" : "no");
+	node->set_property ("name", _name);
+	node->set_property ("feedback", get_feedback());
 
 	return *node;
 }
@@ -383,11 +327,52 @@ ControlProtocol::get_state ()
 int
 ControlProtocol::set_state (XMLNode const & node, int /* version */)
 {
-	const XMLProperty* prop;
-
-	if ((prop = node.property ("feedback")) != 0) {
-		set_feedback (string_is_affirmative (prop->value()));
+	bool feedback;
+	if (node.get_property ("feedback", feedback)) {
+		set_feedback (feedback);
 	}
 
 	return 0;
+}
+
+boost::shared_ptr<Stripable>
+ControlProtocol::first_selected_stripable () const
+{
+	return session->selection().first_selected_stripable ();
+}
+
+void
+ControlProtocol::add_stripable_to_selection (boost::shared_ptr<ARDOUR::Stripable> s)
+{
+	session->selection().add (s, boost::shared_ptr<AutomationControl>());
+}
+
+void
+ControlProtocol::set_stripable_selection (boost::shared_ptr<ARDOUR::Stripable> s)
+{
+	session->selection().select_stripable_and_maybe_group (s, true, true, 0);
+}
+
+void
+ControlProtocol::toggle_stripable_selection (boost::shared_ptr<ARDOUR::Stripable> s)
+{
+	session->selection().toggle (s, boost::shared_ptr<AutomationControl>());
+}
+
+void
+ControlProtocol::remove_stripable_from_selection (boost::shared_ptr<ARDOUR::Stripable> s)
+{
+	session->selection().remove (s, boost::shared_ptr<AutomationControl>());
+}
+
+void
+ControlProtocol::clear_stripable_selection ()
+{
+	session->selection().clear_stripables ();
+}
+
+void
+ControlProtocol::notify_stripable_selection_changed (StripableNotificationListPtr sp)
+{
+	_last_selected = *sp;
 }

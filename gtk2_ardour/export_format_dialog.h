@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2013 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2013-2014 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __export_format_dialog_h__
 #define __export_format_dialog_h__
@@ -36,10 +38,21 @@
 #undef interface
 #endif
 
-#include <gtkmm.h>
+#include <gtkmm/adjustment.h>
+#include <gtkmm/box.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/combobox.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/label.h>
+#include <gtkmm/liststore.h>
+#include <gtkmm/radiobutton.h>
+#include <gtkmm/spinbutton.h>
+#include <gtkmm/table.h>
+#include <gtkmm/treeview.h>
 
-class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList {
-  private:
+class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
+{
+private:
 
 	typedef ARDOUR::WeakExportFormatCompatibilityPtr WeakCompatPtr;
 	typedef ARDOUR::WeakExportFormatPtr WeakFormatPtr;
@@ -51,14 +64,14 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 	typedef boost::shared_ptr<ARDOUR::ExportFormatSpecification> FormatPtr;
 
 
-  public:
+public:
 
 	explicit ExportFormatDialog (FormatPtr format, bool new_dialog = false);
 	~ExportFormatDialog ();
 
 	void set_session (ARDOUR::Session* s);
 
-  private:
+private:
 
 	FormatPtr                   format;
 	ARDOUR::ExportFormatManager manager;
@@ -133,8 +146,15 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 	void update_clock (AudioClock & clock, ARDOUR::AnyTime const & time);
 	void update_time (ARDOUR::AnyTime & time, AudioClock const & clock);
 
+	/* SRC, codec, etc */
+
 	void update_src_quality_selection ();
+	void update_codec_quality_selection ();
 	void update_tagging_selection ();
+	void set_codec_quality_selection ();
+
+	void update_demo_noise_selection ();
+	void update_demo_noise_sensitivity ();
 
 	/*** Encoding options */
 
@@ -147,8 +167,10 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 	void show_ogg_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatOggVorbis> ptr);
 	void show_flac_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatFLAC> ptr);
 	void show_bwf_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatBWF> ptr);
+	void show_ffmpeg_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatFFMPEG> ptr);
 
 	void fill_sample_format_lists (boost::shared_ptr<ARDOUR::HasSampleFormat> ptr);
+	void fill_codec_quality_lists (boost::shared_ptr<ARDOUR::HasCodecQuality> ptr);
 
 	/*** GUI components ***/
 
@@ -197,7 +219,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct CompatibilityCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::ExportFormatCompatibilityPtr>  ptr;
 		Gtk::TreeModelColumn<bool>                                  selected;
 		Gtk::TreeModelColumn<std::string>                           label;
@@ -213,7 +235,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct QualityCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::ExportFormatManager::QualityPtr>  ptr;
 		Gtk::TreeModelColumn<std::string>                            color;
 		Gtk::TreeModelColumn<std::string>                            label;
@@ -225,7 +247,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct FormatCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::ExportFormatPtr>  ptr;
 		Gtk::TreeModelColumn<std::string>              color;
 		Gtk::TreeModelColumn<std::string>              label;
@@ -237,7 +259,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct SampleRateCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::ExportFormatManager::SampleRatePtr>  ptr;
 		Gtk::TreeModelColumn<std::string>                               color;
 		Gtk::TreeModelColumn<std::string>                               label;
@@ -263,7 +285,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct SRCQualityCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::ExportFormatBase::SRCQuality>  id;
 		Gtk::TreeModelColumn<std::string>                         label;
 
@@ -274,6 +296,36 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	Gtk::Label      src_quality_label;
 	Gtk::ComboBox   src_quality_combo;
+
+	/* Watermark */
+
+	struct DemoNoiseCols : public Gtk::TreeModelColumnRecord
+	{
+	public:
+		Gtk::TreeModelColumn<std::string> label;
+		Gtk::TreeModelColumn<int> interval;
+		Gtk::TreeModelColumn<int> duration;
+
+		DemoNoiseCols () {
+			add(label);
+			add(interval);
+			add(duration);
+		}
+	};
+
+	DemoNoiseCols                demo_noise_cols;
+	Glib::RefPtr<Gtk::ListStore> demo_noise_list;
+
+	Gtk::Table watermark_options_table;
+
+	Gtk::Label watermark_heading;
+	Gtk::Label demo_noise_mode_label;
+	Gtk::Label demo_noise_level_label;
+	Gtk::Label demo_noise_dbfs_unit;
+
+	Gtk::ComboBox   demo_noise_combo;
+	Gtk::Adjustment demo_noise_dbfs_adjustment;
+	Gtk::SpinButton demo_noise_dbfs_spinbutton;
 
 	/* Common encoding option components */
 
@@ -293,7 +345,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct SampleFormatCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::HasSampleFormat::SampleFormatPtr>   ptr;
 		Gtk::TreeModelColumn<std::string>                              color;
 		Gtk::TreeModelColumn<std::string>                              label;
@@ -305,7 +357,7 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	struct DitherTypeCols : public Gtk::TreeModelColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<ARDOUR::HasSampleFormat::DitherTypePtr>   ptr;
 		Gtk::TreeModelColumn<std::string>                            color;
 		Gtk::TreeModelColumn<std::string>                            label;
@@ -331,6 +383,22 @@ class ExportFormatDialog : public ArdourDialog, public PBD::ScopedConnectionList
 
 	Gtk::TreeView sample_format_view;
 	Gtk::TreeView dither_type_view;
+
+
+	/* codec quality combo */
+
+	struct CodecQualityCols : public Gtk::TreeModelColumnRecord
+	{
+	public:
+		Gtk::TreeModelColumn<int>          quality;
+		Gtk::TreeModelColumn<std::string>  label;
+
+		CodecQualityCols () { add(quality); add(label); }
+	};
+	CodecQualityCols             codec_quality_cols;
+	Glib::RefPtr<Gtk::ListStore> codec_quality_list;
+
+	Gtk::ComboBox   codec_quality_combo;
 
 	/* Tagging */
 

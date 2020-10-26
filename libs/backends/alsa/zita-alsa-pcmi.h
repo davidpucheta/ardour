@@ -123,7 +123,7 @@ private:
 	typedef char *(Alsa_pcmi::*play_function)(const float *, char *, int, int);
 	typedef const char *(Alsa_pcmi::*capt_function) (const char *, float *, int, int);
 
-	enum { MAXPFD = 16, MAXCHAN = 64 };
+	enum { MAXPFD = 16, MAXCHAN = 128 };
 
 	void initialise (const char *play_name, const char *capt_name, const char *ctrl_name);
 	int set_hwpar (snd_pcm_t *handle, snd_pcm_hw_params_t *hwpar, const char *sname, unsigned int nfrag, unsigned int *nchan);
@@ -154,6 +154,7 @@ private:
 	unsigned int           _fsamp;
 	snd_pcm_uframes_t      _fsize;
 	unsigned int           _play_nfrag;
+	unsigned int           _real_nfrag;
 	unsigned int           _capt_nfrag;
 	unsigned int           _debug;
 	int                    _state;

@@ -1,20 +1,24 @@
 /*
-    Copyright (C) 2001-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2007-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <list>
@@ -41,7 +45,7 @@
 #include "selection.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -51,7 +55,7 @@ using namespace Editing;
 
 AutomationStreamView::AutomationStreamView (AutomationTimeAxisView& tv)
 	: StreamView (*dynamic_cast<RouteTimeAxisView*>(tv.get_parent()),
-		      tv.canvas_display())
+	              tv.canvas_display())
 	, _automation_view(tv)
 	, _pending_automation_state (Off)
 {
@@ -275,15 +279,15 @@ AutomationStreamView::clear ()
 	}
 }
 
-/** @param start Start position in session frames.
- *  @param end End position in session frames.
+/** @param start Start position in session samples.
+ *  @param end End position in session samples.
  *  @param bot Bottom position expressed as a fraction of track height where 0 is the bottom of the track.
  *  @param top Top position expressed as a fraction of track height where 0 is the bottom of the track.
  *  NOTE: this y system is different to that for the StreamView method that this overrides, which is a little
  *  confusing.
  */
 void
-AutomationStreamView::get_selectables (framepos_t start, framepos_t end, double botfrac, double topfrac, list<Selectable*>& results, bool /*within*/)
+AutomationStreamView::get_selectables (samplepos_t start, samplepos_t end, double botfrac, double topfrac, list<Selectable*>& results, bool /*within*/)
 {
 	for (list<RegionView*>::iterator i = region_views.begin(); i != region_views.end(); ++i) {
 		AutomationRegionView* arv = dynamic_cast<AutomationRegionView*> (*i);
@@ -319,7 +323,7 @@ AutomationStreamView::get_lines () const
 }
 
 bool
-AutomationStreamView::paste (framepos_t                                pos,
+AutomationStreamView::paste (samplepos_t                               pos,
                              unsigned                                  paste_count,
                              float                                     times,
                              boost::shared_ptr<ARDOUR::AutomationList> alist)

@@ -1,28 +1,37 @@
 /*
-    Copyright (C) 2009 John Emmas
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2016 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_msvc_extensions_h__
 #define __ardour_msvc_extensions_h__
 
-#ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0500
+#ifdef WINVER
+#undef WINVER
 #endif
+#if (defined(_MSC_VER) && (_MSC_VER < 1900)) /* 1900 is an arbitrary value, corresponding to VS2019 (it might need to be lowered) */
+#define WINVER 0x0500
+#else
+#define WINVER 0x0601
+#endif
+#ifdef _WIN32_WINNT
+#undef _WIN32_WINNT
+#endif
+#define _WIN32_WINNT WINVER
+
 #ifndef _CPP_VECTOR
 #define _CPP_VECTOR  1
 #endif
@@ -196,6 +205,7 @@ typedef _mode_t mode_t;
 #endif /* _MODE_T_ */
 
 // int64 abs()
+#if (defined(_MSC_VER) && (_MSC_VER < 1500))
 #ifdef __cplusplus // Normal 'C' doesn't permit over-ridden functions !!
 inline int64_t abs(int64_t val) throw()
 {
@@ -205,10 +215,13 @@ inline int64_t abs(int64_t val) throw()
 		return val;
 }
 #endif
+#endif
 
 // fmin() and fmax()
-#define fmin(a, b) min((double)a, (double)b)
-#define fmax(a, b) max((double)a, (double)b)
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+#define fmin(a, b) __min((double)a, (double)b)
+#define fmax(a, b) __max((double)a, (double)b)
+#endif
 
 // approximate POSIX pipe()
 #define pipe(handles) _pipe(handles, 4096, _O_BINARY)
@@ -252,11 +265,18 @@ inline int64_t abs(int64_t val) throw()
 #endif
 
 #if !defined(LIBPBD_API) || defined(PBD_IS_IN_WIN_STATIC_LIB)
+// Emulate some C99 math functions which MSVC itself didn't
+// implement until later in life.
+#if defined(_MSC_VER) && (_MSC_VER < 1800)
+extern  double expm1(double x);
+extern  double log1p(double x);
 extern  double round(double x);
-
-// log2().... MSVC doesn't offer the C99 function 'log2()'
-// so let's emulate it.
-extern  double log2(double x);
+extern  float roundf(float x);
+#endif
+#if defined(_MSC_VER) && (_MSC_VER < 1900)
+extern  double log2 (double x);
+extern  double trunc(double x);
+#endif
 #endif
 
 #endif /* __ardour_msvc_extensions_h__ */

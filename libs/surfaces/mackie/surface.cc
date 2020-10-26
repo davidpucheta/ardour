@@ -1,21 +1,26 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2007 John Anderson
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Len Ovens <len@ovenwerks.net>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2018 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <sstream>
 #include <iomanip>
@@ -57,7 +62,7 @@
 #include "jog.h"
 #include "meter.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #ifdef PLATFORM_WINDOWS
 #define random() rand()
@@ -65,7 +70,7 @@
 
 using namespace std;
 using namespace PBD;
-using ARDOUR::Route;
+using ARDOUR::Stripable;
 using ARDOUR::Panner;
 using ARDOUR::Profile;
 using ARDOUR::AutomationControl;
@@ -84,6 +89,15 @@ static MidiByteArray mackie_sysex_hdr  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x14);
 // the device type
 static MidiByteArray mackie_sysex_hdr_xt  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x15);
 
+//QCON
+// The MCU sysex header for QCon Control surface
+static MidiByteArray mackie_sysex_hdr_qcon  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x14); 
+
+// The MCU sysex header for QCon Control - extender 
+// The extender differs from Mackie by 4th bit - it's same like for main control surface (for display)
+static MidiByteArray mackie_sysex_hdr_xt_qcon  (5, MIDI::sysex, 0x0, 0x0, 0x66, 0x14);
+
+
 static MidiByteArray empty_midi_byte_array;
 
 Surface::Surface (MackieControlProtocol& mcp, const std::string& device_name, uint32_t number, surface_type_t stype)
@@ -97,6 +111,7 @@ Surface::Surface (MackieControlProtocol& mcp, const std::string& device_name, ui
 	, _master_fader (0)
 	, _last_master_gain_written (-0.0f)
 	, connection_state (0)
+	, is_qcon (false)
 	, input_source (0)
 {
 	DEBUG_TRACE (DEBUG::MackieControl, "Surface::Surface init\n");
@@ -105,6 +120,13 @@ Surface::Surface (MackieControlProtocol& mcp, const std::string& device_name, ui
 		_port = new SurfacePort (*this);
 	} catch (...) {
 		throw failed_constructor ();
+	}
+
+	//Store Qcon flag
+	if( mcp.device_info().is_qcon() ) {
+		is_qcon = true;
+	} else {
+		is_qcon = false;
 	}
 
 	/* only the first Surface object has global controls */
@@ -248,7 +270,7 @@ XMLNode&
 Surface::get_state()
 {
 	XMLNode* node = new XMLNode (X_("Surface"));
-	node->add_property (X_("name"), _name);
+	node->set_property (X_("name"), _name);
 	node->add_child_nocopy (_port->get_state());
 	return *node;
 }
@@ -262,12 +284,10 @@ Surface::set_state (const XMLNode& node, int version)
 	XMLNode* mynode = 0;
 
 	for (XMLNodeList::const_iterator c = children.begin(); c != children.end(); ++c) {
-		XMLProperty const* prop = (*c)->property (X_("name"));
-		if (prop) {
-			if (prop->value() == _name) {
-				mynode = *c;
-				break;
-			}
+		std::string name;
+		if ((*c)->get_property (X_("name"), name) && name == _name) {
+			mynode = *c;
+			break;
 		}
 	}
 
@@ -289,8 +309,18 @@ const MidiByteArray&
 Surface::sysex_hdr() const
 {
 	switch  (_stype) {
-	case mcu: return mackie_sysex_hdr;
-	case ext: return mackie_sysex_hdr_xt;
+	case mcu: 
+		if (_mcp.device_info().is_qcon()) {
+			return mackie_sysex_hdr_qcon;
+		} else {
+			return mackie_sysex_hdr;
+		}
+	case ext:
+		if(_mcp.device_info().is_qcon()) {		
+			return mackie_sysex_hdr_xt_qcon;
+		} else {
+			return mackie_sysex_hdr_xt;
+		}
 	}
 	cout << "SurfacePort::sysex_hdr _port_type not known" << endl;
 	return mackie_sysex_hdr;
@@ -377,7 +407,7 @@ Surface::master_monitor_may_have_changed ()
 void
 Surface::setup_master ()
 {
-	boost::shared_ptr<Route> m;
+	boost::shared_ptr<Stripable> m;
 
 	if ((m = _mcp.get_session().monitor_out()) == 0) {
 		m = _mcp.get_session().master_out();
@@ -675,8 +705,6 @@ Surface::handle_midi_sysex (MIDI::Parser &, MIDI::byte * raw_bytes, size_t count
 {
 	MidiByteArray bytes (count, raw_bytes);
 
-	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("handle_midi_sysex: %1\n", bytes));
-
 	if (_mcp.device_info().no_handshake()) {
 		turn_it_on ();
 	}
@@ -686,13 +714,25 @@ Surface::handle_midi_sysex (MIDI::Parser &, MIDI::byte * raw_bytes, size_t count
 	 */
 
 	if (_stype == mcu) {
-		mackie_sysex_hdr[4] = bytes[4];
+		if (_mcp.device_info().is_qcon()) {
+			mackie_sysex_hdr_qcon[4] = bytes[4];
+		} else {
+			mackie_sysex_hdr[4] = bytes[4]; 
+		}
+		
 	} else {
-		mackie_sysex_hdr_xt[4] = bytes[4];
+		if (_mcp.device_info().is_qcon()) {
+			mackie_sysex_hdr_xt_qcon[4] = bytes[4];
+		} else {
+			mackie_sysex_hdr_xt[4] = bytes[4];
+		}
 	}
 
 	switch (bytes[5]) {
 	case 0x01:
+		if (!_active) {
+			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("handle_midi_sysex: %1\n", bytes));
+		}
 		/* MCP: Device Ready
 		   LCP: Connection Challenge
 		*/
@@ -700,12 +740,17 @@ Surface::handle_midi_sysex (MIDI::Parser &, MIDI::byte * raw_bytes, size_t count
 			DEBUG_TRACE (DEBUG::MackieControl, "Logic Control Device connection challenge\n");
 			write_sysex (host_connection_query (bytes));
 		} else {
-			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("Mackie Control Device ready, current status = %1\n", _active));
+			if (!_active) {
+				DEBUG_TRACE (DEBUG::MackieControl, string_compose ("Mackie Control Device ready, current status = %1\n", _active));
+			}
 			turn_it_on ();
 		}
 		break;
 
 	case 0x06:
+		if (!_active) {
+			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("handle_midi_sysex: %1\n", bytes));
+		}
 		/* Behringer X-Touch Compact: Device Ready
 		*/
 		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("Behringer X-Touch Compact ready, current status = %1\n", _active));
@@ -713,6 +758,7 @@ Surface::handle_midi_sysex (MIDI::Parser &, MIDI::byte * raw_bytes, size_t count
 		break;
 
 	case 0x03: /* LCP Connection Confirmation */
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("handle_midi_sysex: %1\n", bytes));
 		DEBUG_TRACE (DEBUG::MackieControl, "Logic Control Device confirms connection, ardour replies\n");
 		if (bytes[4] == 0x10 || bytes[4] == 0x11) {
 			write_sysex (host_connection_confirmation (bytes));
@@ -721,11 +767,13 @@ Surface::handle_midi_sysex (MIDI::Parser &, MIDI::byte * raw_bytes, size_t count
 		break;
 
 	case 0x04: /* LCP: Confirmation Denied */
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("handle_midi_sysex: %1\n", bytes));
 		DEBUG_TRACE (DEBUG::MackieControl, "Logic Control Device denies connection\n");
 		_active = false;
 		break;
 
 	default:
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("handle_midi_sysex: %1\n", bytes));
 		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("unknown device ID byte %1", (int) bytes[5]));
 		error << "MCP: unknown sysex: " << bytes << endmsg;
 	}
@@ -932,28 +980,38 @@ Surface::write (const MidiByteArray& data)
 }
 
 void
-Surface::map_routes (const vector<boost::shared_ptr<Route> >& routes)
+Surface::update_strip_selection ()
 {
-	vector<boost::shared_ptr<Route> >::const_iterator r;
+	Strips::iterator s = strips.begin();
+	for ( ; s != strips.end(); ++s) {
+		(*s)->update_selection_state();
+	}
+}
+
+void
+Surface::map_stripables (const vector<boost::shared_ptr<Stripable> >& stripables)
+{
+	vector<boost::shared_ptr<Stripable> >::const_iterator r;
 	Strips::iterator s = strips.begin();
 
-	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("Mapping %1 routes\n", routes.size()));
+	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("Mapping %1 stripables to %2 strips\n", stripables.size(), strips.size()));
 
-	for (r = routes.begin(); r != routes.end() && s != strips.end(); ++s) {
+	for (r = stripables.begin(); r != stripables.end() && s != strips.end(); ++s) {
 
-		/* don't try to assign routes to a locked strip. it won't
+		/* don't try to assign stripables to a locked strip. it won't
 		   use it anyway, but if we do, then we get out of sync
 		   with the proposed mapping.
 		*/
 
 		if (!(*s)->locked()) {
-			(*s)->set_route (*r);
+			(*s)->set_stripable (*r);
 			++r;
 		}
 	}
 
 	for (; s != strips.end(); ++s) {
-		(*s)->set_route (boost::shared_ptr<Route>());
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("strip %1 being set to null stripable\n", (*s)->index()));
+		(*s)->set_stripable (boost::shared_ptr<Stripable>());
 	}
 }
 
@@ -999,6 +1057,8 @@ Surface::show_two_char_display (unsigned int value, const std::string & /*dots*/
 void
 Surface::display_timecode (const std::string & timecode, const std::string & last_timecode)
 {
+	//TODO: Fix for Qcon to correct timecode value if is over 1000 bars
+
 	if (!_active || !_mcp.device_info().has_timecode_display()) {
 		return;
 	}
@@ -1121,7 +1181,7 @@ Surface::update_view_mode_display (bool with_helpful_text)
 	if (id >= 0) {
 
 		for (vector<int>::iterator i = view_mode_buttons.begin(); i != view_mode_buttons.end(); ++i) {
-			map<int,Control*>::iterator x = controls_by_device_independent_id.find (id);
+			map<int,Control*>::iterator x = controls_by_device_independent_id.find (*i);
 
 			if (x != controls_by_device_independent_id.end()) {
 				Button* button = dynamic_cast<Button*> (x->second);
@@ -1137,14 +1197,6 @@ Surface::update_view_mode_display (bool with_helpful_text)
 
 	if (with_helpful_text && !text.empty()) {
 		display_message_for (text, 1000);
-	}
-}
-
-void
-Surface::gui_selection_changed (const ARDOUR::StrongRouteNotificationList& routes)
-{
-	for (Strips::iterator s = strips.begin(); s != strips.end(); ++s) {
-		(*s)->gui_selection_changed (routes);
 	}
 }
 
@@ -1173,10 +1225,10 @@ Surface::set_jog_mode (JogWheel::Mode)
 }
 
 bool
-Surface::route_is_locked_to_strip (boost::shared_ptr<Route> r) const
+Surface::stripable_is_locked_to_strip (boost::shared_ptr<Stripable> stripable) const
 {
 	for (Strips::const_iterator s = strips.begin(); s != strips.end(); ++s) {
-		if ((*s)->route() == r && (*s)->locked()) {
+		if ((*s)->stripable() == stripable && (*s)->locked()) {
 			return true;
 		}
 	}
@@ -1184,10 +1236,10 @@ Surface::route_is_locked_to_strip (boost::shared_ptr<Route> r) const
 }
 
 bool
-Surface::route_is_mapped (boost::shared_ptr<Route> r) const
+Surface::stripable_is_mapped (boost::shared_ptr<Stripable> stripable) const
 {
 	for (Strips::const_iterator s = strips.begin(); s != strips.end(); ++s) {
-		if ((*s)->route() == r) {
+		if ((*s)->stripable() == stripable) {
 			return true;
 		}
 	}
@@ -1251,18 +1303,20 @@ Surface::set_touch_sensitivity (int sensitivity)
 
 	/* sensitivity already clamped by caller */
 
-	if (_port) {
-		MidiByteArray msg;
+	if( !is_qcon ) { // Qcon doesn't support fader sensitivity
+		if (_port) {
+			MidiByteArray msg;
 
-		msg << sysex_hdr ();
-		msg << 0x0e;
-		msg << 0xff; /* overwritten for each fader below */
-		msg << (sensitivity & 0x7f);
-		msg << MIDI::eox;
+			msg << sysex_hdr ();
+			msg << 0x0e;
+			msg << 0xff; /* overwritten for each fader below */
+			msg << (sensitivity & 0x7f);
+			msg << MIDI::eox;
 
-		for (int fader = 0; fader < 9; ++fader) {
-			msg[6] = fader;
-			_port->write (msg);
+			for (int fader = 0; fader < 9; ++fader) {
+				msg[6] = fader;
+				_port->write (msg);
+			}
 		}
 	}
 }

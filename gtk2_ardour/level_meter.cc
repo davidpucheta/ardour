@@ -1,43 +1,47 @@
 /*
-  Copyright (C) 2002 Paul Davis
-
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <limits.h>
 
 #include "ardour/meter.h"
+#include "ardour/logmeter.h"
 
 #include <gtkmm2ext/utils.h>
 #include "pbd/fastlog.h"
 
 #include "level_meter.h"
 #include "utils.h"
-#include "logmeter.h"
 #include "gui_thread.h"
 #include "keyboard.h"
 #include "public_editor.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace ARDOUR_UI_UTILS;
 using namespace PBD;
-using namespace Gtkmm2ext;
+using namespace ArdourWidgets;
 using namespace Gtk;
 using namespace std;
 
@@ -49,9 +53,10 @@ LevelMeterBase::LevelMeterBase (Session* s, PBD::EventLoop::InvalidationRecord* 
 	, meter_length (0)
 	, thin_meter_width(2)
 	, max_peak (minus_infinity())
-	, meter_type (MeterPeak)
 	, visible_meter_type (MeterType(0))
-	, visible_meter_count (0)
+	, midi_count (0)
+	, meter_count (0)
+	, max_visible_meters (0)
 	, color_changed (false)
 {
 	set_session (s);
@@ -83,7 +88,7 @@ LevelMeterBase::set_meter (PeakMeter* meter)
 
 	if (_meter) {
 		_meter->ConfigurationChanged.connect (_configuration_connection, parent_invalidator, boost::bind (&LevelMeterBase::configuration_changed, this, _1, _2), gui_context());
-		_meter->TypeChanged.connect (_meter_type_connection, parent_invalidator, boost::bind (&LevelMeterBase::meter_type_changed, this, _1), gui_context());
+		_meter->MeterTypeChanged.connect (_meter_type_connection, parent_invalidator, boost::bind (&LevelMeterBase::meter_type_changed, this, _1), gui_context());
 	}
 }
 
@@ -148,6 +153,7 @@ LevelMeterBase::update_meters ()
 			if (n < nmidi) {
 				(*i).meter->set (_meter->meter_level (n, MeterPeak));
 			} else {
+				MeterType meter_type = _meter->meter_type ();
 				const float peak = _meter->meter_level (n, meter_type);
 				if (meter_type == MeterPeak) {
 					(*i).meter->set (log_meter (peak));
@@ -216,9 +222,7 @@ LevelMeterBase::configuration_changed (ChanCount /*in*/, ChanCount /*out*/)
 void
 LevelMeterBase::meter_type_changed (MeterType t)
 {
-	meter_type = t;
 	setup_meters (meter_length, regular_meter_width, thin_meter_width);
-	MeterTypeChanged(t);
 }
 
 void
@@ -230,19 +234,31 @@ LevelMeterBase::hide_all_meters ()
 			(*i).packed = false;
 		}
 	}
-	visible_meter_count = 0;
+	meter_count = 0;
+}
+
+void
+LevelMeterBase::set_max_audio_meter_count (uint32_t cnt)
+{
+	if (cnt == max_visible_meters) {
+		return;
+	}
+	color_changed = true; // force re-setup
+	max_visible_meters = cnt;
+	setup_meters (meter_length, regular_meter_width, thin_meter_width);
 }
 
 void
 LevelMeterBase::setup_meters (int len, int initial_width, int thin_width)
 {
 
- 	if (!_meter) {
+	if (!_meter) {
 		hide_all_meters ();
- 		return; /* do it later or never */
- 	}
+		return; /* do it later or never */
+	}
 
-	int32_t nmidi = _meter->input_streams().n_midi();
+	MeterType meter_type = _meter->meter_type ();
+	uint32_t nmidi = _meter->input_streams().n_midi();
 	uint32_t nmeters = _meter->input_streams().n_total();
 	regular_meter_width = initial_width;
 	thin_meter_width = thin_width;
@@ -264,7 +280,8 @@ LevelMeterBase::setup_meters (int len, int initial_width, int thin_width)
 	width = rint (width * UIConfiguration::instance().get_ui_scale());
 
 	if (   meters.size() > 0
-	    && nmeters == visible_meter_count
+	    && nmidi == midi_count
+	    && nmeters == meter_count
 	    && meters[0].width == width
 	    && meters[0].length == len
 	    && !color_changed
@@ -277,7 +294,7 @@ LevelMeterBase::setup_meters (int len, int initial_width, int thin_width)
 			(meters.size() > 0) ? "yes" : "no",
 			(meters.size() > 0 &&  meters[0].width == width) ? "yes" : "no",
 			(meters.size() > 0 &&  meters[0].length == len) ? "yes" : "no",
-			(nmeters == visible_meter_count) ? "yes" : "no",
+			(nmeters == meter_count) ? "yes" : "no",
 			(meter_type == visible_meter_type) ? "yes" : "no",
 			!color_changed ? "yes" : "no"
 			);
@@ -299,7 +316,7 @@ LevelMeterBase::setup_meters (int len, int initial_width, int thin_width)
 		b[1] = UIConfiguration::instance().color ("meter background top");
 		b[2] = 0x991122ff; // red highlight gradient Bot
 		b[3] = 0x551111ff; // red highlight gradient Top
-		if (n < nmidi) {
+		if ((uint32_t) n < nmidi) {
 			c[0] = UIConfiguration::instance().color ("midi meter color0");
 			c[1] = UIConfiguration::instance().color ("midi meter color1");
 			c[2] = UIConfiguration::instance().color ("midi meter color2");
@@ -438,7 +455,7 @@ LevelMeterBase::setup_meters (int len, int initial_width, int thin_width)
 				}
 			}
 		}
-		if (meters[n].width != width || meters[n].length != len || color_changed || meter_type != visible_meter_type) {
+		if (meters[n].width != width || meters[n].length != len || color_changed || meter_type != visible_meter_type || nmidi != midi_count) {
 			bool hl = meters[n].meter ? meters[n].meter->get_highlight() : false;
 			meters[n].packed = false;
 			delete meters[n].meter;
@@ -459,20 +476,18 @@ LevelMeterBase::setup_meters (int len, int initial_width, int thin_width)
 
 		//pack_end (*meters[n].meter, false, false);
 		mtr_pack (*meters[n].meter);
-		meters[n].meter->show_all ();
 		meters[n].packed = true;
+		if (max_visible_meters == 0 || (uint32_t) n < max_visible_meters + nmidi) {
+			meters[n].meter->show_all ();
+		} else {
+			meters[n].meter->hide ();
+		}
 	}
 	//show();
 	color_changed = false;
 	visible_meter_type = meter_type;
-	visible_meter_count = nmeters;
-}
-
-void
-LevelMeterBase::set_type(MeterType t)
-{
-	meter_type = t;
-	_meter->set_type(t);
+	midi_count = nmidi;
+	meter_count = nmeters;
 }
 
 bool

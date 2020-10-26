@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2002-2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 #include <sigc++/bind.h>
@@ -54,11 +55,24 @@ ArdourWindow::ArdourWindow (Gtk::Window& parent, string title)
 
 ArdourWindow::~ArdourWindow ()
 {
-	WM::Manager::instance().remove (proxy);
 }
 
 bool
 ArdourWindow::on_key_press_event (GdkEventKey* ev)
+{
+	bool handled = Gtk::Window::on_key_press_event (ev);
+
+	if (!handled) {
+		if (!get_modal()) {
+			handled = relay_key_press (ev, this);
+		}
+	}
+
+	return handled;
+}
+
+bool
+ArdourWindow::on_key_release_event (GdkEventKey* ev)
 {
 	bool handled = Gtk::Window::on_key_press_event (ev);
 
@@ -106,26 +120,26 @@ ArdourWindow::init ()
 	set_border_width (10);
 	add_events (Gdk::FOCUS_CHANGE_MASK);
 
-        /* ArdourWindows are not dialogs (they have no "OK" or "Close" button) but
-           they should be considered part of the same "window level" as a dialog. This
-           works on X11 in that: 
+	/* ArdourWindows are not dialogs (they have no "OK" or "Close" button) but
+	   they should be considered part of the same "window level" as a dialog. This
+	   works on X11 in that:
 
-           (a) there are no window "levels"
-           (b) they will float above normal windows without any particular effort
+	   (a) there are no window "levels"
+	   (b) they will float above normal windows without any particular effort
 	   (c) present()-ing them will make a utility float over a dialog or
-               vice versa.
+	       vice versa.
 
-           Some X11 Window managers (e.g. KDE) get this wrong, and so we allow the user
-           to select what type of window hint is used.
+	   Some X11 Window managers (e.g. KDE) get this wrong, and so we allow the user
+	   to select what type of window hint is used.
 
-           GTK+ on OS X uses different levels for DIALOG and UTILITY, and Cocoa has a bug/design
-           issue that it will not transfer keyboard focus across levels when hiding a window.
-           So on OS X, we use DIALOG for all ArdourWindows to ensure that keyboard focus
-           will return to the main window(s) when this window is hidden.
-        */
+	   GTK+ on OS X uses different levels for DIALOG and UTILITY, and Cocoa has a bug/design
+	   issue that it will not transfer keyboard focus across levels when hiding a window.
+	   So on OS X, we use DIALOG for all ArdourWindows to ensure that keyboard focus
+	   will return to the main window(s) when this window is hidden.
+	*/
 
 #ifdef __APPLE__
-        set_type_hint (Gdk::WINDOW_TYPE_HINT_DIALOG);
+	set_type_hint (Gdk::WINDOW_TYPE_HINT_DIALOG);
 #else
 	if (UIConfiguration::instance().get_all_floating_windows_are_dialogs()) {
 		set_type_hint (Gdk::WINDOW_TYPE_HINT_DIALOG);
@@ -141,8 +155,5 @@ ArdourWindow::init ()
 	}
 
 	ARDOUR_UI::CloseAllDialogs.connect (sigc::mem_fun (*this, &ArdourWindow::hide));
-
-	proxy = new WM::ProxyTemporary (get_title(), this);
-	WM::Manager::instance().register_window (proxy);
 }
 

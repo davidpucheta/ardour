@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2014 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __CANVAS_FILL_H__
 #define __CANVAS_FILL_H__
@@ -38,10 +39,10 @@ public:
 	Fill (Item& self);
 	virtual ~Fill() {}
 
-	virtual void set_fill_color (Color);
+	virtual void set_fill_color (Gtkmm2ext::Color);
 	virtual void set_fill (bool);
 
-	Color fill_color () const {
+	Gtkmm2ext::Color fill_color () const {
 		return _fill_color;
 	}
 
@@ -49,23 +50,23 @@ public:
 		return _fill;
 	}
 
-        typedef std::vector<std::pair<double,Color> > StopList;
+	typedef std::vector<std::pair<double,Gtkmm2ext::Color> > StopList;
 
-        void set_gradient (StopList const & stops, bool is_vertical);
+	void set_gradient (StopList const & stops, bool is_vertical);
 
-        void set_pattern (Cairo::RefPtr<Cairo::Pattern>);
+	void set_pattern (Cairo::RefPtr<Cairo::Pattern>);
 
 protected:
 	void setup_fill_context (Cairo::RefPtr<Cairo::Context>) const;
-        void setup_gradient_context (Cairo::RefPtr<Cairo::Context>, Rect const &, Duple const &) const;
+	void setup_gradient_context (Cairo::RefPtr<Cairo::Context>, Rect const &, Duple const &) const;
 
-       	Item& _self;
-	Color _fill_color;
+	Item& _self;
+	Gtkmm2ext::Color _fill_color;
 	bool _fill;
 	bool _transparent;
-        StopList _stops;
-        bool _vertical_gradient;
-        Cairo::RefPtr<Cairo::Pattern> _pattern;
+	StopList _stops;
+	bool _vertical_gradient;
+	Cairo::RefPtr<Cairo::Pattern> _pattern;
 
 };
 

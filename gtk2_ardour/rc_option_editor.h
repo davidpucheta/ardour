@@ -1,29 +1,31 @@
 /*
-    Copyright (C) 2001-2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2012-2018 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_rc_option_editor_h__
 #define __gtk_ardour_rc_option_editor_h__
 
-#include "gtkmm2ext/tabbable.h"
+#include "widgets/tabbable.h"
 
 #include "option_editor.h"
 #include "visibility_group.h"
+#include "transport_masters_dialog.h"
 
 /** @file rc_option_editor.h
  *  @brief Editing of options which are obtained from and written back to one of the .rc files.
@@ -34,14 +36,15 @@
  */
 
 /** Editor for options which are obtained from and written back to one of the .rc files. */
-class RCOptionEditor : public OptionEditorContainer, public Gtkmm2ext::Tabbable
+class RCOptionEditor : public OptionEditorContainer, public ARDOUR::SessionHandlePtr, public ArdourWidgets::Tabbable
 {
 public:
 	RCOptionEditor ();
 
-	void populate_sync_options ();
+	void set_session (ARDOUR::Session*);
 
 	Gtk::Window* use_own_window (bool and_fill_it);
+	XMLNode& get_state ();
 
 private:
 	void parameter_changed (std::string const &);
@@ -50,27 +53,26 @@ private:
 	BoolOption* _solo_control_is_listen_control;
 	ComboOption<ARDOUR::ListenPosition>* _listen_position;
 	VisibilityGroup _mixer_strip_visibility;
-	ComboOption<ARDOUR::SyncSource>* _sync_source;
 	BoolOption* _sync_framerate;
-	BoolOption* _sync_genlock;
-	BoolOption* _sync_source_2997;
-	ComboStringOption* _ltc_port;
 	HSliderOption* _ltc_volume_slider;
 	Gtk::Adjustment* _ltc_volume_adjustment;
 	BoolOption* _ltc_send_continuously;
 	BoolOption* _plugin_prefer_inline;
+	TransportMastersWidget _transport_masters_widget;
 
 	PBD::ScopedConnection parameter_change_connection;
 	PBD::ScopedConnection engine_started_connection;
 
 	/* plugin actions */
 	void plugin_scan_refresh ();
-	void clear_vst_cache ();
-	void clear_vst_blacklist ();
+	void plugin_reset_stats ();
+	void clear_vst2_cache ();
+	void clear_vst2_blacklist ();
+	void clear_vst3_cache ();
+	void clear_vst3_blacklist ();
 	void clear_au_cache ();
 	void clear_au_blacklist ();
-	void edit_lxvst_path ();
-	void edit_vst_path ();
+	void edit_vst_path (std::string const& title, std::string const& dflt, sigc::slot<std::string>, sigc::slot<bool, std::string>);
 };
 
 #endif /* __gtk_ardour_rc_option_editor_h__ */

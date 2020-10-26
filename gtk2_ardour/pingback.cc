@@ -1,22 +1,22 @@
 /*
-    Copyright (C) 2012 Paul Davis
-    Inspired by code from Ben Loftis @ Harrison Consoles
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2015 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <string>
 #include <cstring>
@@ -24,11 +24,10 @@
 #ifdef PLATFORM_WINDOWS
 #include <windows.h>
 #include <glibmm.h>
+#include "pbd/windows_special_dirs.h"
 #else
 #include <sys/utsname.h>
 #endif
-
-#include <curl/curl.h>
 
 #include "pbd/gstdio_compat.h"
 #include <glibmm/miscutils.h>
@@ -39,30 +38,12 @@
 #include "ardour/filesystem_paths.h"
 #include "ardour/rc_configuration.h"
 
+#include "ardour_http.h"
 #include "pingback.h"
+#include "utils.h"
 
 using std::string;
 using namespace ARDOUR;
-
-static size_t
-curl_write_data (char *bufptr, size_t size, size_t nitems, void *ptr)
-{
-        /* we know its a string */
-
-        string* sptr = (string*) ptr;
-
-        for (size_t i = 0; i < nitems; ++i) {
-                for (size_t n = 0; n < size; ++n) {
-                        if (*bufptr == '\n') {
-                                break;
-                        }
-
-                        (*sptr) += *bufptr++;
-                }
-        }
-
-        return size * nitems;
-}
 
 struct ping_call {
     std::string version;
@@ -72,49 +53,15 @@ struct ping_call {
 	    : version (v), announce_path (a) {}
 };
 
-#ifdef PLATFORM_WINDOWS
-static bool
-_query_registry (const char *regkey, const char *regval, std::string &rv) {
-	HKEY key;
-	DWORD size = PATH_MAX;
-	char tmp[PATH_MAX+1];
-
-	if (   (ERROR_SUCCESS == RegOpenKeyExA (HKEY_LOCAL_MACHINE, regkey, 0, KEY_READ, &key))
-	    && (ERROR_SUCCESS == RegQueryValueExA (key, regval, 0, NULL, reinterpret_cast<LPBYTE>(tmp), &size))
-		 )
-	{
-		rv = Glib::locale_to_utf8 (tmp);
-		return true;
-	}
-
-	if (   (ERROR_SUCCESS == RegOpenKeyExA (HKEY_LOCAL_MACHINE, regkey, 0, KEY_READ | KEY_WOW64_32KEY, &key))
-	    && (ERROR_SUCCESS == RegQueryValueExA (key, regval, 0, NULL, reinterpret_cast<LPBYTE>(tmp), &size))
-		 )
-	{
-		rv = Glib::locale_to_utf8 (tmp);
-		return true;
-	}
-
-	return false;
-}
-#endif
-
-
 static void*
 _pingback (void *arg)
 {
+	pthread_set_name ("Pingback");
+	ArdourCurl::HttpGet h;
+
 	ping_call* cm = static_cast<ping_call*> (arg);
-	CURL* c;
 	string return_str;
 	//initialize curl
-
-	curl_global_init (CURL_GLOBAL_NOTHING);
-	c = curl_easy_init ();
-
-	curl_easy_setopt (c, CURLOPT_WRITEFUNCTION, curl_write_data);
-	curl_easy_setopt (c, CURLOPT_WRITEDATA, &return_str);
-	char errbuf[CURL_ERROR_SIZE];
-	curl_easy_setopt (c, CURLOPT_ERRORBUFFER, errbuf);
 
 	string url;
 
@@ -131,10 +78,10 @@ _pingback (void *arg)
 		return 0;
 	}
 
-	char* v = curl_easy_escape (c, cm->version.c_str(), cm->version.length());
+	char* v = h.escape (cm->version.c_str(), cm->version.length());
 	url += v;
 	url += '?';
-	free (v);
+	h.free (v);
 
 #ifndef PLATFORM_WINDOWS
 	struct utsname utb;
@@ -148,45 +95,45 @@ _pingback (void *arg)
 	string s;
 	char* query;
 
-	query = curl_easy_escape (c, utb.sysname, strlen (utb.sysname));
+	query = h.escape (utb.sysname, strlen (utb.sysname));
 	s = string_compose ("s=%1", query);
 	url += s;
 	url += '&';
-	free (query);
+	h.free (query);
 
-	query = curl_easy_escape (c, utb.release, strlen (utb.release));
+	query = h.escape (utb.release, strlen (utb.release));
 	s = string_compose ("r=%1", query);
 	url += s;
 	url += '&';
-	free (query);
+	h.free (query);
 
-	query = curl_easy_escape (c, utb.machine, strlen (utb.machine));
+	query = h.escape (utb.machine, strlen (utb.machine));
 	s = string_compose ("m=%1", query);
 	url += s;
-	free (query);
+	h.free (query);
 #else
 	std::string val;
-	if (_query_registry("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName", val)) {
-		char* query = curl_easy_escape (c, val.c_str(), strlen (val.c_str()));
+	if (PBD::windows_query_registry ("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", "ProductName", val)) {
+		char* query = h.escape (val.c_str(), strlen (val.c_str()));
 		url += "r=";
 		url += query;
 		url += '&';
-		free (query);
+		h.free (query);
 	} else {
 		url += "r=&";
 	}
 
-	if (_query_registry("Hardware\\Description\\System\\CentralProcessor\\0", "Identifier", val)) {
+	if (PBD::windows_query_registry ("Hardware\\Description\\System\\CentralProcessor\\0", "Identifier", val)) {
 		// remove "Family X Model YY Stepping Z" tail
 		size_t cut = val.find (" Family ");
 		if (string::npos != cut) {
 			val = val.substr (0, cut);
 		}
-		char* query = curl_easy_escape (c, val.c_str(), strlen (val.c_str()));
+		char* query = h.escape (val.c_str(), strlen (val.c_str()));
 		url += "m=";
 		url += query;
 		url += '&';
-		free (query);
+		h.free (query);
 	} else {
 		url += "m=&";
 	}
@@ -199,24 +146,13 @@ _pingback (void *arg)
 
 #endif /* PLATFORM_WINDOWS */
 
-	curl_easy_setopt (c, CURLOPT_URL, url.c_str());
+	return_str = h.get (url, false);
 
-	return_str = "";
-
-	if (curl_easy_perform (c) == 0) {
-		long http_status;
-
-		curl_easy_getinfo (c, CURLINFO_RESPONSE_CODE, &http_status);
-
-		if (http_status != 200) {
-			std::cerr << "Bad HTTP status" << std::endl;
-			return 0;
-		}
-
+	if (!return_str.empty ()) {
 		if ( return_str.length() > 140 ) { // like a tweet :)
 			std::cerr << "Announcement string is too long (probably behind a proxy)." << std::endl;
 		} else {
-			std::cerr << "Announcement is: " << return_str << std::endl;
+			std::cout << "Announcement is: " << return_str << std::endl;
 
 			//write announcements to local file, even if the
 			//announcement is empty
@@ -229,10 +165,11 @@ _pingback (void *arg)
 			}
 		}
 	} else {
-		std::cerr << "curl failed: " << errbuf << std::endl;
+#ifndef NDEBUG
+		std::cerr << "pingback: " << h.error () << std::endl;
+#endif
 	}
 
-	curl_easy_cleanup (c);
 	delete cm;
 	return 0;
 }
@@ -241,6 +178,13 @@ namespace ARDOUR {
 
 void pingback (const string& version, const string& announce_path)
 {
+	if (ARDOUR_UI_UTILS::running_from_source_tree ()) {
+		/* we don't ping under these conditions, because the user is
+		   probably just paul or robin :)
+		*/
+		return;
+	}
+
 	ping_call* cm = new ping_call (version, announce_path);
 	pthread_t thread;
 

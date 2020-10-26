@@ -1,29 +1,32 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2014 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2016-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/export_format_manager.h"
+#include "ardour/filesystem_paths.h"
 
 #include "ardour/export_format_specification.h"
 #include "ardour/export_format_compatibility.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using std::string;
 
@@ -210,19 +213,26 @@ ExportFormatManager::init_formats ()
 		f_ptr.reset (new ExportFormatFLAC ());
 		add_format (f_ptr);
 	} catch (ExportFormatIncompatible & e) {}
+
+	std::string unused;
+	if (ArdourVideoToolPaths::transcoder_exe (unused, unused)) {
+		f_ptr.reset (new ExportFormatFFMPEG ("MP3", "mp3"));
+		add_format (f_ptr);
+	}
 }
 
 void
 ExportFormatManager::init_sample_rates ()
 {
 	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_Session, _("Session rate"))));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_8, "8 kHz")));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_22_05, "22,05 kHz")));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_44_1, "44,1 kHz")));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_48, "48 kHz")));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_88_2, "88,2 kHz")));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_96, "96 kHz")));
-	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_192, "192 kHz")));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_8,     string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(0), 8))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_22_05, string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(2), 22.05))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_44_1,  string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(1), 44.1))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_48,    string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(0), 48))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_88_2,  string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(1), 88.2))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_96,    string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(0), 96))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_176_4, string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(0), 176.4))));
+	add_sample_rate (SampleRatePtr (new SampleRateState (ExportFormatBase::SR_192,   string_compose ("%1%2%3 kHz", std::fixed, std::setprecision(0), 192))));
 }
 
 void
@@ -276,6 +286,13 @@ void
 ExportFormatManager::select_src_quality (ExportFormatBase::SRCQuality value)
 {
 	current_selection->set_src_quality (value);
+	check_for_description_change ();
+}
+
+void
+ExportFormatManager::select_codec_quality (int value)
+{
+	current_selection->set_codec_quality (value);
 	check_for_description_change ();
 }
 
@@ -367,6 +384,27 @@ void
 ExportFormatManager::select_normalize_dbtp (float value)
 {
 	current_selection->set_normalize_dbtp (value);
+	check_for_description_change ();
+}
+
+void
+ExportFormatManager::select_demo_noise_level (float value)
+{
+	current_selection->set_demo_noise_level (value);
+	check_for_description_change ();
+}
+
+void
+ExportFormatManager::select_demo_noise_duration (int value)
+{
+	current_selection->set_demo_noise_duration (value);
+	check_for_description_change ();
+}
+
+void
+ExportFormatManager::select_demo_noise_interval (int value)
+{
+	current_selection->set_demo_noise_interval (value);
 	check_for_description_change ();
 }
 

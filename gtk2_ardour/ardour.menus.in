@@ -14,10 +14,7 @@
       <menuitem action='SnapshotSwitch'/>
 #endif
       <menuitem action='SaveTemplate'/>
-      <menu name='Metadata' action='Metadata'>
-        <menuitem action='EditMetadata'/>
-        <menuitem action='ImportMetadata'/>
-      </menu>
+      <menuitem action='Archive'/>
       <separator/>
       <menuitem action='AddTrackBus'/>
       <separator/>
@@ -27,32 +24,44 @@
 #endif
       <!--menuitem action='importFromSession'/-->
 
-      <menu name='Scripting' action='Scripting'>
-        <menuitem action='AddLuaScript'/>
-        <menuitem action='RemoveLuaScript'/>
-      </menu>
-
       <menuitem action='OpenVideo'/>
       <menuitem action='CloseVideo'/>
+
+      <menuitem action='LoudnessAssistant'/>
 
       <menu name='Export' action='Export'>
         <menuitem action='ExportAudio'/>
         <menuitem action='StemExport'/>
         <menuitem action='ExportVideo'/>
       </menu>
+      <separator/>
+      <menuitem action='toggle-session-options-editor'/>
+
+      <menu name='MonitorMenu' action='MonitorMenu'>
+        <menuitem action='UseMonitorSection'/>
+        <menuitem action='monitor-cut-all'/>
+        <menuitem action='monitor-dim-all'/>
+        <menuitem action='monitor-mono'/>
+      </menu>
+
+      <menu name='Metadata' action='Metadata'>
+        <menuitem action='EditMetadata'/>
+        <menuitem action='ImportMetadata'/>
+      </menu>
       <menu name='Cleanup' action='Cleanup'>
         <menuitem action='bring-into-session'/>
         <menuitem action='CleanupPeakFiles'/>
-        <menuitem action='CleanupUnused'/>
+        <menuitem action='CleanupUnusedSources'/>
+        <menuitem action='CleanupUnusedRegions'/>
         <menuitem action='FlushWastebasket'/>
       </menu>
-      <separator/>
-      <menuitem action='toggle-session-options-editor'/>
 #ifdef __APPLE__
       <menuitem action='toggle-about'/>
 #endif
+#ifndef MIXBUS
       <separator/>
       <menuitem action='lock'/>
+#endif
 #ifndef __APPLE__
       <separator/>
       <menuitem action='Quit'/>
@@ -63,6 +72,7 @@
       <menuitem action='ToggleRoll'/>
       <menu action="PlayMenu">
         <menuitem action='PlaySelection'/>
+        <menuitem action='solo-selection'/>
         <menuitem action='PlayPreroll'/>
         <menuitem action='ToggleRollMaybe'/>
         <menuitem action='play-from-edit-point-and-return'/>
@@ -71,14 +81,11 @@
       <menuitem action='record-roll'/>
       <menuitem action='ToggleRollForgetCapture'/>
       <menuitem action='Record'/>
+      <menuitem action='RecordPreroll'/>
+      <menuitem action='RecordCountIn'/>
 #if 0
       <menuitem action='toggle-skip-playback'/>
 #endif
-
-      <separator/>
-      <menuitem action='set-loop-from-edit-range'/>
-      <menuitem action='set-punch-from-edit-range'/>
-      <menuitem action='set-session-from-edit-range'/>
 
       <separator/>
       <menuitem action='Forward'/>
@@ -87,6 +94,10 @@
       <menuitem action='TransitionToReverse'/>
       <separator/>
 
+      <separator/>
+      <menuitem action='set-loop-from-edit-range'/>
+      <menuitem action='set-punch-from-edit-range'/>
+      <menuitem action='set-session-from-edit-range'/>
 
       <menu action="MovePlayHeadMenu">
         <menuitem action='set-playhead'/>
@@ -128,6 +139,7 @@
       <menu action="MarkerMenu">
         <menuitem action='add-location-from-playhead'/>
         <menuitem action='remove-location-from-playhead'/>
+        <menuitem action='toggle-location-at-playhead'/>
         <separator/>
         <menuitem action='goto-mark-1'/>
         <menuitem action='goto-mark-2'/>
@@ -156,6 +168,7 @@
       <menuitem action='toggle-follow-playhead'/>
       <menuitem action='toggle-stationary-playhead'/>
       <menuitem action='ToggleFollowEdits'/>
+      <menuitem action='ToggleExternalSync'/>
       <menuitem action='panic'/>
       <separator/>
     </menu>
@@ -174,6 +187,7 @@
       <menu action="SelectMenu">
         <menuitem action='select-all-objects'/>
         <menuitem action='select-all-tracks'/>
+        <menuitem action='select-all-visible-lanes'/>
         <menuitem action='deselect-all'/>
         <menuitem action='invert-selection'/>
         <separator/>
@@ -225,54 +239,36 @@
         <menuitem action='toggle-region-fade-out'/>
       </menu>
       <separator/>
+      <menuitem action='tag-last-capture'/>
       <menuitem action='remove-last-capture'/>
       <separator/>
       <menu action="EditPointMenu">
         <menuitem action='cycle-edit-point'/>
         <menuitem action='cycle-edit-point-with-marker'/>
       </menu>
-      <menu name='SnapMode' action='SnapMode'>
-        <menuitem action='snap-off'/>
-        <menuitem action='snap-normal'/>
-        <menuitem action='snap-magnetic'/>
+      <menuitem action='cycle-snap-mode'/>
+      <menu name='GridChoice' action='GridChoice'>
+        <menuitem action='prev-grid-choice'/>
+        <menuitem action='next-grid-choice'/>
         <separator/>
-        <menuitem action='cycle-snap-mode'/>
-        <menuitem action='next-snap-choice'/>
-        <menuitem action='prev-snap-choice'/>
-        <menuitem action='next-snap-choice-music-only'/>
-        <menuitem action='prev-snap-choice-music-only'/>
-      </menu>
-      <menu name='SnapTo' action='SnapTo'>
-        <menuitem action='snap-to-cd-frame'/>
-        <menuitem action='snap-to-timecode-frame'/>
-        <menuitem action='snap-to-timecode-seconds'/>
-        <menuitem action='snap-to-timecode-minutes'/>
-        <menuitem action='snap-to-seconds'/>
-        <menuitem action='snap-to-minutes'/>
-        <menuitem action='snap-to-onetwentyeighths'/>
-        <menuitem action='snap-to-sixtyfourths'/>
-        <menuitem action='snap-to-thirtyseconds'/>
-        <menuitem action='snap-to-twentyeighths'/>
-        <menuitem action='snap-to-twentyfourths'/>
-        <menuitem action='snap-to-twentieths'/>
-        <menuitem action='snap-to-asixteenthbeat'/>
-        <menuitem action='snap-to-fourteenths'/>
-        <menuitem action='snap-to-twelfths'/>
-        <menuitem action='snap-to-tenths'/>
-        <menuitem action='snap-to-eighths'/>
-        <menuitem action='snap-to-sevenths'/>
-        <menuitem action='snap-to-sixths'/>
-        <menuitem action='snap-to-fifths'/>
-        <menuitem action='snap-to-quarters'/>
-        <menuitem action='snap-to-thirds'/>
-        <menuitem action='snap-to-halves'/>
-        <menuitem action='snap-to-beat'/>
-        <menuitem action='snap-to-bar'/>
-        <menuitem action='snap-to-mark'/>
-        <menuitem action='snap-to-region-start'/>
-        <menuitem action='snap-to-region-end'/>
-        <menuitem action='snap-to-region-sync'/>
-        <menuitem action='snap-to-region-boundary'/>
+        <menuitem action='grid-type-none'/>
+        <menuitem action='grid-type-bar'/>
+        <menuitem action='grid-type-beat'/>
+        <menuitem action='grid-type-halves'/>
+        <menuitem action='grid-type-quarters'/>
+        <menuitem action='grid-type-eighths'/>
+        <menuitem action='grid-type-asixteenthbeat'/>
+        <menuitem action='grid-type-thirtyseconds'/>
+        <menuitem action='grid-type-thirds'/>
+        <menuitem action='grid-type-sixths'/>
+        <menuitem action='grid-type-twelfths'/>
+        <menuitem action='grid-type-twentyfourths'/>
+        <menuitem action='grid-type-fifths'/>
+        <menuitem action='grid-type-tenths'/>
+        <menuitem action='grid-type-twentieths'/>
+        <menuitem action='grid-type-sevenths'/>
+        <menuitem action='grid-type-fourteenths'/>
+        <menuitem action='grid-type-twentyeighths'/>
       </menu>
       <separator/>
       <menu action="TempoMenu">
@@ -281,18 +277,18 @@
       </menu>
       <menuitem action='set-mouse-mode-object-range'/>
       <separator/>
-      <menu action="ActionScripts">
-        <menuitem action='manage-action-scripts'/>
+      <menu action="LuaScripts">
+        <menuitem action='toggle-script-manager'/>
         <separator/>
-        <menuitem action='script-action-1'/>
-        <menuitem action='script-action-2'/>
-        <menuitem action='script-action-3'/>
-        <menuitem action='script-action-4'/>
-        <menuitem action='script-action-5'/>
-        <menuitem action='script-action-6'/>
-        <menuitem action='script-action-7'/>
-        <menuitem action='script-action-8'/>
-        <menuitem action='script-action-9'/>
+        <menuitem action='script-1'/>
+        <menuitem action='script-2'/>
+        <menuitem action='script-3'/>
+        <menuitem action='script-4'/>
+        <menuitem action='script-5'/>
+        <menuitem action='script-6'/>
+        <menuitem action='script-7'/>
+        <menuitem action='script-8'/>
+        <menuitem action='script-9'/>
       </menu>
 #ifndef __APPLE__
       <separator/>
@@ -301,18 +297,20 @@
     </menu>
 
     <menu name='RegionMenu' action='RegionMenu'>
-      <menuitem action='insert-region-from-region-list'/>
+      <menuitem action='insert-region-from-source-list'/>
       <menuitem action='play-selected-regions'/>
+      <menuitem action='tag-selected-regions'/>
       <menuitem action='loop-region'/>
       <menuitem action='rename-region'/>
       <menuitem action='show-region-properties'/>
       <menuitem action='loudness-analyze-region'/>
       <menuitem action='spectral-analyze-region'/>
       <menu action='RegionMenuEdit'>
+#ifndef MIXBUS
         <menuitem action='combine-regions'/>
         <menuitem action='uncombine-regions'/>
+#endif
         <menuitem action='pitch-shift-region'/>
-        <menuitem action='split-region'/>
         <menuitem action='split-region-at-transients'/>
         <menuitem action='split-multichannel-region'/>
         <menuitem action='close-region-gaps'/>
@@ -343,6 +341,7 @@
         <menuitem action='normalize-region'/>
         <menuitem action='boost-region-gain'/>
         <menuitem action='cut-region-gain'/>
+        <menuitem action='reset-region-gain'/>
         <menuitem action='reset-region-gain-envelopes'/>
         <menuitem action='toggle-region-gain-envelope-active'/>
       </menu>
@@ -386,14 +385,19 @@
         <menuitem action='region-fill-track'/>
       </menu>
       <menuitem action='export-region'/>
-      <menuitem action='bounce-regions-processed'/>
       <menuitem action='bounce-regions-unprocessed'/>
+#ifndef MIXBUS
+      <menuitem action='bounce-regions-processed'/>
+#endif
       <separator/>
       <menuitem action='remove-region'/>
     </menu>
 
     <menu action='TrackMenu'>
       <menuitem action='AddTrackBus'/>
+#ifdef MIXBUS
+      <menuitem action='addExistingAudioFiles'/>
+#endif
       <menuitem action='duplicate-routes'/>
       <separator/>
       <menuitem action='track-record-enable-toggle'/>
@@ -413,8 +417,11 @@
         <menuitem action='track-height-small'/>
       </menu>
       <separator/>
+        <menuitem action='toggle-layer-display'/>
+      <separator/>
       <menuitem action='toggle-track-active'/>
       <menuitem action='remove-track'/>
+      <separator/>
     </menu>
 
     <menu name='View' action = 'View'>
@@ -423,6 +430,14 @@
 
       <separator/>
 
+      <menu action="AutomationMenu">
+        <menuitem action="toggle-all-existing-automation"/>
+      </menu>
+
+      <separator/>
+
+      <menuitem action="toggle-layer-display"/>
+      
       <menu action="PrimaryClockMenu">
         <menuitem action='focus-on-clock'/>
         <menuitem action="primary-clock-timecode"/>
@@ -443,7 +458,9 @@
         <menuitem action='temporal-zoom-in'/>
         <menuitem action='temporal-zoom-out'/>
         <menuitem action='zoom-to-session'/>
+        <menuitem action='zoom-to-extents'/>
         <menuitem action='zoom-to-selection'/>
+        <menuitem action='zoom-to-selection-horiz'/>
         <menuitem action='fit-selection'/>
         <menuitem action='toggle-zoom'/>
         <menuitem action='expand-tracks'/>
@@ -522,12 +539,19 @@
 
       <menuitem action='show-editor-mixer'/>
       <menuitem action='show-editor-list'/>
-      <menuitem action='ToggleMixerList'/>
-      <menuitem action='ToggleMonitorSection'/>
-      <menuitem action='ToggleMeasureVisibility'/>
+
       <menuitem action='ToggleSummary'/>
       <menuitem action='ToggleGroupTabs'/>
       <menuitem action='show-marker-lines'/>
+
+      <separator/>
+      <menuitem action='ToggleMixerList'/>
+#ifdef MIXBUS
+      <menuitem action='ToggleMixbusPane'/>
+#endif
+      <menuitem action='ToggleVCAPane'/>
+      <menuitem action='ToggleMonitorSection'/>
+      <menuitem action='ToggleFoldbackStrip'/>
 
     </menu>
     <menu action = 'WindowMenu'>
@@ -552,25 +576,38 @@
         <menuitem action='detach-preferences'/>
       </menu>
       <menuitem action='toggle-meterbridge'/>
-      <menuitem action='toggle-luawindow'/>
       <separator/>
+#ifndef MIXBUS
       <menuitem action='toggle-inspector'/>
+#endif
       <menuitem action='toggle-locations'/>
-      <menuitem action='toggle-key-editor'/>
+#ifndef MIXBUS
       <menuitem action='toggle-bundle-manager'/>
+#endif
       <menuitem action='toggle-big-clock'/>
+      <menuitem action='toggle-big-transport'/>
+      <menuitem action='toggle-transport-masters'/>
 #if 0
       <menuitem action='toggle-speaker-config'/>
 #endif
+      <menuitem action='toggle-plugin-dsp-load'/>
+#if 0
+      <menuitem action='toggle-idle-o-meter'/>
+#endif
 
       <separator/>
-
       <menuitem action='ToggleJadeo'/>
       <separator/>
 
-      <menuitem action='NewMIDITracer'/>
       <menuitem action='toggle-audio-connection-manager'/>
       <menuitem action='toggle-midi-connection-manager'/>
+      <separator/>
+      <menuitem action='toggle-luawindow'/>
+      <menuitem action='ManageTemplates'/>
+      <menuitem action='toggle-key-editor'/>
+      <separator/>
+      <menuitem action='toggle-virtual-keyboard'/>
+      <menuitem action='NewMIDITracer'/>
       <menuitem action='toggle-log-window'/>
       <separator/>
     </menu>
@@ -578,39 +615,47 @@
 #ifndef __APPLE__
       <menuitem action='toggle-about'/>
 #endif
+#ifdef MIXBUS
+      <menuitem action='website'/>
+      <menuitem action='tutorial'/>
+      <menuitem action='reference'/>
+      <menuitem action='videos'/>
+      <menuitem action='forums'/>
+#else
       <menuitem action='chat'/>
-      <menuitem action='manual'/>
+      <menuitem action='tutorial'/>
       <menuitem action='reference'/>
       <menuitem action='forums'/>
       <menuitem action='howto-report'/>
       <menuitem action='tracker'/>
       <menuitem action='website'/>
       <menuitem action='website-dev'/>
+#endif
     </menu>
   </menubar>
 
-  <popup action="editorTabbableButtonMenu">
+  <popup action="editorTabbableButtonMenu" accelerators='true'>
     <menuitem action='show-editor'/>
     <menuitem action='hide-editor'/>
     <menuitem action='attach-editor'/>
     <menuitem action='detach-editor'/>
   </popup>
 
-  <popup action="mixerTabbableButtonMenu">
+  <popup action="mixerTabbableButtonMenu" accelerators='true'>
     <menuitem action='show-mixer'/>
     <menuitem action='hide-mixer'/>
     <menuitem action='attach-mixer'/>
     <menuitem action='detach-mixer'/>
   </popup>
 
-  <popup action="preferencesTabbableButtonMenu">
+  <popup action="preferencesTabbableButtonMenu" accelerators='true'>
     <menuitem action='show-preferences'/>
     <menuitem action='hide-preferences'/>
     <menuitem action='attach-preferences'/>
     <menuitem action='detach-preferences'/>
   </popup>
 
-  <popup action="RulerMenuPopup">
+  <popup action="RulerMenuPopup" accelerators='true'>
     <menuitem action="toggle-minsec-ruler"/>
     <menuitem action="toggle-timecode-ruler"/>
     <menuitem action="toggle-samples-ruler"/>
@@ -627,16 +672,23 @@
     <menuitem action="toggle-video-ruler"/>
   </popup>
 
-  <popup name='ProcessorMenu'>
+  <popup name='ProcessorMenu' accelerators='true'>
     <menuitem action='newplugin'/>
     <menuitem action='newinsert'/>
     <menuitem action='newsend'/>
     <menuitem action='newaux'/>
+    <menuitem action='newlisten'/>
+    <menuitem action='removelisten'/>
     <separator/>
     <menuitem action='controls'/>
-#ifndef MIXBUS
     <menuitem action='send_options'/>
-#endif
+    <separator/>
+    <menu action="disk-io-menu">
+      <menuitem action='disk-io-prefader'/>
+      <menuitem action='disk-io-postfader'/>
+      <menuitem action='disk-io-custom'/>
+    </menu>
+    <menuitem action='custom-volume-pos'/>
     <separator/>
     <menuitem action='clear'/>
     <menuitem action='clear_pre'/>
@@ -654,7 +706,9 @@
     <separator/>
     <menuitem action='activate_all'/>
     <menuitem action='deactivate_all'/>
+#ifndef MIXBUS
     <menuitem action='ab_plugins'/>
+#endif
     <separator/>
     <menuitem action='manage-pins'/>
     <separator/>
@@ -662,41 +716,22 @@
     <menuitem action='edit-generic'/>
   </popup>
 
-  <popup name='ShuttleUnitPopup'>
+  <popup name='ShuttleUnitPopup' accelerators='true'>
     <menuitem action='SetShuttleUnitsPercentage'/>
     <menuitem action='SetShuttleUnitsSemitones'/>
   </popup>
 
-  <popup name='RegionListMenu'>
+  <popup name='RegionListMenu' accelerators='true'>
     <menuitem action='rlAudition'/>
-    <menuitem action='rlHide'/>
-    <menuitem action='rlShow'/>
-    <separator/>
-    <menuitem action='rlShowAll'/>
-    <menuitem action='rlShowAuto'/>
-    <menu name='Sort' action='RegionListSort'>
-      <menuitem action='SortAscending'/>
-      <menuitem action='SortDescending'/>
-      <separator/>
-      <menuitem action='SortByRegionName'/>
-      <menuitem action='SortByRegionLength'/>
-      <menuitem action='SortByRegionPosition'/>
-      <menuitem action='SortByRegionTimestamp'/>
-      <menuitem action='SortByRegionStartinFile'/>
-      <menuitem action='SortByRegionEndinFile'/>
-      <menuitem action='SortBySourceFileName'/>
-      <menuitem action='SortBySourceFileLength'/>
-      <menuitem action='SortBySourceFileCreationDate'/>
-      <menuitem action='SortBySourceFilesystem'/>
-    </menu>
     <separator/>
     <menuitem action='addExternalAudioToRegionList'/>
     <separator/>
     <menuitem action='removeUnusedRegions'/>
   </popup>
 
-  <popup name='PopupRegionMenu' action='PopupRegionMenu'>
+  <popup name='PopupRegionMenu' action='PopupRegionMenu' accelerators='true'>
     <menuitem action='play-selected-regions'/>
+    <menuitem action='tag-selected-regions'/>
     <menuitem action='loop-region'/>
     <menuitem action='rename-region'/>
     <menuitem action='show-region-properties'/>
@@ -764,6 +799,7 @@
       <menuitem action='normalize-region'/>
       <menuitem action='boost-region-gain'/>
       <menuitem action='cut-region-gain'/>
+      <menuitem action='reset-region-gain'/>
       <menuitem action='reset-region-gain-envelopes'/>
       <menuitem action='toggle-region-gain-envelope-active'/>
     </menu>
@@ -778,13 +814,14 @@
       <menuitem action='region-fill-track'/>
     </menu>
     <menuitem action='export-region'/>
-    <menuitem action='bounce-regions-processed'/>
     <menuitem action='bounce-regions-unprocessed'/>
+#ifndef MIXBUS
+    <menuitem action='bounce-regions-processed'/>
+#endif
     <menuitem action='loudness-analyze-region'/>
     <menuitem action='spectral-analyze-region'/>
     <separator/>
     <menuitem action='remove-region'/>
-
   </popup>
 
 </ui>

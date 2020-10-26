@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2001-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2015-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <vector>
 
@@ -42,8 +46,9 @@
 #include "gtkmm2ext/bindings.h"
 #include "gtkmm2ext/keyboard.h"
 #include "gtkmm2ext/debug.h"
+#include "gtkmm2ext/utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 using namespace Gtk;
@@ -59,7 +64,7 @@ guint Keyboard::insert_note_mod = GDK_CONTROL_MASK;
 
 #ifdef __APPLE__
 
-uint Keyboard::PrimaryModifier = GDK_META_MASK|GDK_MOD2_MASK;   // Command
+guint Keyboard::PrimaryModifier = GDK_MOD2_MASK;   // Command
 guint Keyboard::SecondaryModifier = GDK_CONTROL_MASK; // Control
 guint Keyboard::TertiaryModifier = GDK_SHIFT_MASK; // Shift
 guint Keyboard::Level4Modifier = GDK_MOD1_MASK; // Alt/Option
@@ -72,6 +77,11 @@ const char* Keyboard::secondary_modifier_name() { return _("Control"); }
 const char* Keyboard::tertiary_modifier_name() { return S_("Key|Shift"); }
 const char* Keyboard::level4_modifier_name() { return _("Option"); }
 
+const char* Keyboard::primary_modifier_short_name() { return _("Cmd"); }
+const char* Keyboard::secondary_modifier_short_name() { return _("Ctrl"); }
+const char* Keyboard::tertiary_modifier_short_name() { return S_("Key|Shift"); }
+const char* Keyboard::level4_modifier_short_name() { return _("Opt"); }
+
 guint Keyboard::snap_mod = Keyboard::Level4Modifier|Keyboard::TertiaryModifier; // XXX this is probably completely wrong
 guint Keyboard::snap_delta_mod = Keyboard::Level4Modifier;
 
@@ -80,7 +90,7 @@ guint Keyboard::snap_delta_mod = Keyboard::Level4Modifier;
 guint Keyboard::PrimaryModifier = GDK_CONTROL_MASK; // Control
 guint Keyboard::SecondaryModifier = GDK_MOD1_MASK;  // Alt/Option
 guint Keyboard::TertiaryModifier = GDK_SHIFT_MASK;  // Shift
-guint Keyboard::Level4Modifier = GDK_MOD4_MASK;     // Mod4/Windows
+guint Keyboard::Level4Modifier = GDK_MOD4_MASK|GDK_SUPER_MASK; // Mod4/Windows
 guint Keyboard::CopyModifier = GDK_CONTROL_MASK;
 guint Keyboard::RangeSelectModifier = GDK_SHIFT_MASK;
 guint Keyboard::button2_modifiers = 0; /* not used */
@@ -89,6 +99,11 @@ const char* Keyboard::primary_modifier_name() { return _("Control"); }
 const char* Keyboard::secondary_modifier_name() { return _("Alt"); }
 const char* Keyboard::tertiary_modifier_name() { return S_("Key|Shift"); }
 const char* Keyboard::level4_modifier_name() { return _("Windows"); }
+
+const char* Keyboard::primary_modifier_short_name() { return _("Ctrl"); }
+const char* Keyboard::secondary_modifier_short_name() { return _("Alt"); }
+const char* Keyboard::tertiary_modifier_short_name() { return S_("Key|Shift"); }
+const char* Keyboard::level4_modifier_short_name() { return _("Win"); }
 
 guint Keyboard::snap_mod = Keyboard::SecondaryModifier;
 guint Keyboard::snap_delta_mod = Keyboard::SecondaryModifier|Keyboard::Level4Modifier;
@@ -116,6 +131,8 @@ Gtk::Window* Keyboard::pre_dialog_active_window = 0;
 
 /* set this to initially contain the modifiers we care about, then track changes in ::set_edit_modifier() etc. */
 GdkModifierType Keyboard::RelevantModifierKeyMask;
+sigc::signal0<void> Keyboard::RelevantModifierKeysChanged;
+sigc::signal1<void,Gtk::Window*> Keyboard::HideMightMeanQuit;
 
 void
 Keyboard::magic_widget_grab_focus ()
@@ -142,39 +159,7 @@ Keyboard::Keyboard ()
                 _current_binding_name = _("Unknown");
 	}
 
-	RelevantModifierKeyMask = (GdkModifierType) gtk_accelerator_get_default_mod_mask ();
-
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | PrimaryModifier);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | SecondaryModifier);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | TertiaryModifier);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | Level4Modifier);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | CopyModifier);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | RangeSelectModifier);
-
-	gtk_accelerator_set_default_mod_mask (RelevantModifierKeyMask);
-
-#ifdef __APPLE__
-        /* Remove SUPER,HYPER,META.
-         *
-         * GTK on OS X adds META when Command is pressed for various indefensible reasons, since
-         * it also uses MOD2 to indicate Command. Our code assumes that each
-         * modifier (Primary, Secondary etc.) is represented by a single bit in
-         * the modifier mask, but GTK's (STUPID) design uses two (MOD2 + META)
-         * to represent the Command key. Some discussion about this is here:
-         * https://bugzilla.gnome.org/show_bug.cgi?id=692597 
-         *
-         * We cannot do this until AFTER we told GTK what the default modifier
-         * was, because otherwise it will fail to recognize MOD2-META-<key> as
-         * an accelerator.
-         *
-         * Note that in the tabbed branch, we no longer use GTK accelerators
-         * for functional purposes, so this is as critical for that branch.
-         */
-
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~GDK_SUPER_MASK);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~GDK_HYPER_MASK);
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~GDK_META_MASK);
-#endif
+	reset_relevant_modifier_key_mask();
 
 	snooper_id = gtk_key_snooper_install (_snooper, (gpointer) this);
 }
@@ -188,26 +173,16 @@ XMLNode&
 Keyboard::get_state (void)
 {
 	XMLNode* node = new XMLNode ("Keyboard");
-	char buf[32];
 
-	snprintf (buf, sizeof (buf), "%d", CopyModifier);
-	node->add_property ("copy-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", edit_but);
-	node->add_property ("edit-button", buf);
-	snprintf (buf, sizeof (buf), "%d", edit_mod);
-	node->add_property ("edit-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", delete_but);
-	node->add_property ("delete-button", buf);
-	snprintf (buf, sizeof (buf), "%d", delete_mod);
-	node->add_property ("delete-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", snap_mod);
-	node->add_property ("snap-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", snap_delta_mod);
-	node->add_property ("snap-delta-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", insert_note_but);
-	node->add_property ("insert-note-button", buf);
-	snprintf (buf, sizeof (buf), "%d", insert_note_mod);
-	node->add_property ("insert-note-modifier", buf);
+	node->set_property ("copy-modifier", CopyModifier);
+	node->set_property ("edit-button", edit_but);
+	node->set_property ("edit-modifier", edit_mod);
+	node->set_property ("delete-button", delete_but);
+	node->set_property ("delete-modifier", delete_mod);
+	node->set_property ("snap-modifier", snap_mod);
+	node->set_property ("snap-delta-modifier", snap_delta_mod);
+	node->set_property ("insert-note-button", insert_note_but);
+	node->set_property ("insert-note-modifier", insert_note_mod);
 
 	return *node;
 }
@@ -215,43 +190,15 @@ Keyboard::get_state (void)
 int
 Keyboard::set_state (const XMLNode& node, int /*version*/)
 {
-	const XMLProperty* prop;
-
-	if ((prop = node.property ("copy-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &CopyModifier);
-	}
-
-	if ((prop = node.property ("edit-button")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &edit_but);
-	}
-
-	if ((prop = node.property ("edit-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &edit_mod);
-	}
-
-	if ((prop = node.property ("delete-button")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &delete_but);
-	}
-
-	if ((prop = node.property ("delete-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &delete_mod);
-	}
-
-	if ((prop = node.property ("snap-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &snap_mod);
-	}
-
-	if ((prop = node.property ("snap-delta-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &snap_delta_mod);
-	}
-
-	if ((prop = node.property ("insert-note-button")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &insert_note_but);
-	}
-
-	if ((prop = node.property ("insert-note-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &insert_note_mod);
-	}
+	node.get_property ("copy-modifier", CopyModifier);
+	node.get_property ("edit-button", edit_but);
+	node.get_property ("edit-modifier", edit_mod);
+	node.get_property ("delete-button", delete_but);
+	node.get_property ("delete-modifier", delete_mod);
+	node.get_property ("snap-modifier", snap_mod);
+	node.get_property ("snap-delta-modifier", snap_delta_mod);
+	node.get_property ("insert-note-button", insert_note_but);
+	node.get_property ("insert-note-modifier", insert_note_mod);
 
 	return 0;
 }
@@ -262,64 +209,6 @@ Keyboard::_snooper (GtkWidget *widget, GdkEventKey *event, gpointer data)
 	return ((Keyboard *) data)->snooper (widget, event);
 }
 
-static string
-show_gdk_event_state (int state)
-{
-	string s;
-	if (state & GDK_SHIFT_MASK) {
-		s += "+SHIFT";
-	}
-	if (state & GDK_LOCK_MASK) {
-		s += "+LOCK";
-	}
-	if (state & GDK_CONTROL_MASK) {
-		s += "+CONTROL";
-	}
-	if (state & GDK_MOD1_MASK) {
-		s += "+MOD1";
-	}
-	if (state & GDK_MOD2_MASK) {
-		s += "+MOD2";
-	}
-	if (state & GDK_MOD3_MASK) {
-		s += "+MOD3";
-	}
-	if (state & GDK_MOD4_MASK) {
-		s += "+MOD4";
-	}
-	if (state & GDK_MOD5_MASK) {
-		s += "+MOD5";
-	}
-	if (state & GDK_BUTTON1_MASK) {
-		s += "+BUTTON1";
-	}
-	if (state & GDK_BUTTON2_MASK) {
-		s += "+BUTTON2";
-	}
-	if (state & GDK_BUTTON3_MASK) {
-		s += "+BUTTON3";
-	}
-	if (state & GDK_BUTTON4_MASK) {
-		s += "+BUTTON4";
-	}
-	if (state & GDK_BUTTON5_MASK) {
-		s += "+BUTTON5";
-	}
-	if (state & GDK_SUPER_MASK) {
-		s += "+SUPER";
-	}
-	if (state & GDK_HYPER_MASK) {
-		s += "+HYPER";
-	}
-	if (state & GDK_META_MASK) {
-		s += "+META";
-	}
-	if (state & GDK_RELEASE_MASK) {
-		s += "+RELEASE";
-	}
-
-	return s;
-}
 
 gint
 Keyboard::snooper (GtkWidget *widget, GdkEventKey *event)
@@ -387,17 +276,44 @@ Keyboard::snooper (GtkWidget *widget, GdkEventKey *event)
 		}
 	}
 
-	/* Special keys that we want to handle in
-	   any dialog, no matter whether it uses
-	   the regular set of accelerators or not
-	*/
+	if (event->type == GDK_KEY_RELEASE) {
 
-	if (event->type == GDK_KEY_RELEASE && modifier_state_equals (event->state, PrimaryModifier)) {
-		switch (event->keyval) {
-		case GDK_w:
-			close_current_dialog ();
-			ret = true;
-			break;
+		State::iterator k = find (state.begin(), state.end(), keyval);
+
+		if (k != state.end()) {
+			/* this cannot change the ordering, so need to sort */
+			state.erase (k);
+			if (state.empty()) {
+				DEBUG_TRACE (DEBUG::Keyboard, "no keys down\n");
+			} else {
+#ifndef NDEBUG
+				if (DEBUG_ENABLED(DEBUG::Keyboard)) {
+					DEBUG_STR_DECL(a);
+					DEBUG_STR_APPEND(a, "keyboard, keys still down: ");
+					for (State::iterator i = state.begin(); i != state.end(); ++i) {
+						DEBUG_STR_APPEND(a, gdk_keyval_name (*i));
+						DEBUG_STR_APPEND(a, ',');
+					}
+					DEBUG_STR_APPEND(a, '\n');
+					DEBUG_TRACE (DEBUG::Keyboard, DEBUG_STR(a).str());
+				}
+#endif /* NDEBUG */
+			}
+		}
+
+		if (modifier_state_equals (event->state, PrimaryModifier)) {
+
+			/* Special keys that we want to handle in
+			   any dialog, no matter whether it uses
+			   the regular set of accelerators or not
+			*/
+
+			switch (event->keyval) {
+			case GDK_w:
+				close_current_dialog ();
+				ret = true;
+				break;
+			}
 		}
 	}
 
@@ -407,9 +323,29 @@ Keyboard::snooper (GtkWidget *widget, GdkEventKey *event)
 }
 
 void
+Keyboard::reset_relevant_modifier_key_mask ()
+{
+	RelevantModifierKeyMask = (GdkModifierType) gtk_accelerator_get_default_mod_mask ();
+
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | PrimaryModifier);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | SecondaryModifier);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | TertiaryModifier);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | Level4Modifier);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | CopyModifier);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | RangeSelectModifier);
+
+	gtk_accelerator_set_default_mod_mask (RelevantModifierKeyMask);
+
+	RelevantModifierKeysChanged(); /* EMIT SIGNAL */
+}
+
+void
 Keyboard::close_current_dialog ()
 {
 	if (current_window) {
+
+		HideMightMeanQuit (current_window); /* EMIT SIGNAL */
+
 		current_window->hide ();
 		current_window = 0;
 
@@ -468,7 +404,7 @@ Keyboard::leave_window (GdkEventCrossing *ev, Gtk::Window* /*win*/)
 
 		case GDK_NOTIFY_VIRTUAL:
 			DEBUG_TRACE (DEBUG::Keyboard, "VIRTUAL crossing ... out\n");
-			/* fallthru */
+			/* fallthrough */
 
 		default:
 			DEBUG_TRACE (DEBUG::Keyboard, "REAL crossing ... out\n");
@@ -477,6 +413,7 @@ Keyboard::leave_window (GdkEventCrossing *ev, Gtk::Window* /*win*/)
 			current_window = 0;
 		}
 	} else {
+		DEBUG_TRACE (DEBUG::Keyboard, "LEAVE window without event\n");
 		current_window = 0;
 	}
 
@@ -498,7 +435,9 @@ Keyboard::focus_out_window (GdkEventFocus * ev, Gtk::Window* win)
 		state.clear ();
 		current_window = 0;
 	}  else {
-		current_window = 0;
+		if (win == current_window) {
+			current_window = 0;
+		}
 	}
 
 	DEBUG_TRACE (DEBUG::Keyboard, string_compose ("Foucusing out window, title = %1\n", win->get_title()));
@@ -515,9 +454,8 @@ Keyboard::set_edit_button (guint but)
 void
 Keyboard::set_edit_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~edit_mod);
 	edit_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | edit_mod);
+	reset_relevant_modifier_key_mask();
 }
 
 void
@@ -529,9 +467,8 @@ Keyboard::set_delete_button (guint but)
 void
 Keyboard::set_delete_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~delete_mod);
 	delete_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | delete_mod);
+	reset_relevant_modifier_key_mask();
 }
 
 void
@@ -543,34 +480,30 @@ Keyboard::set_insert_note_button (guint but)
 void
 Keyboard::set_insert_note_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~insert_note_mod);
 	insert_note_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | insert_note_mod);
+	reset_relevant_modifier_key_mask();
 }
 
 
 void
 Keyboard::set_modifier (uint32_t newval, uint32_t& var)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~var);
 	var = newval;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | var);
+	reset_relevant_modifier_key_mask();
 }
 
 void
 Keyboard::set_snap_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~snap_mod);
 	snap_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | snap_mod);
+	reset_relevant_modifier_key_mask();
 }
 
 void
 Keyboard::set_snap_delta_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~snap_delta_mod);
 	snap_delta_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | snap_delta_mod);
+	reset_relevant_modifier_key_mask();
 }
 
 bool
@@ -702,8 +635,9 @@ Keyboard::read_keybindings (string const & path)
 	XMLNodeList const& children = tree.root()->children();
 
 	for (XMLNodeList::const_iterator i = children.begin(); i != children.end(); ++i) {
-		if ((*i)->name() == X_("Bindings")) {
-		        XMLProperty const* name = (*i)->property (X_("name"));
+		XMLNode const * child = *i;
+		if (child->name() == X_("Bindings")) {
+		        XMLProperty const* name = child->property (X_("name"));
 		        if (!name) {
 			        warning << _("Keyboard binding found without a name") << endmsg;
 			        continue;
@@ -724,9 +658,11 @@ Keyboard::store_keybindings (string const & path)
 	XMLNode* bnode;
 	int ret = 0;
 
+	DEBUG_TRACE (DEBUG::Bindings, string_compose ("save bindings to %1\n", path));
+
 	for (list<Bindings*>::const_iterator b = Bindings::bindings.begin(); b != Bindings::bindings.end(); ++b) {
 		bnode = new XMLNode (X_("Bindings"));
-		bnode->add_property (X_("name"), (*b)->name());
+		bnode->set_property (X_("name"), (*b)->name());
 		(*b)->save (*bnode);
 		node->add_child_nocopy (*bnode);
 	}
@@ -758,6 +694,7 @@ Keyboard::reset_bindings ()
 
 	{
 		PBD::Unwinder<bool> uw (can_save_keybindings, false);
+		Bindings::reset_bindings ();
 		setup_keybindings ();
 		Bindings::associate_all ();
 	}

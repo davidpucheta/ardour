@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 
@@ -30,7 +32,7 @@
 #include "ardour/return.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -45,7 +47,7 @@ Return::name_and_id_new_return (Session& s, uint32_t& bitslot)
 
 Return::Return (Session& s, bool internal)
 	: IOProcessor (s, (internal ? false : true), false,
-		       name_and_id_new_return (s, _bitslot))
+		       name_and_id_new_return (s, _bitslot), "", DataType::AUDIO, true)
 	, _metering (false)
 {
 	/* never muted */
@@ -64,19 +66,11 @@ Return::~Return ()
 }
 
 XMLNode&
-Return::get_state(void)
+Return::state()
 {
-	return state (true);
-}
-
-XMLNode&
-Return::state(bool full)
-{
-	XMLNode& node = IOProcessor::state(full);
-	char buf[32];
-	node.add_property ("type", "return");
-	snprintf (buf, sizeof (buf), "%" PRIu32, _bitslot);
-	node.add_property ("bitslot", buf);
+	XMLNode& node = IOProcessor::state ();
+	node.set_property ("type", "return");
+	node.set_property ("bitslot", _bitslot);
 
 	return node;
 }
@@ -86,7 +80,6 @@ Return::set_state (const XMLNode& node, int version)
 {
 	XMLNodeList nlist = node.children();
 	XMLNodeIterator niter;
-	const XMLProperty* prop;
 	const XMLNode* insert_node = &node;
 
 	/* Return has regular IO automation (gain, pan) */
@@ -102,12 +95,13 @@ Return::set_state (const XMLNode& node, int version)
 	IOProcessor::set_state (*insert_node, version);
 
 	if (!node.property ("ignore-bitslot")) {
-		if ((prop = node.property ("bitslot")) == 0) {
-			_bitslot = _session.next_return_id();
-		} else {
+		uint32_t bitslot;
+		if (node.get_property ("bitslot", bitslot)) {
 			_session.unmark_return_id (_bitslot);
-			sscanf (prop->value().c_str(), "%" PRIu32, &_bitslot);
+			_bitslot = bitslot;
 			_session.mark_return_id (_bitslot);
+		} else {
+			_bitslot = _session.next_return_id();
 		}
 	}
 
@@ -115,7 +109,7 @@ Return::set_state (const XMLNode& node, int version)
 }
 
 void
-Return::run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pframes_t nframes, bool)
+Return::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, double speed, pframes_t nframes, bool)
 {
 	if ((!_active && !_pending_active) || _input->n_ports() == ChanCount::ZERO) {
 		return;
@@ -126,14 +120,14 @@ Return::run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pfra
 
 	// Can't automate gain for sends or returns yet because we need different buffers
 	// so that we don't overwrite the main automation data for the route amp
-	// _amp->setup_gain_automation (start_frame, end_frame, nframes);
-	_amp->run (bufs, start_frame, end_frame, nframes, true);
+	// _amp->setup_gain_automation (start_sample, end_sample, nframes);
+	_amp->run (bufs, start_sample, end_sample, speed, nframes, true);
 
 	if (_metering) {
 		if (_amp->gain_control()->get_value() == 0) {
 			_meter->reset();
 		} else {
-			_meter->run (bufs, start_frame, end_frame, nframes, true);
+			_meter->run (bufs, start_sample, end_sample, speed, nframes, true);
 		}
 	}
 

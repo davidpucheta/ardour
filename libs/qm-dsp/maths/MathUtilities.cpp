@@ -16,8 +16,11 @@
 #include "MathUtilities.h"
 
 #include <iostream>
+#include <algorithm>
+#include <vector>
 #include <cmath>
 
+using namespace std;
 
 double MathUtilities::mod(double x, double y)
 {
@@ -36,16 +39,16 @@ double MathUtilities::princarg(double ang)
     return ValOut;
 }
 
-void MathUtilities::getAlphaNorm(const double *data, unsigned int len, unsigned int alpha, double* ANorm)
+void MathUtilities::getAlphaNorm(const double *data, int len, int alpha, double* ANorm)
 {
-    unsigned int i;
+    int i;
     double temp = 0.0;
     double a=0.0;
-
+	
     for( i = 0; i < len; i++)
     {
 	temp = data[ i ];
-
+		
 	a  += ::pow( fabs(temp), double(alpha) );
     }
     a /= ( double )len;
@@ -54,17 +57,16 @@ void MathUtilities::getAlphaNorm(const double *data, unsigned int len, unsigned 
     *ANorm = a;
 }
 
-double MathUtilities::getAlphaNorm( const std::vector <double> &data, unsigned int alpha )
+double MathUtilities::getAlphaNorm( const vector <double> &data, int alpha )
 {
-    unsigned int i;
-    unsigned int len = data.size();
+    int i;
+    int len = data.size();
     double temp = 0.0;
     double a=0.0;
-
+	
     for( i = 0; i < len; i++)
     {
 	temp = data[ i ];
-
 	a  += ::pow( fabs(temp), double(alpha) );
     }
     a /= ( double )len;
@@ -75,59 +77,32 @@ double MathUtilities::getAlphaNorm( const std::vector <double> &data, unsigned i
 
 double MathUtilities::round(double x)
 {
-    double val = (double)floor(x + 0.5);
-
-    return val;
+    if (x < 0) {
+        return -floor(-x + 0.5);
+    } else {
+        return floor(x + 0.5);
+    }
 }
 
-double MathUtilities::median(const double *src, unsigned int len)
+double MathUtilities::median(const double *src, int len)
 {
-    unsigned int i, j;
-    double tmp = 0.0;
-    double tempMedian;
-    double medianVal;
+    if (len == 0) return 0;
+    
+    vector<double> scratch;
+    for (int i = 0; i < len; ++i) scratch.push_back(src[i]);
+    sort(scratch.begin(), scratch.end());
 
-    double* scratch = new double[ len ];//Vector < double > sortedX = Vector < double > ( size );
-
-    for ( i = 0; i < len; i++ )
-    {
-	scratch[i] = src[i];
+    int middle = len/2;
+    if (len % 2 == 0) {
+        return (scratch[middle] + scratch[middle - 1]) / 2;
+    } else {
+        return scratch[middle];
     }
-
-    for ( i = 0; i < len - 1; i++ )
-    {
-	for ( j = 0; j < len - 1 - i; j++ )
-	{
-	    if ( scratch[j + 1] < scratch[j] )
-	    {
-		// compare the two neighbors
-		tmp = scratch[j]; // swap a[j] and a[j+1]
-		scratch[j] = scratch[j + 1];
-		scratch[j + 1] = tmp;
-	    }
-	}
-    }
-    int middle;
-    if ( len % 2 == 0 )
-    {
-	middle = len / 2;
-	tempMedian = ( scratch[middle] + scratch[middle - 1] ) / 2;
-    }
-    else
-    {
-	middle = ( int )floor( len / 2.0 );
-	tempMedian = scratch[middle];
-    }
-
-    medianVal = tempMedian;
-
-    delete [] scratch;
-    return medianVal;
 }
 
-double MathUtilities::sum(const double *src, unsigned int len)
+double MathUtilities::sum(const double *src, int len)
 {
-    unsigned int i ;
+    int i ;
     double retVal =0.0;
 
     for(  i = 0; i < len; i++)
@@ -138,24 +113,28 @@ double MathUtilities::sum(const double *src, unsigned int len)
     return retVal;
 }
 
-double MathUtilities::mean(const double *src, unsigned int len)
+double MathUtilities::mean(const double *src, int len)
 {
     double retVal =0.0;
 
-    double s = sum( src, len );
+    if (len == 0) return 0;
 
+    double s = sum( src, len );
+	
     retVal =  s  / (double)len;
 
     return retVal;
 }
 
-double MathUtilities::mean(const std::vector<double> &src,
-                           unsigned int start,
-                           unsigned int count)
+double MathUtilities::mean(const vector<double> &src,
+                           int start,
+                           int count)
 {
     double sum = 0.;
-
-    for (unsigned int i = 0; i < count; ++i)
+	
+    if (count == 0) return 0;
+    
+    for (int i = 0; i < (int)count; ++i)
     {
         sum += src[start + i];
     }
@@ -163,16 +142,16 @@ double MathUtilities::mean(const std::vector<double> &src,
     return sum / count;
 }
 
-void MathUtilities::getFrameMinMax(const double *data, unsigned int len, double *min, double *max)
+void MathUtilities::getFrameMinMax(const double *data, int len, double *min, double *max)
 {
-    unsigned int i;
+    int i;
     double temp = 0.0;
 
     if (len == 0) {
         *min = *max = 0;
         return;
     }
-
+	
     *min = data[0];
     *max = data[0];
 
@@ -188,16 +167,16 @@ void MathUtilities::getFrameMinMax(const double *data, unsigned int len, double 
 	{
 	    *max =  temp ;
 	}
-
+		
     }
 }
 
-int MathUtilities::getMax( double* pData, unsigned int Length, double* pMax )
+int MathUtilities::getMax( double* pData, int Length, double* pMax )
 {
-	unsigned int index = 0;
-	unsigned int i;
+	int index = 0;
+	int i;
 	double temp = 0.0;
-
+	
 	double max = pData[0];
 
 	for( i = 0; i < Length; i++)
@@ -209,7 +188,7 @@ int MathUtilities::getMax( double* pData, unsigned int Length, double* pMax )
 			max =  temp ;
 			index = i;
 		}
-
+		
    	}
 
 	if (pMax) *pMax = max;
@@ -218,15 +197,15 @@ int MathUtilities::getMax( double* pData, unsigned int Length, double* pMax )
 	return index;
 }
 
-int MathUtilities::getMax( const std::vector<double> & data, double* pMax )
+int MathUtilities::getMax( const vector<double> & data, double* pMax )
 {
-	unsigned int index = 0;
-	unsigned int i;
+	int index = 0;
+	int i;
 	double temp = 0.0;
-
+	
 	double max = data[0];
 
-	for( i = 0; i < data.size(); i++)
+	for( i = 0; i < int(data.size()); i++)
 	{
 		temp = data[ i ];
 
@@ -235,7 +214,7 @@ int MathUtilities::getMax( const std::vector<double> & data, double* pMax )
 			max =  temp ;
 			index = i;
 		}
-
+		
    	}
 
 	if (pMax) *pMax = max;
@@ -265,7 +244,7 @@ void MathUtilities::circShift( double* pData, int length, int shift)
 
 int MathUtilities::compareInt (const void * a, const void * b)
 {
-  return ( *(const int*)a - *(const int*)b );
+  return ( *(int*)a - *(int*)b );
 }
 
 void MathUtilities::normalise(double *data, int length, NormaliseType type)
@@ -307,7 +286,7 @@ void MathUtilities::normalise(double *data, int length, NormaliseType type)
     }
 }
 
-void MathUtilities::normalise(std::vector<double> &data, NormaliseType type)
+void MathUtilities::normalise(vector<double> &data, NormaliseType type)
 {
     switch (type) {
 
@@ -316,9 +295,9 @@ void MathUtilities::normalise(std::vector<double> &data, NormaliseType type)
     case NormaliseUnitSum:
     {
         double sum = 0.0;
-        for (unsigned int i = 0; i < data.size(); ++i) sum += data[i];
+        for (int i = 0; i < (int)data.size(); ++i) sum += data[i];
         if (sum != 0.0) {
-            for (unsigned int i = 0; i < data.size(); ++i) data[i] /= sum;
+            for (int i = 0; i < (int)data.size(); ++i) data[i] /= sum;
         }
     }
     break;
@@ -326,11 +305,11 @@ void MathUtilities::normalise(std::vector<double> &data, NormaliseType type)
     case NormaliseUnitMax:
     {
         double max = 0.0;
-        for (unsigned int i = 0; i < data.size(); ++i) {
+        for (int i = 0; i < (int)data.size(); ++i) {
             if (fabs(data[i]) > max) max = fabs(data[i]);
         }
         if (max != 0.0) {
-            for (unsigned int i = 0; i < data.size(); ++i) data[i] /= max;
+            for (int i = 0; i < (int)data.size(); ++i) data[i] /= max;
         }
     }
     break;
@@ -338,20 +317,46 @@ void MathUtilities::normalise(std::vector<double> &data, NormaliseType type)
     }
 }
 
-void MathUtilities::adaptiveThreshold(std::vector<double> &data)
+double MathUtilities::getLpNorm(const vector<double> &data, int p)
+{
+    double tot = 0.0;
+    for (int i = 0; i < int(data.size()); ++i) {
+        tot += abs(pow(data[i], p));
+    }
+    return pow(tot, 1.0 / p);
+}
+
+vector<double> MathUtilities::normaliseLp(const vector<double> &data,
+                                               int p,
+                                               double threshold)
+{
+    int n = int(data.size());
+    if (n == 0 || p == 0) return data;
+    double norm = getLpNorm(data, p);
+    if (norm < threshold) {
+        return vector<double>(n, 1.0 / pow(n, 1.0 / p)); // unit vector
+    }
+    vector<double> out(n);
+    for (int i = 0; i < n; ++i) {
+        out[i] = data[i] / norm;
+    }
+    return out;
+}
+    
+void MathUtilities::adaptiveThreshold(vector<double> &data)
 {
     int sz = int(data.size());
     if (sz == 0) return;
 
-    std::vector<double> smoothed(sz);
-
+    vector<double> smoothed(sz);
+	
     int p_pre = 8;
     int p_post = 7;
 
     for (int i = 0; i < sz; ++i) {
 
-        int first = std::max(0,      i - p_pre);
-        int last  = std::min(sz - 1, i + p_post);
+        int first = max(0,      i - p_pre);
+        int last  = min(sz - 1, i + p_post);
 
         smoothed[i] = mean(data, first, last - first + 1);
     }
@@ -365,7 +370,7 @@ void MathUtilities::adaptiveThreshold(std::vector<double> &data)
 bool
 MathUtilities::isPowerOfTwo(int x)
 {
-    if (x < 2) return false;
+    if (x < 1) return false;
     if (x & (x-1)) return false;
     return true;
 }
@@ -374,6 +379,7 @@ int
 MathUtilities::nextPowerOfTwo(int x)
 {
     if (isPowerOfTwo(x)) return x;
+    if (x < 1) return 1;
     int n = 1;
     while (x) { x >>= 1; n <<= 1; }
     return n;
@@ -383,6 +389,7 @@ int
 MathUtilities::previousPowerOfTwo(int x)
 {
     if (isPowerOfTwo(x)) return x;
+    if (x < 1) return 1;
     int n = 1;
     x >>= 1;
     while (x) { x >>= 1; n <<= 1; }
@@ -393,8 +400,30 @@ int
 MathUtilities::nearestPowerOfTwo(int x)
 {
     if (isPowerOfTwo(x)) return x;
-    int n0 = previousPowerOfTwo(x), n1 = nearestPowerOfTwo(x);
+    int n0 = previousPowerOfTwo(x), n1 = nextPowerOfTwo(x);
     if (x - n0 < n1 - x) return n0;
     else return n1;
+}
+
+double
+MathUtilities::factorial(int x)
+{
+    if (x < 0) return 0;
+    double f = 1;
+    for (int i = 1; i <= x; ++i) {
+	f = f * i;
+    }
+    return f;
+}
+
+int
+MathUtilities::gcd(int a, int b)
+{
+    int c = a % b;
+    if (c == 0) {
+        return b;
+    } else {
+        return gcd(b, c);
+    }
 }
 

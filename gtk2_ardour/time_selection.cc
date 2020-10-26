@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2003-2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 
@@ -24,7 +25,7 @@
 
 #include "time_selection.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -68,16 +69,16 @@ TimeSelection::consolidate ()
 	return changed;
 }
 
-framepos_t
-TimeSelection::start ()
+samplepos_t
+TimeSelection::start () const
 {
 	if (empty()) {
 		return 0;
 	}
 
-	framepos_t first = max_framepos;
+	samplepos_t first = max_samplepos;
 
-	for (std::list<AudioRange>::iterator i = begin(); i != end(); ++i) {
+	for (std::list<AudioRange>::const_iterator i = begin(); i != end(); ++i) {
 		if ((*i).start < first) {
 			first = (*i).start;
 		}
@@ -85,14 +86,14 @@ TimeSelection::start ()
 	return first;
 }
 
-framepos_t
-TimeSelection::end_frame ()
+samplepos_t
+TimeSelection::end_sample () const
 {
-	framepos_t last = 0;
+	samplepos_t last = 0;
 
 	/* XXX make this work like RegionSelection: no linear search needed */
 
-	for (std::list<AudioRange>::iterator i = begin(); i != end(); ++i) {
+	for (std::list<AudioRange>::const_iterator i = begin(); i != end(); ++i) {
 		if ((*i).end > last) {
 			last = (*i).end;
 		}
@@ -100,12 +101,12 @@ TimeSelection::end_frame ()
 	return last;
 }
 
-framecnt_t
-TimeSelection::length()
+samplecnt_t
+TimeSelection::length() const
 {
 	if (empty()) {
 		return 0;
 	}
 
-	return end_frame() - start() + 1;
+	return end_sample() - start() + 1;
 }

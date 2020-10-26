@@ -1,22 +1,22 @@
 /*
-    Copyright (C) 2012 Paul Davis
-    Author: Robin Gareus
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2017 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2016 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-config.h"
@@ -26,6 +26,7 @@
 #include <sigc++/bind.h>
 
 #include <gtkmm/accelmap.h>
+#include <gtkmm/comboboxtext.h>
 
 #include <glibmm/threads.h>
 
@@ -40,7 +41,6 @@
 
 #include "ardour/audio_track.h"
 #include "ardour/midi_track.h"
-#include "ardour/route_sorters.h"
 
 #include "meterbridge.h"
 
@@ -55,7 +55,7 @@
 #include "meter_patterns.h"
 #include "timers.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace ARDOUR_UI_UTILS;
@@ -100,6 +100,16 @@ Meterbridge::Meterbridge ()
 
 	set_wmclass (X_("ardour_mixer"), PROGRAM_NAME);
 
+#ifdef __APPLE__
+	set_type_hint (Gdk::WINDOW_TYPE_HINT_DIALOG);
+#else
+	if (UIConfiguration::instance().get_all_floating_windows_are_dialogs()) {
+		set_type_hint (Gdk::WINDOW_TYPE_HINT_DIALOG);
+	} else {
+		set_type_hint (Gdk::WINDOW_TYPE_HINT_UTILITY);
+	}
+#endif
+
 	Gdk::Geometry geom;
 	geom.max_width = 1<<16;
 	geom.max_height = max_height;
@@ -124,10 +134,10 @@ Meterbridge::Meterbridge ()
 
 	signal_delete_event().connect (sigc::mem_fun (*this, &Meterbridge::hide_window));
 	signal_configure_event().connect (sigc::mem_fun (*ARDOUR_UI::instance(), &ARDOUR_UI::configure_handler));
-	Route::SyncOrderKeys.connect (*this, invalidator (*this), boost::bind (&Meterbridge::sync_order_keys, this), gui_context());
 	MeterStrip::CatchDeletion.connect (*this, invalidator (*this), boost::bind (&Meterbridge::remove_strip, this, _1), gui_context());
-	MeterStrip::MetricChanged.connect (*this, invalidator (*this), boost::bind(&Meterbridge::resync_order, this), gui_context());
+	MeterStrip::MetricChanged.connect (*this, invalidator (*this), boost::bind(&Meterbridge::sync_order_keys, this), gui_context());
 	MeterStrip::ConfigurationChanged.connect (*this, invalidator (*this), boost::bind(&Meterbridge::queue_resize, this), gui_context());
+	PresentationInfo::Change.connect (*this, invalidator (*this), boost::bind (&Meterbridge::resync_order, this, _1), gui_context());
 
 	/* work around ScrolledWindowViewport alignment mess Part one */
 	Gtk::HBox * yspc = manage (new Gtk::HBox());
@@ -265,8 +275,7 @@ Meterbridge::on_key_release_event (GdkEventKey* ev)
 	if (gtk_window_propagate_key_event (GTK_WINDOW(gobj()), ev)) {
 		return true;
 	}
-	/* don't forward releases */
-	return true;
+	return relay_key_press (ev, this);
 }
 
 bool
@@ -422,12 +431,9 @@ Meterbridge::set_session (Session* s)
 	_show_master = _session->config.get_show_master_on_meterbridge();
 	_show_midi = _session->config.get_show_midi_on_meterbridge();
 
-	ARDOUR::SignalOrderRouteSorter sorter;
-	boost::shared_ptr<RouteList> routes = _session->get_routes();
-
-	RouteList copy(*routes);
-	copy.sort(sorter);
-	add_strips(copy);
+	RouteList copy = _session->get_routelist ();
+	copy.sort (Stripable::Sorter (true));
+	add_strips (copy);
 
 	_session->RouteAdded.connect (_session_connections, invalidator (*this), boost::bind (&Meterbridge::add_strips, this, _1), gui_context());
 	_session->DirtyChanged.connect (_session_connections, invalidator (*this), boost::bind (&Meterbridge::update_title, this), gui_context());
@@ -463,7 +469,6 @@ Meterbridge::session_going_away ()
 int
 Meterbridge::set_state (const XMLNode& node)
 {
-	const XMLProperty* prop;
 	XMLNode* geometry;
 
 	m_width = default_width;
@@ -472,44 +477,15 @@ Meterbridge::set_state (const XMLNode& node)
 	m_root_y = 1;
 
 	if ((geometry = find_named_node (node, "geometry")) != 0) {
-
-		XMLProperty* prop;
-
-		if ((prop = geometry->property("x_size")) == 0) {
-			prop = geometry->property ("x-size");
-		}
-		if (prop) {
-			m_width = atoi(prop->value());
-		}
-		if ((prop = geometry->property("y_size")) == 0) {
-			prop = geometry->property ("y-size");
-		}
-		if (prop) {
-			m_height = atoi(prop->value());
-		}
-
-		if ((prop = geometry->property ("x_pos")) == 0) {
-			prop = geometry->property ("x-pos");
-		}
-		if (prop) {
-			m_root_x = atoi (prop->value());
-
-		}
-		if ((prop = geometry->property ("y_pos")) == 0) {
-			prop = geometry->property ("y-pos");
-		}
-		if (prop) {
-			m_root_y = atoi (prop->value());
-		}
+		geometry->get_property ("x-size", m_width);
+		geometry->get_property ("y-size", m_height);
+		geometry->get_property ("x-pos", m_root_x);
+		geometry->get_property ("y-pos", m_root_y);
 	}
 
 	set_window_pos_and_size ();
 
-	if ((prop = node.property ("show-meterbridge"))) {
-		if (string_is_affirmative (prop->value())) {
-		       _visible = true;
-		}
-	}
+	node.get_property ("show-meterbridge", _visible);
 
 	return 0;
 }
@@ -517,7 +493,6 @@ Meterbridge::set_state (const XMLNode& node)
 XMLNode&
 Meterbridge::get_state (void)
 {
-	char buf[32];
 	XMLNode* node = new XMLNode ("Meterbridge");
 
 	if (is_realized() && _visible) {
@@ -525,17 +500,13 @@ Meterbridge::get_state (void)
 	}
 
 	XMLNode* geometry = new XMLNode ("geometry");
-	snprintf(buf, sizeof(buf), "%d", m_width);
-	geometry->add_property(X_("x_size"), string(buf));
-	snprintf(buf, sizeof(buf), "%d", m_height);
-	geometry->add_property(X_("y_size"), string(buf));
-	snprintf(buf, sizeof(buf), "%d", m_root_x);
-	geometry->add_property(X_("x_pos"), string(buf));
-	snprintf(buf, sizeof(buf), "%d", m_root_y);
-	geometry->add_property(X_("y_pos"), string(buf));
+	geometry->set_property(X_("x-size"), m_width);
+	geometry->set_property(X_("y-size"), m_height);
+	geometry->set_property(X_("x-pos"), m_root_x);
+	geometry->set_property(X_("y-pos"), m_root_y);
 	node->add_child_nocopy (*geometry);
 
-	node->add_property ("show-meterbridge", _visible ? "yes" : "no");
+	node->set_property ("show-meterbridge", _visible);
 	return *node;
 }
 
@@ -581,7 +552,7 @@ Meterbridge::add_strips (RouteList& routes)
 
 		strip = new MeterStrip (_session, route);
 		strips.push_back (MeterBridgeStrip(strip));
-		route->active_changed.connect (*this, invalidator (*this), boost::bind (&Meterbridge::resync_order, this), gui_context ());
+		route->active_changed.connect (*this, invalidator (*this), boost::bind (&Meterbridge::sync_order_keys, this), gui_context ());
 
 		meterarea.pack_start (*strip, false, false);
 		strip->show();
@@ -746,9 +717,11 @@ Meterbridge::sync_order_keys ()
 }
 
 void
-Meterbridge::resync_order()
+Meterbridge::resync_order (PropertyChange what_changed)
 {
-	sync_order_keys();
+	if (what_changed.contains (ARDOUR::Properties::order)) {
+		sync_order_keys();
+	}
 }
 
 void

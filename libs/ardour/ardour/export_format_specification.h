@@ -1,22 +1,25 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2013 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2014 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_export_format_specification_h__
 #define __ardour_export_format_specification_h__
@@ -48,7 +51,7 @@ class LIBARDOUR_API ExportFormatSpecification : public ExportFormatBase {
 		Time (Session & session) : AnyTime (), session (session) {}
 		Time & operator= (AnyTime const & other);
 
-		framecnt_t get_frames_at (framepos_t position, framecnt_t target_rate) const;
+		samplecnt_t get_samples_at (samplepos_t position, samplecnt_t target_rate) const;
 
 		/* Serialization */
 
@@ -96,6 +99,10 @@ class LIBARDOUR_API ExportFormatSpecification : public ExportFormatBase {
 	void set_normalize_lufs (float value) { _normalize_lufs = value; }
 	void set_normalize_dbtp (float value) { _normalize_dbtp = value; }
 
+	void set_demo_noise_level    (float db) { _demo_noise_level = db; }
+	void set_demo_noise_duration (int msec) { _demo_noise_duration = msec; }
+	void set_demo_noise_interval (int msec) { _demo_noise_interval = msec; }
+
 	void set_tag (bool tag_it) { _tag = tag_it; }
 	void set_with_cue (bool yn) { _with_cue = yn; }
 	void set_with_toc (bool yn) { _with_toc = yn; }
@@ -103,6 +110,7 @@ class LIBARDOUR_API ExportFormatSpecification : public ExportFormatBase {
 	void set_soundcloud_upload (bool yn) { _soundcloud_upload = yn; }
 	void set_command (std::string command) { _command = command; }
 	void set_analyse (bool yn) { _analyse = yn; }
+	void set_codec_quality (int q) { _codec_quality = q; }
 
 	void set_silence_beginning (AnyTime const & value) { _silence_beginning = value; }
 	void set_silence_end (AnyTime const & value) { _silence_end = value; }
@@ -168,16 +176,21 @@ class LIBARDOUR_API ExportFormatSpecification : public ExportFormatBase {
 	bool with_cue() const { return _with_cue; }
 	bool with_mp4chaps() const { return _with_mp4chaps; }
 
+	float demo_noise_level () const    { return _demo_noise_level; }
+	int   demo_noise_duration () const { return _demo_noise_duration; }
+	int   demo_noise_interval () const { return _demo_noise_interval; }
+
 	bool soundcloud_upload() const { return _soundcloud_upload; }
 	std::string command() const { return _command; }
 	bool analyse() const { return _analyse; }
+	int  codec_quality() const { return _codec_quality; }
 
 	bool tag () const { return _tag && supports_tagging; }
 
-	framecnt_t silence_beginning_at (framepos_t position, framecnt_t samplerate) const
-		{ return _silence_beginning.get_frames_at (position, samplerate); }
-	framecnt_t silence_end_at (framepos_t position, framecnt_t samplerate) const
-		{ return _silence_end.get_frames_at (position, samplerate); }
+	samplecnt_t silence_beginning_at (samplepos_t position, samplecnt_t samplerate) const
+		{ return _silence_beginning.get_samples_at (position, samplerate); }
+	samplecnt_t silence_end_at (samplepos_t position, samplecnt_t samplerate) const
+		{ return _silence_end.get_samples_at (position, samplerate); }
 
 	AnyTime silence_beginning_time () const { return _silence_beginning; }
 	AnyTime silence_end_time () const { return _silence_end; }
@@ -197,6 +210,7 @@ class LIBARDOUR_API ExportFormatSpecification : public ExportFormatBase {
 	std::string  _format_name;
 	bool            has_sample_format;
 	bool            supports_tagging;
+	bool           _has_codec_quality;
 	bool           _has_broadcast_info;
 	uint32_t       _channel_limit;
 
@@ -226,8 +240,13 @@ class LIBARDOUR_API ExportFormatSpecification : public ExportFormatBase {
 	bool            _with_mp4chaps;
 	bool            _soundcloud_upload;
 
+	float           _demo_noise_level;
+	int             _demo_noise_duration;
+	int             _demo_noise_interval;
+
 	std::string     _command;
 	bool            _analyse;
+	int             _codec_quality;
 
 	/* serialization helpers */
 

@@ -1,21 +1,20 @@
 /*
-    Copyright (C) 2016 Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #ifndef __ardour_luawindow_h__
 #define __ardour_luawindow_h__
 
@@ -24,6 +23,7 @@
 #include <gtkmm/box.h>
 #include <gtkmm/scrolledwindow.h>
 #include <gtkmm/label.h>
+#include <gtkmm/textview.h>
 #include <gtkmm/window.h>
 
 #include "pbd/signals.h"
@@ -38,8 +38,8 @@
 
 #include "lua/luastate.h"
 
-#include "ardour_button.h"
-#include "ardour_dropdown.h"
+#include "widgets/ardour_button.h"
+#include "widgets/ardour_dropdown.h"
 
 class LuaWindow :
 	public Gtk::Window,
@@ -47,12 +47,13 @@ class LuaWindow :
 	public ARDOUR::SessionHandlePtr,
 	public Gtkmm2ext::VisibilityTracker
 {
-  public:
+public:
 	static LuaWindow* instance();
 	~LuaWindow();
 
 	void show_window ();
 	bool hide_window (GdkEventAny *ev);
+	void edit_script (const std::string&, const std::string&);
 
 	void set_session (ARDOUR::Session* s);
 
@@ -65,7 +66,8 @@ class LuaWindow :
 		Buffer_Scratch    = 0x10,
 	} BufferFlags;
 
-	class ScriptBuffer {
+	class ScriptBuffer
+	{
 	public:
 		ScriptBuffer (const std::string&);
 		ScriptBuffer (ARDOUR::LuaScriptInfoPtr);
@@ -81,7 +83,7 @@ class LuaWindow :
 		ARDOUR::LuaScriptInfo::ScriptType type;
 	};
 
-  private:
+private:
 	LuaWindow ();
 	static LuaWindow* _instance;
 
@@ -98,14 +100,14 @@ class LuaWindow :
 	Gtk::TextView outtext;
 	Gtk::ScrolledWindow scrollout;
 
-	ArdourButton _btn_run;
-	ArdourButton _btn_clear;
-	ArdourButton _btn_open;
-	ArdourButton _btn_save;
-	ArdourButton _btn_delete;
-	ArdourButton _btn_revert;
+	ArdourWidgets::ArdourButton _btn_run;
+	ArdourWidgets::ArdourButton _btn_clear;
+	ArdourWidgets::ArdourButton _btn_open;
+	ArdourWidgets::ArdourButton _btn_save;
+	ArdourWidgets::ArdourButton _btn_delete;
+	ArdourWidgets::ArdourButton _btn_revert;
 
-	ArdourDropdown script_select;
+	ArdourWidgets::ArdourDropdown script_select;
 
 	typedef boost::shared_ptr<ScriptBuffer> ScriptBufferPtr;
 	typedef std::vector<ScriptBufferPtr> ScriptBufferList;

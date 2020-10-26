@@ -1,21 +1,26 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006 Hans Fugal <hans@fugal.net>
+ * Copyright (C) 2008-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2016-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_location_h__
 #define __ardour_location_h__
@@ -44,7 +49,7 @@ class SceneChange;
 /** Location on Timeline - abstract representation for Markers, Loop/Punch Ranges, CD-Markers etc. */
 class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDestructible
 {
-  public:
+public:
 	enum Flags {
 		IsMark = 0x1,
 		IsAutoPunch = 0x2,
@@ -55,10 +60,12 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 		IsSessionRange = 0x40,
 		IsSkip = 0x80,
 		IsSkipping = 0x100, /* skipping is active (or not) */
+		IsClockOrigin = 0x200,
+		IsXrun = 0x400,
 	};
 
 	Location (Session &);
-	Location (Session &, framepos_t, framepos_t, const std::string &, Flags bits = Flags(0));
+	Location (Session &, samplepos_t, samplepos_t, const std::string &, Flags bits = Flags(0), const uint32_t sub_num = 0);
 	Location (const Location& other);
 	Location (Session &, const XMLNode&);
 	Location* operator= (const Location& other);
@@ -69,15 +76,16 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 	void lock ();
 	void unlock ();
 
-	framepos_t start() const  { return _start; }
-	framepos_t end() const { return _end; }
-	framecnt_t length() const { return _end - _start; }
+	int64_t timestamp() const { return _timestamp; };
+	samplepos_t start() const { return _start; }
+	samplepos_t end() const { return _end; }
+	samplecnt_t length() const { return _end - _start; }
 
-	int set_start (framepos_t s, bool force = false, bool allow_bbt_recompute = true);
-	int set_end (framepos_t e, bool force = false, bool allow_bbt_recompute = true);
-	int set (framepos_t start, framepos_t end, bool allow_bbt_recompute = true);
+	int set_start (samplepos_t s, bool force = false, bool allow_beat_recompute = true, const uint32_t sub_num = 0);
+	int set_end (samplepos_t e, bool force = false, bool allow_beat_recompute = true, const uint32_t sub_num = 0);
+	int set (samplepos_t start, samplepos_t end, bool allow_beat_recompute = true, const uint32_t sub_num = 0);
 
-	int move_to (framepos_t pos);
+	int move_to (samplepos_t pos, const uint32_t sub_num);
 
 	const std::string& name() const { return _name; }
 	void set_name (const std::string &str);
@@ -87,6 +95,7 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 	void set_hidden (bool yn, void *src);
 	void set_cd (bool yn, void *src);
 	void set_is_range_marker (bool yn, void* src);
+	void set_is_clock_origin (bool yn, void* src);
 	void set_skip (bool yn);
 	void set_skipping (bool yn);
 
@@ -98,7 +107,9 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 	bool is_session_range () const { return _flags & IsSessionRange; }
 	bool is_range_marker() const { return _flags & IsRangeMarker; }
 	bool is_skip() const { return _flags & IsSkip; }
+	bool is_clock_origin() const { return _flags & IsClockOrigin; }
 	bool is_skipping() const { return (_flags & IsSkip) && (_flags & IsSkipping); }
+	bool is_xrun() const { return _flags & IsXrun; }
 	bool matches (Flags f) const { return _flags & f; }
 
 	Flags flags () const { return _flags; }
@@ -107,8 +118,8 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 	void set_scene_change (boost::shared_ptr<SceneChange>);
 
 	/* these are static signals for objects that want to listen to all
-	   locations at once.
-	*/
+	 * locations at once.
+	 */
 
 	static PBD::Signal1<void,Location*> name_changed;
 	static PBD::Signal1<void,Location*> end_changed;
@@ -121,8 +132,8 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 	static PBD::Signal1<void,Location*> changed;
 
 	/* these are member signals for objects that care only about
-	   changes to this object
-	*/
+	 * changes to this object
+	 */
 
 	PBD::Signal0<void> Changed;
 
@@ -143,37 +154,39 @@ class LIBARDOUR_API Location : public SessionHandleRef, public PBD::StatefulDest
 
 	PositionLockStyle position_lock_style() const { return _position_lock_style; }
 	void set_position_lock_style (PositionLockStyle ps);
-	void recompute_frames_from_bbt ();
+	void recompute_samples_from_beat ();
 
 	static PBD::Signal0<void> scene_changed; /* for use by backend scene change management, class level */
-        PBD::Signal0<void> SceneChangeChanged;   /* for use by objects interested in this object */
+	PBD::Signal0<void> SceneChangeChanged;   /* for use by objects interested in this object */
 
-  private:
+private:
 	std::string        _name;
-	framepos_t         _start;
-	Timecode::BBT_Time _bbt_start;
-	framepos_t         _end;
-	Timecode::BBT_Time _bbt_end;
+	samplepos_t        _start;
+	double             _start_beat;
+	samplepos_t        _end;
+	double             _end_beat;
 	Flags              _flags;
 	bool               _locked;
 	PositionLockStyle  _position_lock_style;
 	boost::shared_ptr<SceneChange> _scene_change;
+	int64_t            _timestamp;
 
 	void set_mark (bool yn);
 	bool set_flag_internal (bool yn, Flags flag);
-	void recompute_bbt_from_frames ();
+	void recompute_beat_from_samples (const uint32_t sub_num);
 };
 
 /** A collection of session locations including unique dedicated locations (loop, punch, etc) */
 class LIBARDOUR_API Locations : public SessionHandleRef, public PBD::StatefulDestructible
 {
-  public:
+public:
 	typedef std::list<Location *> LocationList;
 
 	Locations (Session &);
 	~Locations ();
 
-	const LocationList& list() { return locations; }
+	const LocationList& list () const { return locations; }
+	LocationList list () { return locations; }
 
 	void add (Location *, bool make_current = false);
 	void remove (Location *);
@@ -188,6 +201,7 @@ class LIBARDOUR_API Locations : public SessionHandleRef, public PBD::StatefulDes
 	Location* auto_loop_location () const;
 	Location* auto_punch_location () const;
 	Location* session_range_location() const;
+	Location* clock_origin_location() const;
 
 	int next_available_name(std::string& result,std::string base);
 	uint32_t num_range_markers() const;
@@ -195,20 +209,22 @@ class LIBARDOUR_API Locations : public SessionHandleRef, public PBD::StatefulDes
 	int set_current (Location *, bool want_lock = true);
 	Location *current () const { return current_location; }
 
-	Location* mark_at (framepos_t, framecnt_t slop = 0) const;
+	Location* mark_at (samplepos_t, samplecnt_t slop = 0) const;
 
-	framepos_t first_mark_before (framepos_t, bool include_special_ranges = false);
-	framepos_t first_mark_after (framepos_t, bool include_special_ranges = false);
+	void set_clock_origin (Location*, void *src);
 
-	void marks_either_side (framepos_t const, framepos_t &, framepos_t &) const;
+	samplepos_t first_mark_before (samplepos_t, bool include_special_ranges = false);
+	samplepos_t first_mark_after (samplepos_t, bool include_special_ranges = false);
 
-	void find_all_between (framepos_t start, framepos_t, LocationList&, Location::Flags);
+	void marks_either_side (samplepos_t const, samplepos_t &, samplepos_t &) const;
+
+	void find_all_between (samplepos_t start, samplepos_t, LocationList&, Location::Flags);
 
 	PBD::Signal1<void,Location*> current_changed;
 
 	/* Objects that care about individual addition and removal of Locations should connect to added/removed.
-	   If an object additionally cares about potential mass clearance of Locations, they should connect to changed.
-	*/
+	 * If an object additionally cares about potential mass clearance of Locations, they should connect to changed.
+	 */
 
 	PBD::Signal1<void,Location*> added;
 	PBD::Signal1<void,Location*> removed;
@@ -216,8 +232,8 @@ class LIBARDOUR_API Locations : public SessionHandleRef, public PBD::StatefulDes
 
 	template<class T> void apply (T& obj, void (T::*method)(const LocationList&)) const {
 		/* We don't want to hold the lock while the given method runs, so take a copy
-		   of the list and pass that instead.
-		*/
+		 * of the list and pass that instead.
+		 */
 		Locations::LocationList copy;
 		{
 			Glib::Threads::Mutex::Lock lm (lock);
@@ -226,11 +242,10 @@ class LIBARDOUR_API Locations : public SessionHandleRef, public PBD::StatefulDes
 		(obj.*method)(copy);
 	}
 
-  private:
-
-	LocationList         locations;
-	Location            *current_location;
-	mutable Glib::Threads::Mutex  lock;
+private:
+	LocationList locations;
+	Location*    current_location;
+	mutable Glib::Threads::Mutex lock;
 
 	int set_current_unlocked (Location *);
 	void location_changed (Location*);

@@ -1,21 +1,20 @@
 /*
-    Copyright (C) 2014 Tim Mayberry
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014-2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __libpbd_timing_h__
 #define __libpbd_timing_h__
@@ -24,10 +23,17 @@
 
 #include <stdint.h>
 
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
 #include "pbd/libpbd_visibility.h"
+
+#ifdef COMPILER_MSVC
+#undef min
+#undef max
+#endif
 
 namespace PBD {
 
@@ -93,9 +99,14 @@ public:
 		return elapsed;
 	}
 
-	/// Elapsed time in microseconds
+	/// @return Elapsed time in microseconds
 	uint64_t elapsed () const {
 		return m_last_val - m_start_val;
+	}
+
+	/// @return Elapsed time in milliseconds
+	uint64_t elapsed_msecs () const {
+		return elapsed () / 1000;
 	}
 
 private:
@@ -103,6 +114,84 @@ private:
 	uint64_t m_start_val;
 	uint64_t m_last_val;
 
+};
+
+class LIBPBD_API TimingStats : public Timing
+{
+public:
+	TimingStats ()
+	{
+		/* override implicit Timing::start () */
+		reset ();
+	}
+
+	void update ()
+	{
+		Timing::update ();
+		calc ();
+	}
+
+	void reset ()
+	{
+		Timing::reset ();
+		_min = std::numeric_limits<uint64_t>::max();
+		_max = 0;
+		_cnt = 0;
+		_avg = 0.;
+		_vm  = 0.;
+		_vs  = 0.;
+	}
+
+	bool valid () const {
+		return Timing::valid () && _cnt > 1;
+	}
+
+	bool get_stats (uint64_t& min,
+	                uint64_t& max,
+	                double& avg,
+	                double& dev) const
+	{
+		if (_cnt < 2) {
+			return false;
+		}
+		min = _min;
+		max = _max;
+		avg = _avg / (double)_cnt;
+		dev = sqrt (_vs / (_cnt - 1.0));
+		return true;
+	}
+
+private:
+	void calc ()
+	{
+		const uint64_t diff = elapsed ();
+
+		_avg += diff;
+
+		if (diff > _max) {
+			_max = diff;
+		}
+		if (diff < _min) {
+			_min = diff;
+		}
+
+		if (_cnt == 0) {
+			_vm = diff;
+		} else {
+			const double ela = diff;
+			const double var_m1 = _vm;
+			_vm = _vm + (ela - _vm) / (1.0 + _cnt);
+			_vs = _vs + (ela - _vm) * (ela - var_m1);
+		}
+		++_cnt;
+	}
+
+	uint64_t _cnt;
+	uint64_t _min;
+	uint64_t _max;
+	double   _avg;
+	double   _vm;
+	double   _vs;
 };
 
 class LIBPBD_API TimingData

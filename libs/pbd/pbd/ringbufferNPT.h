@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2000 Paul Davis & Benno Senoner
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2000 Paul Davis & Benno Senoner
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef ringbuffer_npt_h
 #define ringbuffer_npt_h
@@ -59,6 +60,7 @@ class /*LIBPBD_API*/ RingBufferNPT
 
 	size_t  read  (T *dest, size_t cnt);
 	size_t  write (const T *src, size_t cnt);
+	size_t  write_one (const T src);
 
 	struct rw_vector {
 	    T *buf[2];
@@ -196,6 +198,12 @@ RingBufferNPT<T>::write (const T *src, size_t cnt)
 
         g_atomic_int_set(&write_ptr, priv_write_ptr);
         return to_write;
+}
+
+template<class T> /*LIBPBD_API*/ size_t
+RingBufferNPT<T>::write_one (const T src)
+{
+	return write (&src, 1);
 }
 
 template<class T> /*LIBPBD_API*/ void

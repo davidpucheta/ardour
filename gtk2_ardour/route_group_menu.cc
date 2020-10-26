@@ -1,31 +1,36 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/menu.h>
 #include <gtkmm/stock.h>
+
 #include "gtkmm2ext/utils.h"
+#include "gtkmm2ext/doi.h"
+
 #include "ardour/session.h"
 #include "ardour/route_group.h"
 #include "ardour/route.h"
 #include "route_group_menu.h"
 #include "route_group_dialog.h"
-#include "i18n.h"
+
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace ARDOUR;
@@ -84,7 +89,7 @@ RouteGroupMenu::build (WeakRouteList const & s)
 	RadioMenuItem::Group group;
 	items.push_back (RadioMenuElem (group, _("No Group")));
 	RadioMenuItem* i = static_cast<RadioMenuItem *> (&items.back ());
-	i->signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &RouteGroupMenu::set_group), (RouteGroup *) 0));
+	i->signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &RouteGroupMenu::set_group), i, (RouteGroup *) 0));
 
 	if (groups.size() == 1 && *groups.begin() == 0) {
 		i->set_active ();
@@ -112,7 +117,7 @@ RouteGroupMenu::add_item (RouteGroup* rg, std::set<RouteGroup*> const & groups, 
 
 	items.push_back (RadioMenuElem (*group, rg->name()));
 	RadioMenuItem* i = static_cast<RadioMenuItem*> (&items.back ());
-	i->signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &RouteGroupMenu::set_group), rg));
+	i->signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &RouteGroupMenu::set_group), i, rg));
 
 	if (groups.size() == 1 && *groups.begin() == rg) {
 		/* there's only one active group, and it's this one */
@@ -127,9 +132,12 @@ RouteGroupMenu::add_item (RouteGroup* rg, std::set<RouteGroup*> const & groups, 
  *  @param Group, or 0 for none.
  */
 void
-RouteGroupMenu::set_group (RouteGroup* g)
+RouteGroupMenu::set_group (Gtk::RadioMenuItem* e, RouteGroup* g)
 {
 	if (_inhibit_group_selected) {
+		return;
+	}
+	if (e && !e->get_active()) {
 		return;
 	}
 
@@ -158,14 +166,23 @@ RouteGroupMenu::new_group ()
 	}
 
 	RouteGroup* g = new RouteGroup (*_session, "");
-	RouteGroupDialog d (g, true);
+	RouteGroupDialog* d = new RouteGroupDialog (g, true);
 
-	if (d.do_run ()) {
-		delete g;
+	d->signal_response().connect (sigc::bind (sigc::mem_fun (*this, &RouteGroupMenu::new_group_dialog_finished), d));
+	d->present ();
+}
+
+void
+RouteGroupMenu::new_group_dialog_finished (int r, RouteGroupDialog* d)
+{
+	if (r == RESPONSE_OK) {
+		_session->add_route_group (d->group());
+		set_group (0, d->group());
 	} else {
-		_session->add_route_group (g);
-		set_group (g);
+		delete d->group ();
 	}
+
+	delete_when_idle (d);
 }
 
 Gtk::Menu *

@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2012-2014 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /** @file libs/ardour/vst_info_file.cc
  *  @brief Code to manage info files containing cached information about a plugin.
@@ -25,8 +26,15 @@
 #include <cassert>
 
 #include <sys/types.h>
-#include <fcntl.h>
+
+#ifdef COMPILER_MSVC
+#include <sys/utime.h>
+#else
 #include <unistd.h>
+#include <utime.h>
+#endif
+
+#include <fcntl.h>
 #include <errno.h>
 
 #include <stdlib.h>
@@ -49,10 +57,11 @@
 
 #include "ardour/filesystem_paths.h"
 #include "ardour/linux_vst_support.h"
+#include "ardour/mac_vst_support.h"
 #include "ardour/plugin_types.h"
 #include "ardour/vst_info_file.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 #include "sha1.c"
 
 #define MAX_STRING_LEN 256
@@ -72,6 +81,10 @@ vstfx_instantiate_and_get_info_fst (const char* dllpath, vector<VSTInfo*> *infos
 
 #ifdef LXVST_SUPPORT
 static bool vstfx_instantiate_and_get_info_lx (const char* dllpath, vector<VSTInfo*> *infos, int uniqueID);
+#endif
+
+#ifdef MACVST_SUPPORT
+static bool vstfx_instantiate_and_get_info_mac (const char* dllpath, vector<VSTInfo*> *infos, int uniqueID);
 #endif
 
 /* ID for shell plugins */
@@ -254,14 +267,14 @@ read_string (FILE *fp)
 		return 0;
 	}
 
-	if (strlen (buf) < MAX_STRING_LEN) {
-		if (strlen (buf)) {
-			buf[strlen (buf)-1] = 0;
-		}
+	if (strlen (buf)) {
+		/* strip lash char here: '\n',
+		 * since VST-params cannot be longer than 127 chars.
+		 */
+		buf[strlen (buf)-1] = 0;
 		return strdup (buf);
-	} else {
-		return 0;
 	}
+	return 0;
 }
 
 /** Read an integer value from a line in fp into n,
@@ -298,6 +311,13 @@ vstfx_load_info_block (FILE* fp, VSTInfo *info)
 	/* backwards compatibility with old .fsi files */
 	if (info->wantMidi == -1) {
 		info->wantMidi = 1;
+	}
+
+	info->isInstrument = (info->wantMidi & 4) ? 1 : 0;
+
+	info->isInstrument |= info->numInputs == 0 && info->numOutputs > 0 && 1 == (info->wantMidi & 1);
+	if (!strcmp (info->Category, "Instrument")) {
+		info->isInstrument = 1;
 	}
 
 	if ((info->numParams) == 0) {
@@ -378,7 +398,7 @@ vstfx_write_info_block (FILE* fp, VSTInfo *info)
 	fprintf (fp, "%d\n", info->numInputs);
 	fprintf (fp, "%d\n", info->numOutputs);
 	fprintf (fp, "%d\n", info->numParams);
-	fprintf (fp, "%d\n", info->wantMidi);
+	fprintf (fp, "%d\n", info->wantMidi | (info->isInstrument ? 4 : 0));
 	fprintf (fp, "%d\n", info->hasEditor);
 	fprintf (fp, "%d\n", info->canProcessReplacing);
 
@@ -435,6 +455,8 @@ vstfx_infofile_for_read (const char* dllpath)
 	if (
 			(slen <= 3 || g_ascii_strcasecmp (&dllpath[slen-3], ".so"))
 			&&
+			(slen <= 4 || g_ascii_strcasecmp (&dllpath[slen-4], ".vst"))
+			&&
 			(slen <= 4 || g_ascii_strcasecmp (&dllpath[slen-4], ".dll"))
 	   ) {
 		return 0;
@@ -469,6 +491,8 @@ vstfx_infofile_for_write (const char* dllpath)
 	const size_t slen = strlen (dllpath);
 	if (
 			(slen <= 3 || g_ascii_strcasecmp (&dllpath[slen-3], ".so"))
+			&&
+			(slen <= 4 || g_ascii_strcasecmp (&dllpath[slen-4], ".vst"))
 			&&
 			(slen <= 4 || g_ascii_strcasecmp (&dllpath[slen-4], ".dll"))
 	   ) {
@@ -507,14 +531,13 @@ bool vstfx_midi_input (VSTState* vstfx)
 {
 	AEffect* plugin = vstfx->plugin;
 
-	int const vst_version = plugin->dispatcher (plugin, effGetVstVersion, 0, 0, 0, 0.0f);
+	/* should we send it VST events (i.e. MIDI) */
 
-	if (vst_version >= 2) {
-		/* should we send it VST events (i.e. MIDI) */
-
-		if ((plugin->flags & effFlagsIsSynth) || (plugin->dispatcher (plugin, effCanDo, 0, 0, const_cast<char*> ("receiveVstEvents"), 0.0f) > 0)) {
-			return true;
-		}
+	if ((plugin->flags & effFlagsIsSynth)
+			|| (plugin->dispatcher (plugin, effCanDo, 0, 0, const_cast<char*> ("receiveVstEvents"), 0.0f) > 0)
+			|| (plugin->dispatcher (plugin, effCanDo, 0, 0, const_cast<char*> ("receiveVstMidiEvents"), 0.0f) > 0)
+		 ) {
+		return true;
 	}
 
 	return false;
@@ -630,10 +653,10 @@ vstfx_parse_vst_state (VSTState* vstfx)
 	switch (plugin->dispatcher (plugin, effGetPlugCategory, 0, 0, 0, 0))
 	{
 		case kPlugCategEffect:         info->Category = strdup ("Effect"); break;
-		case kPlugCategSynth:          info->Category = strdup ("Synth"); break;
-		case kPlugCategAnalysis:       info->Category = strdup ("Anaylsis"); break;
+		case kPlugCategSynth:          info->Category = strdup ("Instrument"); break;
+		case kPlugCategAnalysis:       info->Category = strdup ("Analyser"); break;
 		case kPlugCategMastering:      info->Category = strdup ("Mastering"); break;
-		case kPlugCategSpacializer:    info->Category = strdup ("Spacializer"); break;
+		case kPlugCategSpacializer:    info->Category = strdup ("Spatial"); break;
 		case kPlugCategRoomFx:         info->Category = strdup ("RoomFx"); break;
 		case kPlugSurroundFx:          info->Category = strdup ("SurroundFx"); break;
 		case kPlugCategRestoration:    info->Category = strdup ("Restoration"); break;
@@ -650,13 +673,21 @@ vstfx_parse_vst_state (VSTState* vstfx)
 	info->numParams = plugin->numParams;
 	info->wantMidi = (vstfx_midi_input (vstfx) ? 1 : 0) | (vstfx_midi_output (vstfx) ? 2 : 0);
 	info->hasEditor = plugin->flags & effFlagsHasEditor ? true : false;
+	info->isInstrument = (plugin->flags & effFlagsIsSynth) ? 1 : 0;
 	info->canProcessReplacing = plugin->flags & effFlagsCanReplacing ? true : false;
 	info->ParamNames = (char **) malloc (sizeof (char*)*info->numParams);
 	info->ParamLabels = (char **) malloc (sizeof (char*)*info->numParams);
 
+#ifdef __APPLE__
+	if (info->hasEditor) {
+		/* we only support Cocoa UIs (just like Reaper) */
+		info->hasEditor = (plugin->dispatcher (plugin, effCanDo, 0, 0, const_cast<char*> ("hasCockosViewAsConfig"), 0.0f) & 0xffff0000) == 0xbeef0000;
+	}
+#endif
+
 	for (int i = 0; i < info->numParams; ++i) {
-		char name[64];
-		char label[64];
+		char name[VestigeMaxLabelLen];
+		char label[VestigeMaxLabelLen];
 
 		/* Not all plugins give parameters labels as well as names */
 
@@ -714,6 +745,11 @@ vstfx_info_from_plugin (const char *dllpath, VSTState* vstfx, vector<VSTInfo *> 
 				vstfx_close (vstfx);
 				break;
 #endif
+#ifdef MACVST_SUPPORT
+			case ARDOUR::MacVST:
+				mac_vst_close (vstfx);
+				break;
+#endif
 			default:
 				assert (0);
 				break;
@@ -734,6 +770,11 @@ vstfx_info_from_plugin (const char *dllpath, VSTState* vstfx, vector<VSTInfo *> 
 #ifdef LXVST_SUPPORT
 				case ARDOUR::LXVST:
 					ok = vstfx_instantiate_and_get_info_lx (dllpath, infos, id);
+					break;
+#endif
+#ifdef MACVST_SUPPORT
+				case ARDOUR::MacVST:
+					ok = vstfx_instantiate_and_get_info_mac (dllpath, infos, id);
 					break;
 #endif
 				default:
@@ -765,6 +806,11 @@ vstfx_info_from_plugin (const char *dllpath, VSTState* vstfx, vector<VSTInfo *> 
 #ifdef LXVST_SUPPORT
 			case ARDOUR::LXVST:
 				vstfx_close (vstfx);
+				break;
+#endif
+#ifdef MACVST_SUPPORT
+			case ARDOUR::MacVST:
+				mac_vst_close (vstfx);
 				break;
 #endif
 			default:
@@ -836,7 +882,35 @@ vstfx_instantiate_and_get_info_fst (
 }
 #endif
 
+#ifdef MACVST_SUPPORT
+static bool
+vstfx_instantiate_and_get_info_mac (
+		const char* dllpath, vector<VSTInfo*> *infos, int uniqueID)
+{
+	printf("vstfx_instantiate_and_get_info_mac %s\n", dllpath);
+	VSTHandle* h;
+	VSTState* vstfx;
+	if (!(h = mac_vst_load (dllpath))) {
+		PBD::warning << string_compose (_("Cannot get MacVST information from '%1': load failed."), dllpath) << endmsg;
+		return false;
+	}
 
+	vstfx_current_loading_id = uniqueID;
+
+	if (!(vstfx = mac_vst_instantiate (h, simple_master_callback, 0))) {
+		mac_vst_unload (h);
+		PBD::warning << string_compose (_("Cannot get MacVST information from '%1': instantiation failed."), dllpath) << endmsg;
+		return false;
+	}
+
+	vstfx_current_loading_id = 0;
+
+	vstfx_info_from_plugin (dllpath, vstfx, infos, ARDOUR::MacVST);
+
+	mac_vst_unload (h);
+	return true;
+}
+#endif
 
 /* *** ERROR LOGGING *** */
 #ifndef VST_SCANNER_APP
@@ -925,7 +999,7 @@ vstfx_get_info (const char* dllpath, enum ARDOUR::PluginType type, enum VSTScanM
 		ARDOUR::SystemExec scanner (scanner_bin_path, argp);
 		PBD::ScopedConnectionList cons;
 		scanner.ReadStdout.connect_same_thread (cons, boost::bind (&parse_scanner_output, _1 ,_2));
-		if (scanner.start (2 /* send stderr&stdout via signal */)) {
+		if (scanner.start (ARDOUR::SystemExec::MergeWithStdin)) {
 			PBD::error << string_compose (_("Cannot launch VST scanner app '%1': %2"), scanner_bin_path, strerror (errno)) << endmsg;
 			close_error_log ();
 			return infos;
@@ -983,6 +1057,11 @@ vstfx_get_info (const char* dllpath, enum ARDOUR::PluginType type, enum VSTScanM
 			ok = vstfx_instantiate_and_get_info_lx (dllpath, infos, 0);
 			break;
 #endif
+#ifdef MACVST_SUPPORT
+		case ARDOUR::MacVST:
+			ok = vstfx_instantiate_and_get_info_mac (dllpath, infos, 0);
+			break;
+#endif
 		default:
 			ok = false;
 			break;
@@ -1003,6 +1082,19 @@ vstfx_get_info (const char* dllpath, enum ARDOUR::PluginType type, enum VSTScanM
 	} else {
 		vstfx_write_info_file (infofile, infos);
 		fclose (infofile);
+
+		/* In some cases the .dll may have a modification time in the future,
+		 * (e.g. unzip a VST plugin: .zip files don't include timezones)
+		 */
+		string const fsipath = vstfx_infofile_path (dllpath);
+		GStatBuf dllstat;
+		GStatBuf fsistat;
+		if (g_stat (dllpath, &dllstat) == 0 && g_stat (fsipath.c_str (), &fsistat) == 0) {
+			struct utimbuf utb;
+			utb.actime = fsistat.st_atime;
+			utb.modtime = std::max (dllstat.st_mtime, fsistat.st_mtime);
+			g_utime (fsipath.c_str (), &utb);
+		}
 	}
 	return infos;
 }
@@ -1024,6 +1116,14 @@ vector<VSTInfo *> *
 vstfx_get_info_lx (char* dllpath, enum VSTScanMode mode)
 {
 	return vstfx_get_info (dllpath, ARDOUR::LXVST, mode);
+}
+#endif
+
+#ifdef MACVST_SUPPORT
+vector<VSTInfo *> *
+vstfx_get_info_mac (char* dllpath, enum VSTScanMode mode)
+{
+	return vstfx_get_info (dllpath, ARDOUR::MacVST, mode);
 }
 #endif
 

@@ -1,21 +1,26 @@
 /*
-	Copyright (C) 2006,2007 John Anderson
-	Copyright (C) 2012 Paul Davis
-
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2007 John Anderson
+ * Copyright (C) 2007-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Len Ovens <len@ovenwerks.net>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2018 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <fcntl.h>
 #include <iostream>
@@ -52,6 +57,7 @@
 #include "ardour/panner.h"
 #include "ardour/panner_shell.h"
 #include "ardour/profile.h"
+#include "ardour/record_enable_control.h"
 #include "ardour/route.h"
 #include "ardour/route_group.h"
 #include "ardour/session.h"
@@ -59,12 +65,14 @@
 #include "ardour/track.h"
 #include "ardour/types.h"
 #include "ardour/audioengine.h"
+#include "ardour/vca_manager.h"
 
 #include "mackie_control_protocol.h"
 
 #include "midi_byte_array.h"
 #include "mackie_control_exception.h"
 #include "device_profile.h"
+#include "subview.h"
 #include "surface_port.h"
 #include "surface.h"
 #include "strip.h"
@@ -74,6 +82,10 @@
 #include "fader.h"
 #include "pot.h"
 
+#ifndef G_SOURCE_FUNC
+#define G_SOURCE_FUNC(f) ((GSourceFunc) (void (*)(void)) (f))
+#endif
+
 using namespace ARDOUR;
 using namespace std;
 using namespace PBD;
@@ -81,7 +93,7 @@ using namespace Glib;
 using namespace ArdourSurface;
 using namespace Mackie;
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include "pbd/abstract_ui.cc" // instantiate template
 
@@ -109,13 +121,12 @@ MackieControlProtocol::MackieControlProtocol (Session& session)
 	: ControlProtocol (session, X_("Mackie"))
 	, AbstractUI<MackieControlUIRequest> (name())
 	, _current_initial_bank (0)
-	, _frame_last (0)
+	, _sample_last (0)
 	, _timecode_type (ARDOUR::AnyTime::BBT)
 	, _gui (0)
 	, _scrub_mode (false)
 	, _flip_mode (Normal)
 	, _view_mode (Mixer)
-	, _subview_mode (None)
 	, _current_selected_track (-1)
 	, _modifier_state (0)
 	, _ipmidi_base (MIDI::IPMIDIPort::lowest_ipmidi_port_default)
@@ -129,6 +140,8 @@ MackieControlProtocol::MackieControlProtocol (Session& session)
 {
 	DEBUG_TRACE (DEBUG::MackieControl, "MackieControlProtocol::MackieControlProtocol\n");
 
+	_subview = Mackie::SubviewFactory::instance()->create_subview(Subview::None, *this, boost::shared_ptr<Stripable>());
+
 	DeviceInfo::reload_device_info ();
 	DeviceProfile::reload_device_profiles ();
 
@@ -136,7 +149,7 @@ MackieControlProtocol::MackieControlProtocol (Session& session)
 		_last_bank[i] = 0;
 	}
 
-	TrackSelectionChanged.connect (gui_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::gui_track_selection_changed, this, _1, true), this);
+	PresentationInfo::Change.connect (gui_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_presentation_info_changed, this, _1), this);
 
 	_instance = this;
 
@@ -182,19 +195,12 @@ MackieControlProtocol::~MackieControlProtocol()
 void
 MackieControlProtocol::thread_init ()
 {
-	struct sched_param rtparam;
-
 	pthread_set_name (event_loop_name().c_str());
 
 	PBD::notify_event_loops_about_thread_creation (pthread_self(), event_loop_name(), 2048);
 	ARDOUR::SessionEvent::create_per_thread_pool (event_loop_name(), 128);
 
-	memset (&rtparam, 0, sizeof (rtparam));
-	rtparam.sched_priority = 9; /* XXX should be relative to audio (JACK) thread */
-
-	if (pthread_setschedparam (pthread_self(), SCHED_FIFO, &rtparam) != 0) {
-		// do we care? not particularly.
-	}
+	set_thread_priority ();
 }
 
 void
@@ -210,7 +216,6 @@ MackieControlProtocol::ping_devices ()
 }
 
 // go to the previous track.
-// Assume that get_sorted_routes().size() > route_table.size()
 void
 MackieControlProtocol::prev_track()
 {
@@ -220,145 +225,128 @@ MackieControlProtocol::prev_track()
 }
 
 // go to the next track.
-// Assume that get_sorted_routes().size() > route_table.size()
 void
 MackieControlProtocol::next_track()
 {
-	Sorted sorted = get_sorted_routes();
-	if (_current_initial_bank + n_strips() < sorted.size()) {
+	Sorted sorted = get_sorted_stripables();
+	if (_current_initial_bank + 1 < sorted.size()) {
 		switch_banks (_current_initial_bank + 1);
 	}
 }
 
 bool
-MackieControlProtocol::route_is_locked_to_strip (boost::shared_ptr<Route> r) const
+MackieControlProtocol::stripable_is_locked_to_strip (boost::shared_ptr<Stripable> r) const
 {
 	for (Surfaces::const_iterator si = surfaces.begin(); si != surfaces.end(); ++si) {
-		if ((*si)->route_is_locked_to_strip (r)) {
+		if ((*si)->stripable_is_locked_to_strip (r)) {
 			return true;
 		}
 	}
 	return false;
 }
 
-// predicate for sort call in get_sorted_routes
-struct RouteByRemoteId
+// predicate for sort call in get_sorted_stripables
+struct StripableByPresentationOrder
 {
-	bool operator () (const boost::shared_ptr<Route> & a, const boost::shared_ptr<Route> & b) const
+	bool operator () (const boost::shared_ptr<Stripable> & a, const boost::shared_ptr<Stripable> & b) const
 	{
-		return a->remote_control_id() < b->remote_control_id();
+		return a->presentation_info().order() < b->presentation_info().order();
 	}
 
-	bool operator () (const Route & a, const Route & b) const
+	bool operator () (const Stripable & a, const Stripable & b) const
 	{
-		return a.remote_control_id() < b.remote_control_id();
+		return a.presentation_info().order() < b.presentation_info().order();
 	}
 
-	bool operator () (const Route * a, const Route * b) const
+	bool operator () (const Stripable * a, const Stripable * b) const
 	{
-		return a->remote_control_id() < b->remote_control_id();
+		return a->presentation_info().order() < b->presentation_info().order();
 	}
 };
 
 MackieControlProtocol::Sorted
-MackieControlProtocol::get_sorted_routes()
+MackieControlProtocol::get_sorted_stripables()
 {
 	Sorted sorted;
 
-	// fetch all routes
-	boost::shared_ptr<RouteList> routes = session->get_routes();
-	set<uint32_t> remote_ids;
+	// fetch all stripables
+	StripableList stripables;
 
-	// routes with remote_id 0 should never be added
-	// TODO verify this with ardour devs
-	// remote_ids.insert (0);
+	session->get_stripables (stripables);
 
-	// sort in remote_id order, and exclude master, control and hidden routes
-	// and any routes that are already set.
+	// sort in presentation order, and exclude master, control and hidden stripables
+	// and any stripables that are already set.
 
-	for (RouteList::iterator it = routes->begin(); it != routes->end(); ++it) {
+	for (StripableList::iterator it = stripables.begin(); it != stripables.end(); ++it) {
 
-		boost::shared_ptr<Route> route = *it;
+		boost::shared_ptr<Stripable> s = *it;
 
-		if (remote_ids.find (route->remote_control_id()) != remote_ids.end()) {
-			continue;
-		}
-
-		if (route->is_auditioner() || route->is_master() || route->is_monitor()) {
+		if (s->presentation_info().special()) {
 			continue;
 		}
 
 		/* don't include locked routes */
 
-		if (route_is_locked_to_strip(route)) {
+		if (stripable_is_locked_to_strip (s)) {
 			continue;
 		}
 
 		switch (_view_mode) {
 		case Mixer:
-			if (! is_hidden(route)) {
-				sorted.push_back (route);
-				remote_ids.insert (route->remote_control_id());
+			if (!s->presentation_info().hidden()) {
+				sorted.push_back (s);
 			}
 			break;
 		case AudioTracks:
-			if (is_audio_track(route) && !is_hidden(route)) {
-				sorted.push_back (route);
-				remote_ids.insert (route->remote_control_id());
+			if (is_audio_track(s) && !s->presentation_info().hidden()) {
+				sorted.push_back (s);
 			}
 			break;
 		case Busses:
 			if (Profile->get_mixbus()) {
 #ifdef MIXBUS
-				if (route->mixbus()) {
-					sorted.push_back (route);
-					remote_ids.insert (route->remote_control_id());
+				if (s->mixbus()) {
+					sorted.push_back (s);
 				}
 #endif
 			} else {
-				if (!is_track(route) && !is_hidden(route)) {
-					sorted.push_back (route);
-					remote_ids.insert (route->remote_control_id());
+				if (!is_track(s) && !s->presentation_info().hidden()) {
+					sorted.push_back (s);
 				}
 			}
 			break;
 		case MidiTracks:
-			if (is_midi_track(route) && !is_hidden(route)) {
-				sorted.push_back (route);
-				remote_ids.insert (route->remote_control_id());
+			if (is_midi_track(s) && !s->presentation_info().hidden()) {
+				sorted.push_back (s);
 			}
 			break;
 		case Plugins:
 			break;
 		case Auxes: // in ardour, for now aux and buss are same. for mixbus, "Busses" are mixbuses, "Auxes" are ardour buses
 #ifdef MIXBUS
-			if (!route->mixbus() && !is_track(route) && !is_hidden(route))
+			if (!s->mixbus() && !is_track(s) && !s->presentation_info().hidden())
 #else
-			if (!is_track(route) && !is_hidden(route))
+			if (!is_track(s) && !s->presentation_info().hidden())
 #endif
 			{
-				sorted.push_back (route);
-				remote_ids.insert (route->remote_control_id());
+				sorted.push_back (s);
 			}
 			break;
 		case Hidden: // Show all the tracks we have hidden
-			if (is_hidden(route)) {
+			if (s->presentation_info().hidden()) {
 				// maybe separate groups
-				sorted.push_back (route);
-				remote_ids.insert (route->remote_control_id());
+				sorted.push_back (s);
 			}
 			break;
 		case Selected: // For example: a group (this is USER)
-			if (selected(route) && !is_hidden(route)) {
-				sorted.push_back (route);
-				remote_ids.insert (route->remote_control_id());
+			if (s->is_selected() && !s->presentation_info().hidden()) {
+				sorted.push_back (s);
 			}
 			break;
 		}
-
 	}
 
-	sort (sorted.begin(), sorted.end(), RouteByRemoteId());
+	sort (sorted.begin(), sorted.end(), StripableByPresentationOrder());
 	return sorted;
 }
 
@@ -390,59 +378,67 @@ MackieControlProtocol::switch_banks (uint32_t initial, bool force)
 		return 0;
 	}
 
-	Sorted sorted = get_sorted_routes();
+	Sorted sorted = get_sorted_stripables();
 	uint32_t strip_cnt = n_strips (false); // do not include locked strips
 					       // in this count
 
-	if (initial >= sorted.size()) {
+	if (initial >= sorted.size() && !force) {
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("bank target %1 exceeds route range %2\n",
+		                                                   _current_initial_bank, sorted.size()));
 		/* too high, we can't get there */
 		return -1;
 	}
 
 	if (sorted.size() <= strip_cnt && _current_initial_bank == 0 && !force) {
-		/* no banking - not enough routes to fill all strips and we're
+		/* no banking - not enough stripables to fill all strips and we're
 		 * not at the first one.
 		 */
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("less routes (%1) than strips (%2) and we're at the end already (%3)\n",
+		                                                   sorted.size(), strip_cnt, _current_initial_bank));
 		return -1;
 	}
 
 	_current_initial_bank = initial;
 	_current_selected_track = -1;
 
-	// Map current bank of routes onto each surface(+strip)
+	// Map current bank of stripables onto each surface(+strip)
 
 	if (_current_initial_bank < sorted.size()) {
 
-		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("switch to %1, %2, available routes %3 on %4 surfaces\n",
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("switch to %1, %2, available stripables %3 on %4 surfaces\n",
 								   _current_initial_bank, strip_cnt, sorted.size(),
 								   surfaces.size()));
 
-		// link routes to strips
+		// link stripables to strips
 
 		Sorted::iterator r = sorted.begin() + _current_initial_bank;
 
 		for (Surfaces::iterator si = surfaces.begin(); si != surfaces.end(); ++si) {
-			vector<boost::shared_ptr<Route> > routes;
+			vector<boost::shared_ptr<Stripable> > stripables;
 			uint32_t added = 0;
 
-			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("surface has %1 unlockedstrips\n", (*si)->n_strips (false)));
+			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("surface has %1 unlocked strips\n", (*si)->n_strips (false)));
 
 			for (; r != sorted.end() && added < (*si)->n_strips (false); ++r, ++added) {
-				routes.push_back (*r);
+				stripables.push_back (*r);
 			}
 
-			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("give surface %1 routes\n", routes.size()));
+			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("give surface %1 stripables\n", stripables.size()));
 
-			(*si)->map_routes (routes);
+			(*si)->map_stripables (stripables);
 		}
 
 	} else {
+		/* all strips need to be reset */
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("clear all strips, bank target %1  is outside route range %2\n",
+		                                                   _current_initial_bank, sorted.size()));
+		for (Surfaces::iterator si = surfaces.begin(); si != surfaces.end(); ++si) {
+			vector<boost::shared_ptr<Stripable> > stripables;
+			/* pass in an empty stripables list, so that all strips will be reset */
+			(*si)->map_stripables (stripables);
+		}
 		return -1;
 	}
-
-	/* make sure selection is correct */
-
-	_gui_track_selection_changed (&_last_selected_routes, false, false);
 
 	/* current bank has not been saved */
 	session->set_dirty();
@@ -474,15 +470,29 @@ MackieControlProtocol::set_active (bool yn)
 		/* set up periodic task for timecode display and metering and automation
 		 */
 
-		Glib::RefPtr<Glib::TimeoutSource> periodic_timeout = Glib::TimeoutSource::create (100); // milliseconds
+		// set different refresh time for qcon and standard mackie MCU
+
+		int iTimeCodeRefreshTime = 100; // default value for mackie MCU (100ms)
+		int iStripDisplayRefreshTime = 10; // default value for Mackie MCU (10ms)
+
+		if(_device_info.is_qcon()){
+			// set faster timecode display refresh speed (55ms)
+			iTimeCodeRefreshTime = 55;
+			// set slower refresh time on qcon than on mackie (15ms)
+			iStripDisplayRefreshTime = 15;
+		}
+
+		Glib::RefPtr<Glib::TimeoutSource> periodic_timeout = Glib::TimeoutSource::create (iTimeCodeRefreshTime); // milliseconds
 		periodic_connection = periodic_timeout->connect (sigc::mem_fun (*this, &MackieControlProtocol::periodic));
 		periodic_timeout->attach (main_loop()->get_context());
 
 		/* periodic task used to update strip displays */
 
-		Glib::RefPtr<Glib::TimeoutSource> redisplay_timeout = Glib::TimeoutSource::create (10); // milliseconds
+		Glib::RefPtr<Glib::TimeoutSource> redisplay_timeout = Glib::TimeoutSource::create (iStripDisplayRefreshTime); // milliseconds
 		redisplay_connection = redisplay_timeout->connect (sigc::mem_fun (*this, &MackieControlProtocol::redisplay));
 		redisplay_timeout->attach (main_loop()->get_context());
+
+		notify_transport_state_changed ();
 
 	} else {
 
@@ -650,7 +660,7 @@ MackieControlProtocol::device_ready ()
 {
 	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("device ready init (active=%1)\n", active()));
 	update_surfaces ();
-	set_subview_mode (MackieControlProtocol::None, boost::shared_ptr<Route>());
+	set_subview_mode (Mackie::Subview::None, boost::shared_ptr<Stripable>());
 	set_flip_mode (Normal);
 }
 
@@ -703,8 +713,10 @@ void
 MackieControlProtocol::connect_session_signals()
 {
 	// receive routes added
-	session->RouteAdded.connect(session_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_route_added, this, _1), this);
-	session->RouteAddedOrRemoved.connect(session_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_route_added_or_removed, this), this);
+	session->RouteAdded.connect(session_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_routes_added, this, _1), this);
+	// receive VCAs added
+	session->vca_manager().VCAAdded.connect(session_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_vca_added, this, _1), this);
+
 	// receive record state toggled
 	session->RecordStateChanged.connect(session_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_record_state_changed, this), this);
 	// receive transport state changed
@@ -717,12 +729,8 @@ MackieControlProtocol::connect_session_signals()
 	session->SoloActive.connect(session_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_solo_active_changed, this, _1), this);
 
 	// make sure remote id changed signals reach here
-	// see also notify_route_added
-	Sorted sorted = get_sorted_routes();
-
-	for (Sorted::iterator it = sorted.begin(); it != sorted.end(); ++it) {
-		(*it)->RemoteControlIDChanged.connect (route_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_remote_id_changed, this), this);
-	}
+	// see also notify_stripable_added
+	Sorted sorted = get_sorted_stripables();
 }
 
 void
@@ -867,7 +875,7 @@ MackieControlProtocol::create_surfaces ()
 			XMLNode* this_device = 0;
 			XMLNodeList const& devices = configuration_state->children();
 			for (XMLNodeList::const_iterator d = devices.begin(); d != devices.end(); ++d) {
-				XMLProperty* prop = (*d)->property (X_("name"));
+				XMLProperty const * prop = (*d)->property (X_("name"));
 				if (prop && prop->value() == _device_info.name()) {
 					this_device = *d;
 					break;
@@ -940,7 +948,7 @@ MackieControlProtocol::create_surfaces ()
 				ipm->mcp = this;
 				ipm->port = &input_port;
 
-				g_source_set_callback (surface->input_source, (GSourceFunc) ipmidi_input_handler, ipm, NULL);
+				g_source_set_callback (surface->input_source, G_SOURCE_FUNC (ipmidi_input_handler), ipm, NULL);
 				g_source_attach (surface->input_source, main_loop()->get_context()->gobj());
 			}
 		}
@@ -965,7 +973,7 @@ MackieControlProtocol::close()
 {
 	port_connection.disconnect ();
 	session_connections.drop_connections ();
-	route_connections.drop_connections ();
+	stripable_connections.drop_connections ();
 	periodic_connection.disconnect ();
 
 	clear_surfaces();
@@ -985,7 +993,7 @@ MackieControlProtocol::update_configuration_state ()
 	}
 
 	XMLNode* devnode = new XMLNode (X_("Configuration"));
-	devnode->add_property (X_("name"), _device_info.name());
+	devnode->set_property (X_("name"), _device_info.name());
 
 	configuration_state->remove_nodes_and_delete (X_("name"), _device_info.name());
 	configuration_state->add_child_nocopy (*devnode);
@@ -1005,18 +1013,15 @@ MackieControlProtocol::get_state()
 	XMLNode& node (ControlProtocol::get_state());
 
 	DEBUG_TRACE (DEBUG::MackieControl, "MackieControlProtocol::get_state init\n");
-	char buf[16];
 
 	// add current bank
-	snprintf (buf, sizeof (buf), "%d", _current_initial_bank);
-	node.add_property (X_("bank"), buf);
+	node.set_property (X_("bank"), _current_initial_bank);
 
 	// ipMIDI base port (possibly not used)
-	snprintf (buf, sizeof (buf), "%d", _ipmidi_base);
-	node.add_property (X_("ipmidi-base"), buf);
+	node.set_property (X_("ipmidi-base"), _ipmidi_base);
 
-	node.add_property (X_("device-profile"), _device_profile.name());
-	node.add_property (X_("device-name"), _device_info.name());
+	node.set_property (X_("device-profile"), _device_profile.name());
+	node.set_property (X_("device-name"), _device_info.name());
 
 	{
 		Glib::Threads::Mutex::Lock lm (surfaces_lock);
@@ -1042,29 +1047,27 @@ MackieControlProtocol::set_state (const XMLNode & node, int version)
 {
 	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("MackieControlProtocol::set_state: active %1\n", active()));
 
-	int retval = 0;
-	const XMLProperty* prop;
-	uint32_t bank = 0;
-
 	if (ControlProtocol::set_state (node, version)) {
 		return -1;
 	}
 
-	if ((prop = node.property (X_("ipmidi-base"))) != 0) {
-		set_ipmidi_base (atoi (prop->value()));
+	uint16_t ipmidi_base;
+	if (node.get_property (X_("ipmidi-base"), ipmidi_base)) {
+		set_ipmidi_base (ipmidi_base);
 	}
 
+	uint32_t bank = 0;
 	// fetch current bank
-	if ((prop = node.property (X_("bank"))) != 0) {
-		bank = atoi (prop->value());
+	node.get_property (X_("bank"), bank);
+
+	std::string device_name;
+	if (node.get_property (X_("device-name"), device_name)) {
+		set_device_info (device_name);
 	}
 
-	if ((prop = node.property (X_("device-name"))) != 0) {
-		set_device_info (prop->value());
-	}
-
-	if ((prop = node.property (X_("device-profile"))) != 0) {
-		if (prop->value().empty()) {
+	std::string device_profile_name;
+	if (node.get_property (X_("device-profile"), device_profile_name)) {
+		if (device_profile_name.empty()) {
 			string default_profile_name;
 
 			/* start by looking for a user-edited profile for the current device name */
@@ -1094,8 +1097,8 @@ MackieControlProtocol::set_state (const XMLNode & node, int version)
 			set_profile (default_profile_name);
 
 		} else {
-			if (profile_exists (prop->value())) {
-				set_profile (prop->value());
+			if (profile_exists (device_profile_name)) {
+				set_profile (device_profile_name);
 			} else {
 				set_profile (DeviceProfile::default_profile_name);
 			}
@@ -1116,15 +1119,15 @@ MackieControlProtocol::set_state (const XMLNode & node, int version)
 
 	DEBUG_TRACE (DEBUG::MackieControl, "MackieControlProtocol::set_state done\n");
 
-	return retval;
+	return 0;
 }
 
 string
-MackieControlProtocol::format_bbt_timecode (framepos_t now_frame)
+MackieControlProtocol::format_bbt_timecode (samplepos_t now_sample)
 {
 	Timecode::BBT_Time bbt_time;
 
-	session->bbt_time (now_frame, bbt_time);
+	session->bbt_time (now_sample, bbt_time);
 
 	// The Mackie protocol spec is built around a BBT time display of
 	//
@@ -1147,14 +1150,14 @@ MackieControlProtocol::format_bbt_timecode (framepos_t now_frame)
 }
 
 string
-MackieControlProtocol::format_timecode_timecode (framepos_t now_frame)
+MackieControlProtocol::format_timecode_timecode (samplepos_t now_sample)
 {
 	Timecode::Time timecode;
-	session->timecode_time (now_frame, timecode);
+	session->timecode_time (now_sample, timecode);
 
 	// According to the Logic docs
 	// digits: 888/88/88/888
-	// Timecode mode: Hours/Minutes/Seconds/Frames
+	// Timecode mode: Hours/Minutes/Seconds/Samples
 	ostringstream os;
 	os << setw(2) << setfill('0') << timecode.hours;
 	os << ' ';
@@ -1181,23 +1184,23 @@ MackieControlProtocol::update_timecode_display()
 		return;
 	}
 
-	// do assignment here so current_frame is fixed
-	framepos_t current_frame = session->transport_frame();
+	// do assignment here so current_sample is fixed
+	samplepos_t current_sample = session->transport_sample();
 	string timecode;
 	// For large jumps in play head possition do full reset
-	int moved = (current_frame - _frame_last) / session->frame_rate ();
+	int moved = (current_sample - _sample_last) / session->sample_rate ();
 	if (moved) {
 		DEBUG_TRACE (DEBUG::MackieControl, "Timecode reset\n");
 		_timecode_last = string (10, ' ');
 	}
-	_frame_last = current_frame;
+	_sample_last = current_sample;
 
 	switch (_timecode_type) {
 	case ARDOUR::AnyTime::BBT:
-		timecode = format_bbt_timecode (current_frame);
+		timecode = format_bbt_timecode (current_sample);
 		break;
 	case ARDOUR::AnyTime::Timecode:
-		timecode = format_timecode_timecode (current_frame);
+		timecode = format_timecode_timecode (current_sample);
 		break;
 	default:
 		return;
@@ -1239,7 +1242,7 @@ void MackieControlProtocol::notify_parameter_changed (std::string const & p)
 }
 
 void
-MackieControlProtocol::notify_route_added_or_removed ()
+MackieControlProtocol::notify_stripable_removed ()
 {
 	Glib::Threads::Mutex::Lock lm (surfaces_lock);
 	for (Surfaces::iterator s = surfaces.begin(); s != surfaces.end(); ++s) {
@@ -1247,9 +1250,15 @@ MackieControlProtocol::notify_route_added_or_removed ()
 	}
 }
 
-// RouteList is the set of routes that have just been added
 void
-MackieControlProtocol::notify_route_added (ARDOUR::RouteList & rl)
+MackieControlProtocol::notify_vca_added (ARDOUR::VCAList& vl)
+{
+	refresh_current_bank ();
+}
+
+// RouteList is the set of Routes that have just been added
+void
+MackieControlProtocol::notify_routes_added (ARDOUR::RouteList & rl)
 {
 	{
 		Glib::Threads::Mutex::Lock lm (surfaces_lock);
@@ -1274,13 +1283,6 @@ MackieControlProtocol::notify_route_added (ARDOUR::RouteList & rl)
 	refresh_current_bank();
 
 	// otherwise route added, but current bank needs no updating
-
-	// make sure remote id changes in the new route are handled
-	typedef ARDOUR::RouteList ARS;
-
-	for (ARS::iterator it = rl.begin(); it != rl.end(); ++it) {
-		(*it)->RemoteControlIDChanged.connect (route_connections, MISSING_INVALIDATOR, boost::bind (&MackieControlProtocol::notify_remote_id_changed, this), this);
-	}
 }
 
 void
@@ -1308,8 +1310,17 @@ MackieControlProtocol::notify_solo_active_changed (bool active)
 }
 
 void
-MackieControlProtocol::notify_remote_id_changed()
+MackieControlProtocol::notify_presentation_info_changed (PBD::PropertyChange const & what_changed)
 {
+	PBD::PropertyChange order_or_hidden;
+
+	order_or_hidden.add (Properties::hidden);
+	order_or_hidden.add (Properties::order);
+
+	if (!what_changed.contains (order_or_hidden)) {
+		return;
+	}
+
 	{
 		Glib::Threads::Mutex::Lock lm (surfaces_lock);
 
@@ -1318,23 +1329,7 @@ MackieControlProtocol::notify_remote_id_changed()
 		}
 	}
 
-	Sorted sorted = get_sorted_routes();
-	uint32_t sz = n_strips();
-
-	// if a remote id has been moved off the end, we need to shift
-	// the current bank backwards.
-
-	if (sorted.size() - _current_initial_bank < sz) {
-		// but don't shift backwards past the zeroth channel
-		if (sorted.size() < sz) {  // avoid unsigned math mistake below
-			(void) switch_banks(0, true);
-		} else {
-			(void) switch_banks (max((Sorted::size_type) 0, sorted.size() - sz), true);
-		}
-	} else {
-		// Otherwise just refresh the current bank
-		refresh_current_bank();
-	}
+	refresh_current_bank();
 }
 
 ///////////////////////////////////////////
@@ -1355,11 +1350,11 @@ MackieControlProtocol::notify_transport_state_changed()
 	}
 
 	// switch various play and stop buttons on / off
-	update_global_button (Button::Loop, session->get_play_loop());
-	update_global_button (Button::Play, session->transport_speed() == 1.0);
-	update_global_button (Button::Stop, session->transport_stopped ());
-	update_global_button (Button::Rewind, session->transport_speed() < 0.0);
-	update_global_button (Button::Ffwd, session->transport_speed() > 1.0);
+	update_global_button (Button::Loop, loop_button_onoff ());
+	update_global_button (Button::Play, play_button_onoff ());
+	update_global_button (Button::Stop, stop_button_onoff ());
+	update_global_button (Button::Rewind, rewind_button_onoff ());
+	update_global_button (Button::Ffwd, ffwd_button_onoff ());
 
 	// sometimes a return to start leaves time code at old time
 	_timecode_last = string (10, ' ');
@@ -1412,8 +1407,21 @@ MackieControlProtocol::notify_record_state_changed ()
 				ls = on;
 				break;
 			case Session::Enabled:
-				DEBUG_TRACE (DEBUG::MackieControl, "record state changed to enabled, LED flashing\n");
-				ls = flashing;
+
+				if(_device_info.is_qcon()){
+					// For qcon the rec button is two state only (on/off)
+					DEBUG_TRACE (DEBUG::MackieControl, "record state changed to enabled, LED on (QCon)\n");
+					ls = on;
+					break;
+
+				}
+				else{
+					// For standard Mackie MCU the record LED is flashing
+					DEBUG_TRACE (DEBUG::MackieControl, "record state changed to enabled, LED flashing\n");
+					ls = flashing;
+					break;
+				}
+
 				break;
 			}
 
@@ -1487,14 +1495,14 @@ MackieControlProtocol::build_button_map ()
 	DEFINE_BUTTON_HANDLER (Button::View, &MackieControlProtocol::view_press, &MackieControlProtocol::view_release);
 	DEFINE_BUTTON_HANDLER (Button::NameValue, &MackieControlProtocol::name_value_press, &MackieControlProtocol::name_value_release);
 	DEFINE_BUTTON_HANDLER (Button::TimecodeBeats, &MackieControlProtocol::timecode_beats_press, &MackieControlProtocol::timecode_beats_release);
-	DEFINE_BUTTON_HANDLER (Button::F1, &MackieControlProtocol::F1_press, &MackieControlProtocol::F1_release);
-	DEFINE_BUTTON_HANDLER (Button::F2, &MackieControlProtocol::F2_press, &MackieControlProtocol::F2_release);
-	DEFINE_BUTTON_HANDLER (Button::F3, &MackieControlProtocol::F3_press, &MackieControlProtocol::F3_release);
-	DEFINE_BUTTON_HANDLER (Button::F4, &MackieControlProtocol::F4_press, &MackieControlProtocol::F4_release);
-	DEFINE_BUTTON_HANDLER (Button::F5, &MackieControlProtocol::F5_press, &MackieControlProtocol::F5_release);
-	DEFINE_BUTTON_HANDLER (Button::F6, &MackieControlProtocol::F6_press, &MackieControlProtocol::F6_release);
-	DEFINE_BUTTON_HANDLER (Button::F7, &MackieControlProtocol::F7_press, &MackieControlProtocol::F7_release);
-	DEFINE_BUTTON_HANDLER (Button::F8, &MackieControlProtocol::F8_press, &MackieControlProtocol::F8_release);
+//	DEFINE_BUTTON_HANDLER (Button::F1, &MackieControlProtocol::F1_press, &MackieControlProtocol::F1_release);
+//	DEFINE_BUTTON_HANDLER (Button::F2, &MackieControlProtocol::F2_press, &MackieControlProtocol::F2_release);
+//	DEFINE_BUTTON_HANDLER (Button::F3, &MackieControlProtocol::F3_press, &MackieControlProtocol::F3_release);
+//	DEFINE_BUTTON_HANDLER (Button::F4, &MackieControlProtocol::F4_press, &MackieControlProtocol::F4_release);
+//	DEFINE_BUTTON_HANDLER (Button::F5, &MackieControlProtocol::F5_press, &MackieControlProtocol::F5_release);
+//	DEFINE_BUTTON_HANDLER (Button::F6, &MackieControlProtocol::F6_press, &MackieControlProtocol::F6_release);
+//	DEFINE_BUTTON_HANDLER (Button::F7, &MackieControlProtocol::F7_press, &MackieControlProtocol::F7_release);
+//	DEFINE_BUTTON_HANDLER (Button::F8, &MackieControlProtocol::F8_press, &MackieControlProtocol::F8_release);
 	DEFINE_BUTTON_HANDLER (Button::MidiTracks, &MackieControlProtocol::miditracks_press, &MackieControlProtocol::miditracks_release);
 	DEFINE_BUTTON_HANDLER (Button::Inputs, &MackieControlProtocol::inputs_press, &MackieControlProtocol::inputs_release);
 	DEFINE_BUTTON_HANDLER (Button::AudioTracks, &MackieControlProtocol::audiotracks_press, &MackieControlProtocol::audiotracks_release);
@@ -1550,20 +1558,14 @@ MackieControlProtocol::handle_button_event (Surface& surface, Button& button, Bu
 		return;
 	}
 
-	if ((button_id != Button::Marker) && (modifier_state() & MODIFIER_MARKER)) {
-		marker_modifier_consumed_by_button = true;
-	}
-
-	if ((button_id != Button::Nudge) && (modifier_state() & MODIFIER_NUDGE)) {
-		nudge_modifier_consumed_by_button = true;
-	}
-
 	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("Handling %1 for button %2 (%3)\n", (bs == press ? "press" : "release"), button.id(),
 							   Button::id_to_name (button.bid())));
 
 	/* check profile first */
 
 	string action = _device_profile.get_button_action (button.bid(), _modifier_state);
+
+	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("device profile returned [%1] for that button\n", action));
 
 	if (!action.empty()) {
 
@@ -1578,10 +1580,12 @@ MackieControlProtocol::handle_button_event (Surface& surface, Button& button, Bu
 			   occur either.
 			*/
 			if (bs == press) {
+				update_led (surface, button, on);
 				DEBUG_TRACE (DEBUG::MackieControl, string_compose ("executing action %1\n", action));
 				access_action (action);
+			} else {
+				update_led (surface, button, off);
 			}
-
 			return;
 
 		} else {
@@ -1605,13 +1609,29 @@ MackieControlProtocol::handle_button_event (Surface& surface, Button& button, Bu
 		}
 	}
 
+	/* Now that we have the correct (maybe remapped) button ID, do these
+	 * checks on it.
+	 */
+
+	if ((button_id != Button::Marker) && (modifier_state() & MODIFIER_MARKER)) {
+		marker_modifier_consumed_by_button = true;
+	}
+
+	if ((button_id != Button::Nudge) && (modifier_state() & MODIFIER_NUDGE)) {
+		nudge_modifier_consumed_by_button = true;
+	}
+
 	/* lookup using the device-INDEPENDENT button ID */
+
+	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("now looking up button ID %1\n", button_id));
 
 	ButtonMap::iterator b = button_map.find (button_id);
 
 	if (b != button_map.end()) {
 
 		ButtonHandlers& bh (b->second);
+
+		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("button found in map, now invoking %1\n", (bs == press ? "press" : "release")));
 
 		switch  (bs) {
 		case press:
@@ -1641,7 +1661,7 @@ MackieControlProtocol::midi_input_handler (IOCondition ioc, MIDI::Port* port)
 
 	if (ioc & IO_IN) {
 
-		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("something happend on  %1\n", port->name()));
+		// DEBUG_TRACE (DEBUG::MackieControl, string_compose ("something happend on  %1\n", port->name()));
 
 		/* Devices using regular JACK MIDI ports will need to have
 		   the x-thread FIFO drained to avoid burning endless CPU.
@@ -1658,8 +1678,8 @@ MackieControlProtocol::midi_input_handler (IOCondition ioc, MIDI::Port* port)
 			}
 		}
 
-		DEBUG_TRACE (DEBUG::MackieControl, string_compose ("data available on %1\n", port->name()));
-		framepos_t now = session->engine().sample_time();
+		// DEBUG_TRACE (DEBUG::MackieControl, string_compose ("data available on %1\n", port->name()));
+		samplepos_t now = session->engine().sample_time();
 		port->parse (now);
 	}
 
@@ -1676,46 +1696,11 @@ MackieControlProtocol::clear_ports ()
 }
 
 void
-MackieControlProtocol::notify_subview_route_deleted ()
+MackieControlProtocol::notify_subview_stripable_deleted ()
 {
 	/* return to global/mixer view */
-	_subview_route.reset ();
+	_subview->notify_subview_stripable_deleted();
 	set_view_mode (Mixer);
-}
-
-bool
-MackieControlProtocol::subview_mode_would_be_ok (SubViewMode mode, boost::shared_ptr<Route> r)
-{
-	switch (mode) {
-	case None:
-		return true;
-		break;
-
-	case Sends:
-		if (r && r->send_level_controllable (0)) {
-			return true;
-		}
-		break;
-
-	case EQ:
-		if (r && r->eq_band_cnt() > 0) {
-			return true;
-		}
-		break;
-
-	case Dynamics:
-		if (r && r->comp_enable_controllable()) {
-			return true;
-		}
-		break;
-
-	case TrackView:
-		if (r) {
-			return true;
-		}
-	}
-
-	return false;
 }
 
 bool
@@ -1736,43 +1721,28 @@ MackieControlProtocol::redisplay_subview_mode ()
 	return false;
 }
 
-int
-MackieControlProtocol::set_subview_mode (SubViewMode sm, boost::shared_ptr<Route> r)
+bool
+MackieControlProtocol::set_subview_mode (Subview::Mode sm, boost::shared_ptr<Stripable> r)
 {
+	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("set subview mode %1 with stripable %2, current flip mode %3\n", sm, (r ? r->name() : string ("null")), _flip_mode));
+
 	if (_flip_mode != Normal) {
 		set_flip_mode (Normal);
 	}
 
-	boost::shared_ptr<Route> old_route = _subview_route;
+	std::string reason_why_subview_not_possible = "";
+	if (!_subview->subview_mode_would_be_ok (sm, r, reason_why_subview_not_possible)) {
 
-	if (!subview_mode_would_be_ok (sm, r)) {
+		DEBUG_TRACE (DEBUG::MackieControl, "subview mode not OK\n");
 
 		if (r) {
 
 			Glib::Threads::Mutex::Lock lm (surfaces_lock);
 
 			if (!surfaces.empty()) {
-
-				string msg;
-
-				switch (sm) {
-				case Sends:
-					msg = _("no sends for selected track/bus");
-					break;
-				case EQ:
-					msg = _("no EQ in the track/bus");
-					break;
-				case Dynamics:
-					msg = _("no dynamics in selected track/bus");
-					break;
-				case TrackView:
-					msg = _("no track view possible");
-				default:
-					break;
-				}
-				if (!msg.empty()) {
-					surfaces.front()->display_message_for (msg, 1000);
-					if (_subview_mode != None) {
+				if (!reason_why_subview_not_possible.empty()) {
+					surfaces.front()->display_message_for (reason_why_subview_not_possible, 1000);
+					if (_subview->subview_mode() != Mackie::Subview::None) {
 						/* redisplay current subview mode after
 						   that message goes away.
 						*/
@@ -1784,75 +1754,21 @@ MackieControlProtocol::set_subview_mode (SubViewMode sm, boost::shared_ptr<Route
 			}
 		}
 
-		return -1;
+		return false;
 	}
 
-	_subview_mode = sm;
-
-	if (r) {
-		/* retain _subview_route even if it is reset to null implicitly */
-		_subview_route = r;
-	}
-
-	if (r != old_route) {
-		subview_route_connections.drop_connections ();
-
-		/* Catch the current subview route going away */
-		if (_subview_route) {
-			_subview_route->DropReferences.connect (subview_route_connections, MISSING_INVALIDATOR,
-			                                        boost::bind (&MackieControlProtocol::notify_subview_route_deleted, this),
-			                                        this);
-		}
+	_subview = Mackie::SubviewFactory::instance()->create_subview(sm, *this, r);
+	/* Catch the current subview stripable going away */
+	if (_subview->subview_stripable()) {
+		_subview->subview_stripable()->DropReferences.connect (_subview->subview_stripable_connections(), MISSING_INVALIDATOR,
+													boost::bind (&MackieControlProtocol::notify_subview_stripable_deleted, this),
+													this);
 	}
 
 	redisplay_subview_mode ();
+	_subview->update_global_buttons();
 
-	/* turn buttons related to vpot mode on or off as required */
-
-	switch (_subview_mode) {
-	case MackieControlProtocol::None:
-		update_global_button (Button::Send, off);
-		update_global_button (Button::Plugin, off);
-		update_global_button (Button::Eq, off);
-		update_global_button (Button::Dyn, off);
-		update_global_button (Button::Track, off);
-		update_global_button (Button::Pan, on);
-		break;
-	case MackieControlProtocol::EQ:
-		update_global_button (Button::Send, off);
-		update_global_button (Button::Plugin, off);
-		update_global_button (Button::Eq, on);
-		update_global_button (Button::Dyn, off);
-		update_global_button (Button::Track, off);
-		update_global_button (Button::Pan, off);
-		break;
-	case MackieControlProtocol::Dynamics:
-		update_global_button (Button::Send, off);
-		update_global_button (Button::Plugin, off);
-		update_global_button (Button::Eq, off);
-		update_global_button (Button::Dyn, on);
-		update_global_button (Button::Track, off);
-		update_global_button (Button::Pan, off);
-		break;
-	case MackieControlProtocol::Sends:
-		update_global_button (Button::Send, on);
-		update_global_button (Button::Plugin, off);
-		update_global_button (Button::Eq, off);
-		update_global_button (Button::Dyn, off);
-		update_global_button (Button::Track, off);
-		update_global_button (Button::Pan, off);
-		break;
-	case MackieControlProtocol::TrackView:
-		update_global_button (Button::Send, off);
-		update_global_button (Button::Plugin, off);
-		update_global_button (Button::Eq, off);
-		update_global_button (Button::Dyn, off);
-		update_global_button (Button::Track, on);
-		update_global_button (Button::Pan, off);
-		break;
-	}
-
-	return 0;
+	return true;
 }
 
 void
@@ -1872,7 +1788,8 @@ MackieControlProtocol::set_view_mode (ViewMode m)
 	}
 
 	/* leave subview mode, whatever it was */
-	set_subview_mode (None, boost::shared_ptr<Route>());
+	DEBUG_TRACE (DEBUG::MackieControl, "\t\t\tsubview mode reset in MackieControlProtocol::set_view_mode \n");
+	set_subview_mode (Mackie::Subview::None, boost::shared_ptr<Stripable>());
 	display_view_mode ();
 }
 
@@ -1907,17 +1824,17 @@ MackieControlProtocol::set_flip_mode (FlipMode fm)
 void
 MackieControlProtocol::set_master_on_surface_strip (uint32_t surface, uint32_t strip_number)
 {
-	force_special_route_to_strip (session->master_out(), surface, strip_number);
+	force_special_stripable_to_strip (session->master_out(), surface, strip_number);
 }
 
 void
 MackieControlProtocol::set_monitor_on_surface_strip (uint32_t surface, uint32_t strip_number)
 {
-	force_special_route_to_strip (session->monitor_out(), surface, strip_number);
+	force_special_stripable_to_strip (session->monitor_out(), surface, strip_number);
 }
 
 void
-MackieControlProtocol::force_special_route_to_strip (boost::shared_ptr<Route> r, uint32_t surface, uint32_t strip_number)
+MackieControlProtocol::force_special_stripable_to_strip (boost::shared_ptr<Stripable> r, uint32_t surface, uint32_t strip_number)
 {
 	if (!r) {
 		return;
@@ -1929,71 +1846,9 @@ MackieControlProtocol::force_special_route_to_strip (boost::shared_ptr<Route> r,
 		if ((*s)->number() == surface) {
 			Strip* strip = (*s)->nth_strip (strip_number);
 			if (strip) {
-				strip->set_route (session->master_out());
+				strip->set_stripable (session->master_out());
 				strip->lock_controls ();
 			}
-		}
-	}
-}
-
-void
-MackieControlProtocol::gui_track_selection_changed (ARDOUR::RouteNotificationListPtr rl, bool save_list)
-{
-	_gui_track_selection_changed (rl.get(), save_list, true);
-}
-
-void
-MackieControlProtocol::_gui_track_selection_changed (ARDOUR::RouteNotificationList* rl, bool save_list, bool gui_selection_did_change)
-{
-	/* We need to keep a list of the most recently selected routes around,
-	   but we are not allowed to keep shared_ptr<Route> unless we want to
-	   handle the complexities of route deletion. So instead, the GUI sends
-	   us a notification using weak_ptr<Route>, which we keep a copy
-	   of. For efficiency's sake, however, we convert the weak_ptr's into
-	   shared_ptr<Route> before passing them to however many surfaces (and
-	   thus strips) that we have.
-	*/
-
-	StrongRouteNotificationList srl;
-
-	for (ARDOUR::RouteNotificationList::const_iterator i = rl->begin(); i != rl->end(); ++i) {
-		boost::shared_ptr<ARDOUR::Route> r = (*i).lock();
-		if (r) {
-			srl.push_back (r);
-		}
-	}
-
-	{
-		Glib::Threads::Mutex::Lock lm (surfaces_lock);
-
-		for (Surfaces::iterator s = surfaces.begin(); s != surfaces.end(); ++s) {
-			(*s)->gui_selection_changed (srl);
-		}
-	}
-
-	if (save_list) {
-		_last_selected_routes = *rl;
-	}
-
-	if (gui_selection_did_change) {
-
-		check_fader_automation_state ();
-
-		/* note: this method is also called when we switch banks.
-		 * But ... we don't allow bank switching when in subview mode.
-		 *
-		 * so .. we only have to care about subview mode if the
-		 * GUI selection has changed.
-		 *
-		 * It is possible that first_selected_route() may return null if we
-		 * are no longer displaying/mapping that route. In that case,
-		 * we will exit subview mode. If first_selected_route() is
-		 * null, and subview mode is not None, then the first call to
-		 * set_subview_mode() will fail, and we will reset to None.
-		 */
-
-		if (set_subview_mode (_subview_mode, first_selected_route())) {
-			set_subview_mode (None, boost::shared_ptr<Route>());
 		}
 	}
 }
@@ -2003,7 +1858,7 @@ MackieControlProtocol::check_fader_automation_state ()
 {
 	fader_automation_connections.drop_connections ();
 
-	boost::shared_ptr<Route> r = first_selected_route ();
+	boost::shared_ptr<Stripable> r = first_selected_stripable ();
 
 	if (!r) {
 		update_global_button (Button::Read, off);
@@ -2026,7 +1881,7 @@ MackieControlProtocol::check_fader_automation_state ()
 void
 MackieControlProtocol::update_fader_automation_state ()
 {
-	boost::shared_ptr<Route> r = first_selected_route ();
+	boost::shared_ptr<Stripable> r = first_selected_stripable ();
 
 	if (!r) {
 		update_global_button (Button::Read, off);
@@ -2071,13 +1926,21 @@ MackieControlProtocol::update_fader_automation_state ()
 		update_global_button (Button::Latch, off);
 		update_global_button (Button::Grp, off);
 		break;
+	case Latch:
+		update_global_button (Button::Read, off);
+		update_global_button (Button::Write, off);
+		update_global_button (Button::Touch, off);
+		update_global_button (Button::Trim, off);
+		update_global_button (Button::Latch, on);
+		update_global_button (Button::Grp, off);
+		break;
 	}
 }
 
-framepos_t
-MackieControlProtocol::transport_frame() const
+samplepos_t
+MackieControlProtocol::transport_sample() const
 {
-	return session->transport_frame();
+	return session->transport_sample();
 }
 
 void
@@ -2100,24 +1963,32 @@ MackieControlProtocol::remove_down_select_button (int surface, int strip)
 }
 
 void
-MackieControlProtocol::select_range ()
+MackieControlProtocol::select_range (uint32_t pressed)
 {
-	RouteList routes;
+	StripableList stripables;
 
-	pull_route_range (_down_select_buttons, routes);
+	pull_stripable_range (_down_select_buttons, stripables, pressed);
 
-	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("select range: found %1 routes\n", routes.size()));
+	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("select range: found %1 stripables, first = %2\n", stripables.size(),
+	                                                   (stripables.empty() ? "null" : stripables.front()->name())));
 
-	if (!routes.empty()) {
-		for (RouteList::iterator r = routes.begin(); r != routes.end(); ++r) {
+	if (stripables.empty()) {
+		return;
+	}
+
+	if (stripables.size() == 1 && ControlProtocol::last_selected().size() == 1 && stripables.front()->is_selected()) {
+		/* cancel selection for one and only selected stripable */
+		toggle_stripable_selection (stripables.front());
+	} else {
+		for (StripableList::iterator s = stripables.begin(); s != stripables.end(); ++s) {
 
 			if (main_modifier_state() == MODIFIER_SHIFT) {
-				ToggleRouteSelection ((*r)->remote_control_id ());
+				toggle_stripable_selection (*s);
 			} else {
-				if (r == routes.begin()) {
-					SetRouteSelection ((*r)->remote_control_id());
+				if (s == stripables.begin()) {
+					set_stripable_selection (*s);
 				} else {
-					AddRouteToSelection ((*r)->remote_control_id());
+					add_stripable_to_selection (*s);
 				}
 			}
 		}
@@ -2159,10 +2030,10 @@ MackieControlProtocol::remove_down_button (AutomationType a, int surface, int st
 }
 
 MackieControlProtocol::ControlList
-MackieControlProtocol::down_controls (AutomationType p)
+MackieControlProtocol::down_controls (AutomationType p, uint32_t pressed)
 {
 	ControlList controls;
-	RouteList routes;
+	StripableList stripables;
 
 	DownButtonMap::iterator m = _down_buttons.find (p);
 
@@ -2173,29 +2044,29 @@ MackieControlProtocol::down_controls (AutomationType p)
 	DEBUG_TRACE (DEBUG::MackieControl, string_compose ("looking for down buttons for %1, got %2\n",
 							   p, m->second.size()));
 
-	pull_route_range (m->second, routes);
+	pull_stripable_range (m->second, stripables, pressed);
 
 	switch (p) {
 	case GainAutomation:
-		for (RouteList::iterator r = routes.begin(); r != routes.end(); ++r) {
-			controls.push_back ((*r)->gain_control());
+		for (StripableList::iterator s = stripables.begin(); s != stripables.end(); ++s) {
+			controls.push_back ((*s)->gain_control());
 		}
 		break;
 	case SoloAutomation:
-		for (RouteList::iterator r = routes.begin(); r != routes.end(); ++r) {
-			controls.push_back ((*r)->solo_control());
+		for (StripableList::iterator s = stripables.begin(); s != stripables.end(); ++s) {
+			controls.push_back ((*s)->solo_control());
 		}
 		break;
 	case MuteAutomation:
-		for (RouteList::iterator r = routes.begin(); r != routes.end(); ++r) {
-			controls.push_back ((*r)->mute_control());
+		for (StripableList::iterator s = stripables.begin(); s != stripables.end(); ++s) {
+			controls.push_back ((*s)->mute_control());
 		}
 		break;
 	case RecEnableAutomation:
-		for (RouteList::iterator r = routes.begin(); r != routes.end(); ++r) {
-			boost::shared_ptr<Track> trk = boost::dynamic_pointer_cast<Track> (*r);
-			if (trk) {
-				controls.push_back (trk->rec_enable_control());
+		for (StripableList::iterator s = stripables.begin(); s != stripables.end(); ++s) {
+			boost::shared_ptr<AutomationControl> ac = (*s)->rec_enable_control();
+			if (ac) {
+				controls.push_back (ac);
 			}
 		}
 		break;
@@ -2216,7 +2087,7 @@ struct ButtonRangeSorter {
 };
 
 void
-MackieControlProtocol::pull_route_range (DownButtonList& down, RouteList& selected)
+MackieControlProtocol::pull_stripable_range (DownButtonList& down, StripableList& selected, uint32_t pressed)
 {
 	ButtonRangeSorter cmp;
 
@@ -2266,13 +2137,19 @@ MackieControlProtocol::pull_route_range (DownButtonList& down, RouteList& select
 									   (*s)->number(), fs, ls));
 
 			for (uint32_t n = fs; n < ls; ++n) {
-				boost::shared_ptr<Route> r = (*s)->nth_strip (n)->route();
+				Strip* strip = (*s)->nth_strip (n);
+				boost::shared_ptr<Stripable> r = strip->stripable();
 				if (r) {
-					selected.push_back (r);
+					if (global_index_locked (*strip) == pressed) {
+						selected.push_front (r);
+					} else {
+						selected.push_back (r);
+					}
 				}
 			}
 		}
 	}
+
 }
 
 void
@@ -2396,53 +2273,30 @@ MackieControlProtocol::connection_handler (boost::weak_ptr<ARDOUR::Port> wp1, st
 }
 
 bool
-MackieControlProtocol::is_track (boost::shared_ptr<Route> r) const
+MackieControlProtocol::is_track (boost::shared_ptr<Stripable> r) const
 {
 	return boost::dynamic_pointer_cast<Track>(r) != 0;
 }
 
 bool
-MackieControlProtocol::is_audio_track (boost::shared_ptr<Route> r) const
+MackieControlProtocol::is_audio_track (boost::shared_ptr<Stripable> r) const
 {
 	return boost::dynamic_pointer_cast<AudioTrack>(r) != 0;
 }
 
 bool
-MackieControlProtocol::is_midi_track (boost::shared_ptr<Route> r) const
+MackieControlProtocol::is_midi_track (boost::shared_ptr<Stripable> r) const
 {
 	return boost::dynamic_pointer_cast<MidiTrack>(r) != 0;
 }
 
 bool
-MackieControlProtocol::selected (boost::shared_ptr<Route> r) const
-{
-	const RouteNotificationList* rl = &_last_selected_routes;
-
-	for (ARDOUR::RouteNotificationList::const_iterator i = rl->begin(); i != rl->end(); ++i) {
-		boost::shared_ptr<ARDOUR::Route> rt = (*i).lock();
-		if (rt == r) {
-			return true;
-		}
-	}
-	return false;
-}
-
-bool
-MackieControlProtocol::is_hidden (boost::shared_ptr<Route> r) const
-{
-	if (!r) {
-		return false;
-	}
-	return (((r->remote_control_id()) >>31) != 0);
-}
-
-bool
-MackieControlProtocol::is_mapped (boost::shared_ptr<Route> r) const
+MackieControlProtocol::is_mapped (boost::shared_ptr<Stripable> r) const
 {
 	Glib::Threads::Mutex::Lock lm (surfaces_lock);
 
 	for (Surfaces::const_iterator s = surfaces.begin(); s != surfaces.end(); ++s) {
-		if ((*s)->route_is_mapped (r)) {
+		if ((*s)->stripable_is_mapped (r)) {
 			return true;
 		}
 	}
@@ -2450,43 +2304,89 @@ MackieControlProtocol::is_mapped (boost::shared_ptr<Route> r) const
 	return false;
 }
 
-boost::shared_ptr<Route>
-MackieControlProtocol::first_selected_route () const
+void
+MackieControlProtocol::stripable_selection_changed ()
 {
-	if (_last_selected_routes.empty()) {
-		return boost::shared_ptr<Route>();
+	//this function is called after the stripable selection is "stable", so this is the place to check surface selection state
+	for (Surfaces::iterator si = surfaces.begin(); si != surfaces.end(); ++si) {
+		(*si)->update_strip_selection ();
 	}
 
-	boost::shared_ptr<Route> r = _last_selected_routes.front().lock();
+	/* if we are following the Gui, find the selected strips and map them here */
+	if (_device_info.single_fader_follows_selection()) {
 
-	if (r) {
-		/* check it is on one of our surfaces */
+		Sorted sorted = get_sorted_stripables();
 
-		if (is_mapped (r)) {
-			return r;
+		Sorted::iterator r = sorted.begin();
+		for (Surfaces::iterator si = surfaces.begin(); si != surfaces.end(); ++si) {
+			vector<boost::shared_ptr<Stripable> > stripables;
+			uint32_t added = 0;
+
+			for (; r != sorted.end() && added < (*si)->n_strips (false); ++r, ++added) {
+				if ((*r)->is_selected()) {
+					stripables.push_back (*r);
+				}
+			}
+
+			(*si)->map_stripables (stripables);
 		}
+		return;
+	}
 
-		/* route is not mapped. thus, the currently selected route is
-		 * not on the surfaces, and so from our perspective, there is
-		 * no currently selected route.
+	boost::shared_ptr<Stripable> s = first_selected_stripable ();
+	if (s) {
+		check_fader_automation_state ();
+
+		/* It is possible that first_selected_route() may return null if we
+		 * are no longer displaying/mapping that route. In that case,
+		 * we will exit subview mode. If first_selected_route() is
+		 * null, and subview mode is not None, then the first call to
+		 * set_subview_mode() will fail, and we will reset to None.
 		 */
 
-		r.reset ();
+		if (!set_subview_mode (_subview->subview_mode(), s)) {
+			set_subview_mode (Mackie::Subview::None, boost::shared_ptr<Stripable>());
+		}
 	}
-
-	return r; /* may be null */
+	else {
+		// none selected or not on surface
+		set_subview_mode(Mackie::Subview::None, boost::shared_ptr<Stripable>());
+	}
 }
 
-boost::shared_ptr<Route>
-MackieControlProtocol::subview_route () const
+boost::shared_ptr<Stripable>
+MackieControlProtocol::first_selected_stripable () const
 {
-	return _subview_route;
+	boost::shared_ptr<Stripable> s = ControlProtocol::first_selected_stripable();
+
+	if (s) {
+		/* check it is on one of our surfaces */
+
+		if (is_mapped (s)) {
+			return s;
+		}
+
+		/* stripable is not mapped. thus, the currently selected stripable is
+		 * not on the surfaces, and so from our perspective, there is
+		 * no currently selected stripable.
+		 */
+
+		s.reset ();
+	}
+
+	return s; /* may be null */
 }
 
 uint32_t
 MackieControlProtocol::global_index (Strip& strip)
 {
 	Glib::Threads::Mutex::Lock lm (surfaces_lock);
+	return global_index_locked (strip);
+}
+
+uint32_t
+MackieControlProtocol::global_index_locked (Strip& strip)
+{
 	uint32_t global = 0;
 
 	for (Surfaces::const_iterator s = surfaces.begin(); s != surfaces.end(); ++s) {
@@ -2513,7 +2413,7 @@ MackieControlProtocol::request_factory (uint32_t num_requests)
 void
 MackieControlProtocol::set_automation_state (AutoState as)
 {
-	boost::shared_ptr<Route> r = first_selected_route ();
+	boost::shared_ptr<Stripable> r = first_selected_stripable ();
 
 	if (!r) {
 		return;

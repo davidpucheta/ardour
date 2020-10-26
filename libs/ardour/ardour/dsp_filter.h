@@ -1,20 +1,19 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #ifndef _dsp_filter_h_
 #define _dsp_filter_h_
@@ -23,7 +22,15 @@
 #include <string.h>
 #include <assert.h>
 #include <glib.h>
+#include <glibmm.h>
+#include <fftw3.h>
+
+#include "pbd/malign.h"
+
+#include "ardour/buffer_set.h"
+#include "ardour/chan_mapping.h"
 #include "ardour/libardour_visibility.h"
+#include "ardour/types.h"
 
 namespace ARDOUR { namespace DSP {
 
@@ -46,16 +53,17 @@ namespace ARDOUR { namespace DSP {
 	 */
 	class DspShm {
 		public:
-			DspShm ()
+			DspShm (size_t s = 0)
 				: _data (0)
 				, _size (0)
 			{
 				assert (sizeof(float) == sizeof (int32_t));
 				assert (sizeof(float) == sizeof (int));
+				allocate (s);
 			}
 
 			~DspShm () {
-				free (_data);
+				cache_aligned_free (_data);
 			}
 
 			/** [re] allocate memory in host's memory space
@@ -63,7 +71,9 @@ namespace ARDOUR { namespace DSP {
 			 * @param s size, total number of float or integer elements to store.
 			 */
 			void allocate (size_t s) {
-				_data = realloc (_data, sizeof(float) * s);
+				if (s == _size) { return; }
+				cache_aligned_free (_data);
+				cache_aligned_malloc ((void**) &_data, sizeof (float) * s);
 				if (_data) { _size = s; }
 			}
 
@@ -140,7 +150,7 @@ namespace ARDOUR { namespace DSP {
 	 * @param max result, max value found in range
 	 * @param n_samples number of samples to analyze
 	 */
-	void peaks (float *data, float &min, float &max, uint32_t n_samples);
+	void peaks (const float *data, float &min, float &max, uint32_t n_samples);
 
 	/** non-linear power-scale meter deflection
 	 *
@@ -154,6 +164,12 @@ namespace ARDOUR { namespace DSP {
 	 * @returns deflected value
 	 */
 	float log_meter_coeff (float coeff);
+
+	void process_map (BufferSet* bufs,
+	                  const ChanCount&   n_out,
+	                  const ChanMapping& in_map,
+	                  const ChanMapping& out_map,
+	                  pframes_t nframes, samplecnt_t offset);
 
 	/** 1st order Low Pass filter */
 	class LIBARDOUR_API LowPass {
@@ -176,7 +192,7 @@ namespace ARDOUR { namespace DSP {
 			 *
 			 * @param data pointer to control-data array
 			 * @param val target value
-			 * @param array length
+			 * @param n_samples array length
 			 */
 			void ctrl (float *data, const float val, const uint32_t n_samples);
 			/** update filter cut-off frequency
@@ -193,7 +209,7 @@ namespace ARDOUR { namespace DSP {
 	};
 
 	/** Biquad Filter */
-	class LIBARDOUR_API BiQuad {
+	class LIBARDOUR_API Biquad {
 		public:
 			enum Type {
 				LowPass,
@@ -211,8 +227,8 @@ namespace ARDOUR { namespace DSP {
 			 *
 			 * @param samplerate Samplerate
 			 */
-			BiQuad (double samplerate);
-			BiQuad (const BiQuad &other);
+			Biquad (double samplerate);
+			Biquad (const Biquad &other);
 
 			/** process audio data
 			 *
@@ -228,6 +244,16 @@ namespace ARDOUR { namespace DSP {
 			 * @param gain filter gain
 			 */
 			void compute (Type t, double freq, double Q, double gain);
+
+			/** setup filter, set coefficients directly */
+			void configure (double a1, double a2, double b0, double b1, double b2);
+
+			/** filter transfer function (filter response for spectrum visualization)
+			 * @param freq frequency
+			 * @return gain at given frequency in dB (clamped to -120..+120)
+			 */
+			float dB_at_freq (float freq) const;
+
 			/** reset filter state */
 			void reset () { _z1 = _z2 = 0.0; }
 		private:
@@ -235,6 +261,80 @@ namespace ARDOUR { namespace DSP {
 			float  _z1, _z2;
 			double _a1, _a2;
 			double _b0, _b1, _b2;
+	};
+
+	class LIBARDOUR_API FFTSpectrum {
+		public:
+			FFTSpectrum (uint32_t window_size, double rate);
+			~FFTSpectrum ();
+
+			/** set data to be analyzed and pre-process with hanning window
+			 * n_samples + offset must not be larger than the configured window_size
+			 *
+			 * @param data raw audio data
+			 * @param n_samples number of samples to write to analysis buffer
+			 * @param offset destination offset
+			 */
+			void set_data_hann (float const * const data, const uint32_t n_samples, const uint32_t offset = 0);
+
+			/** process current data in buffer */
+			void execute ();
+
+			/** query
+			 * @param bin the frequency bin 0 .. window_size / 2
+			 * @param norm gain factor (set equal to \p bin for 1/f normalization)
+			 * @return signal power at given bin (in dBFS)
+			 */
+			float power_at_bin (const uint32_t bin, const float norm = 1.f) const;
+
+			float freq_at_bin (const uint32_t bin) const {
+				return bin * _fft_freq_per_bin;
+			}
+
+		private:
+			static Glib::Threads::Mutex fft_planner_lock;
+			float* hann_window;
+
+			void init (uint32_t window_size, double rate);
+			void reset ();
+
+			uint32_t _fft_window_size;
+			uint32_t _fft_data_size;
+			double   _fft_freq_per_bin;
+
+			float* _fft_data_in;
+			float* _fft_data_out;
+			float* _fft_power;
+
+			fftwf_plan _fftplan;
+	};
+
+	class LIBARDOUR_API Generator {
+		public:
+			Generator ();
+
+			enum Type {
+				UniformWhiteNoise,
+				GaussianWhiteNoise,
+				PinkNoise,
+			};
+
+			void run (float *data, const uint32_t n_samples);
+			void set_type (Type t);
+
+		private:
+			uint32_t randi ();
+			float    randf () { return (randi () / 1073741824.f) - 1.f; }
+			float    grandf ();
+
+			Type     _type;
+			uint32_t _rseed;
+			/* pink-noise */
+			float _b0, _b1, _b2, _b3, _b4, _b5, _b6;
+			/* gaussian white */
+			bool _pass;
+			float _rn;
+
 	};
 
 } } /* namespace */

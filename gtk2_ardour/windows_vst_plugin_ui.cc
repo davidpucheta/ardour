@@ -1,26 +1,27 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm.h>
 #include <gtk/gtk.h>
 #include <gtk/gtksocket.h>
-#include <fst.h>
+#include "gtkmm2ext/gui_thread.h"
+#include "fst.h"
 #include "ardour/plugin_insert.h"
 #include "ardour/windows_vst_plugin.h"
 
@@ -58,16 +59,54 @@ WindowsVSTPluginUI::WindowsVSTPluginUI (boost::shared_ptr<PluginInsert> pi, boos
 
 WindowsVSTPluginUI::~WindowsVSTPluginUI ()
 {
+	fst_destroy_editor (_vst->state());
+
 	// plugin destructor destroys the custom GUI, via Windows fun-and-games,
 	// and then our PluginUIWindow does the rest
+}
+
+void
+WindowsVSTPluginUI::top_box_allocated (Gtk::Allocation& a)
+{
+	int h = a.get_height() + 12; // 2 * 6px spacing
+	if (_vst->state()->voffset != h) {
+#ifndef NDEBUG
+		printf("WindowsVSTPluginUI:: update voffset to %d px\n", h);
+#endif
+		_vst->state()->voffset = h;
+		resize_callback ();
+	}
+}
+
+void
+WindowsVSTPluginUI::resize_callback ()
+{
+	void* gtk_parent_window = _vst->state()->gtk_window_parent;
+	if (gtk_parent_window) {
+		int width  = _vst->state()->width + _vst->state()->hoffset;
+		int height = _vst->state()->height + _vst->state()->voffset;
+#ifndef NDEBUG
+		printf ("WindowsVSTPluginUI::resize_callback %d x %d\n", width, height);
+#endif
+		set_size_request (width, height);
+		((Gtk::Window*) gtk_parent_window)->set_size_request (width, height);
+		((Gtk::Window*) gtk_parent_window)->resize (width, height);
+		fst_move_window_into_view (_vst->state ());
+	}
 }
 
 int
 WindowsVSTPluginUI::package (Gtk::Window& win)
 {
+#ifndef NDEBUG
+	printf ("WindowsVSTPluginUI::package\n");
+#endif
 	VSTPluginUI::package (win);
+	_vst->state()->gtk_window_parent = (void*) (&win);
 
-	fst_move_window_into_view (_vst->state ());
+	_vst->VSTSizeWindow.connect (_resize_connection, invalidator (*this), boost::bind (&WindowsVSTPluginUI::resize_callback, this), gui_context());
+
+	resize_callback ();
 
 	return 0;
 }
@@ -75,6 +114,10 @@ WindowsVSTPluginUI::package (Gtk::Window& win)
 void
 WindowsVSTPluginUI::forward_key_event (GdkEventKey* ev)
 {
+	if (dispatch_effeditkey (ev)) {
+		return;
+	}
+#ifndef PLATFORM_WINDOWS /* linux + wine ; libs/fst/vstwin.c */
 	if (ev->type != GDK_KEY_PRESS) {
 		return;
 	}
@@ -117,6 +160,7 @@ WindowsVSTPluginUI::forward_key_event (GdkEventKey* ev)
 	fst->n_pending_keys++;
 
 	pthread_mutex_unlock (&fst->lock);
+#endif
 }
 
 int

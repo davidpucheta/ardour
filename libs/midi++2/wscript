@@ -61,7 +61,7 @@ def build(bld):
         obj.defines      = [ 'LIBMIDIPP_DLL_EXPORTS=1' ]
     else:
         obj              = bld.stlib(features = 'cxx cxxstlib', source=libmidi_sources)
-        obj.cxxflags     = [ '-fPIC' ]
+        obj.cxxflags     = [ bld.env['compiler_flags_dict']['pic'] ]
         obj.defines      = []
 
     # everybody loves JACK
@@ -70,7 +70,7 @@ def build(bld):
     obj.name         = 'libmidipp'
     obj.target       = 'midipp'
     obj.uselib       = 'GLIBMM SIGCPP XML OSX'
-    obj.use          = 'libpbd libevoral libtimecode'
+    obj.use          = 'libpbd libevoral libtemporal'
     obj.vnum         = LIBMIDIPP_LIB_VERSION
     obj.install_path = bld.env['LIBDIR']
 
@@ -83,7 +83,7 @@ def build(bld):
         '''
         obj.includes     = ['.', './src']
         obj.use          = 'libmidipp'
-        obj.uselib       = 'CPPUNIT XML'
+        obj.uselib       = 'GLIBMM SIGCPP XML OSX CPPUNIT'
         obj.target       = 'run-tests'
         obj.name         = 'libmidipp-tests'
         obj.install_path = ''

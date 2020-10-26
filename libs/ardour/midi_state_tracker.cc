@@ -1,28 +1,29 @@
 /*
-    Copyright (C) 2006-2008 Paul Davis
-    Author: Torben Hohn
-
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2008-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 
 #include "pbd/compose.h"
 #include "pbd/stacktrace.h"
 
-#include "evoral/EventSink.hpp"
+#include "evoral/EventSink.h"
 
 #include "ardour/debug.h"
 #include "ardour/midi_source.h"
@@ -55,7 +56,7 @@ MidiStateTracker::add (uint8_t note, uint8_t chn)
 	++_active_notes[note + 128 * chn];
 
 	if (_active_notes[note+128 * chn] > 1) {
-		cerr << this << " note " << (int) note << '/' << (int) chn << " was already on, now at " << (int) _active_notes[note+128*chn] << endl;
+		//cerr << this << " note " << (int) note << '/' << (int) chn << " was already on, now at " << (int) _active_notes[note+128*chn] << endl;
 	}
 
 	DEBUG_TRACE (PBD::DEBUG::MidiTrackers, string_compose ("%1 ON %2/%3 voices %5 total on %4\n",
@@ -110,7 +111,7 @@ MidiStateTracker::track (const uint8_t* evbuf)
 }
 
 void
-MidiStateTracker::resolve_notes (MidiBuffer &dst, framepos_t time)
+MidiStateTracker::resolve_notes (MidiBuffer &dst, samplepos_t time)
 {
 	DEBUG_TRACE (PBD::DEBUG::MidiTrackers, string_compose ("%1 MB-resolve notes @ %2 on = %3\n", this, time, _on));
 
@@ -122,8 +123,8 @@ MidiStateTracker::resolve_notes (MidiBuffer &dst, framepos_t time)
 		for (int note = 0; note < 128; ++note) {
 			while (_active_notes[note + 128 * channel]) {
 				uint8_t buffer[3] = { ((uint8_t) (MIDI_CMD_NOTE_OFF | channel)), uint8_t (note), 0 };
-				Evoral::MIDIEvent<MidiBuffer::TimeType> noteoff
-					(MIDI_CMD_NOTE_OFF, time, 3, buffer, false);
+				Evoral::Event<MidiBuffer::TimeType> noteoff
+					(Evoral::MIDI_EVENT, time, 3, buffer, false);
 				/* note that we do not care about failure from
 				   push_back() ... should we warn someone ?
 				*/
@@ -138,7 +139,7 @@ MidiStateTracker::resolve_notes (MidiBuffer &dst, framepos_t time)
 }
 
 void
-MidiStateTracker::resolve_notes (Evoral::EventSink<framepos_t> &dst, framepos_t time)
+MidiStateTracker::resolve_notes (Evoral::EventSink<samplepos_t> &dst, samplepos_t time)
 {
 	uint8_t buf[3];
 
@@ -157,7 +158,7 @@ MidiStateTracker::resolve_notes (Evoral::EventSink<framepos_t> &dst, framepos_t 
 				/* note that we do not care about failure from
 				   write() ... should we warn someone ?
 				*/
-				dst.write (time, midi_parameter_type (buf[0]), 3, buf);
+				dst.write (time, Evoral::MIDI_EVENT, 3, buf);
 				_active_notes[note + 128 * channel]--;
 				DEBUG_TRACE (PBD::DEBUG::MidiTrackers, string_compose ("%1: EVS-resolved note %2/%3 at %4\n",
 										       this, (int) note, (int) channel, time));
@@ -168,7 +169,7 @@ MidiStateTracker::resolve_notes (Evoral::EventSink<framepos_t> &dst, framepos_t 
 }
 
 void
-MidiStateTracker::resolve_notes (MidiSource& src, const MidiSource::Lock& lock, Evoral::Beats time)
+MidiStateTracker::resolve_notes (MidiSource& src, const MidiSource::Lock& lock, Temporal::Beats time)
 {
 	DEBUG_TRACE (PBD::DEBUG::MidiTrackers, string_compose ("%1 MS-resolve notes @ %2 on = %3\n", this, time, _on));
 
@@ -181,7 +182,7 @@ MidiStateTracker::resolve_notes (MidiSource& src, const MidiSource::Lock& lock, 
 	for (int channel = 0; channel < 16; ++channel) {
 		for (int note = 0; note < 128; ++note) {
 			while (_active_notes[note + 128 * channel]) {
-				Evoral::MIDIEvent<Evoral::Beats> ev ((MIDI_CMD_NOTE_OFF|channel), time, 3, 0, true);
+				Evoral::Event<Temporal::Beats> ev (Evoral::MIDI_EVENT, time, 3, 0, true);
 				ev.set_type (MIDI_CMD_NOTE_OFF);
 				ev.set_channel (channel);
 				ev.set_note (note);
@@ -191,7 +192,7 @@ MidiStateTracker::resolve_notes (MidiSource& src, const MidiSource::Lock& lock, 
 										       this, (int) note, (int) channel, time));
 				_active_notes[note + 128 * channel]--;
 				/* don't stack events up at the same time */
-				time += Evoral::Beats::tick();
+				time += Temporal::Beats::tick();
 			}
 		}
 	}
@@ -206,7 +207,7 @@ MidiStateTracker::dump (ostream& o)
 		for (int x = 0; x < 128; ++x) {
 			if (_active_notes[c * 128 + x]) {
 				o << "Channel " << c+1 << " Note " << x << " is on ("
-				  << (int) _active_notes[c*128+x] <<  "times)\n";
+				  << (int) _active_notes[c*128+x] <<  " times)\n";
 			}
 		}
 	}

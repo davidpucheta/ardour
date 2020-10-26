@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_audio_playlist_source_h__
 #define __ardour_audio_playlist_source_h__
@@ -41,8 +41,8 @@ public:
 	uint32_t   n_channels() const;
 	bool clamped_at_unity () const { return false; }
 
-	framecnt_t read_unlocked (Sample *dst, framepos_t start, framecnt_t cnt) const;
-	framecnt_t write_unlocked (Sample *src, framecnt_t cnt);
+	samplecnt_t read_unlocked (Sample *dst, samplepos_t start, samplecnt_t cnt) const;
+	samplecnt_t write_unlocked (Sample *src, samplecnt_t cnt);
 
 	float sample_rate () const;
 	int setup_peakfile ();
@@ -57,7 +57,7 @@ protected:
 	friend class SourceFactory;
 
 	AudioPlaylistSource (Session&, const PBD::ID& orig, const std::string& name, boost::shared_ptr<AudioPlaylist>, uint32_t chn,
-	                     frameoffset_t begin, framecnt_t len, Source::Flag flags);
+	                     sampleoffset_t begin, samplecnt_t len, Source::Flag flags);
 	AudioPlaylistSource (Session&, const XMLNode&);
 
 

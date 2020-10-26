@@ -1,20 +1,21 @@
 /*
-    Copyright (C) 2013 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2013-2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "canvas/image.h"
 
@@ -55,11 +56,11 @@ Image::render (Rect const& area, Cairo::RefPtr<Cairo::Context> context) const
 	}
 
 	Rect self = item_to_window (Rect (0, 0, _width, _height));
-	boost::optional<Rect> draw = self.intersection (area);
+	Rect draw = self.intersection (area);
 
 	if (_surface && draw) {
 		context->set_source (_surface, self.x0, self.y0);
-		context->rectangle (draw->x0, draw->y0, draw->width(), draw->height());
+		context->rectangle (draw.x0, draw.y0, draw.width(), draw.height());
 		context->fill ();
 	}
 }
@@ -67,7 +68,7 @@ Image::render (Rect const& area, Cairo::RefPtr<Cairo::Context> context) const
 void
 Image::compute_bounding_box () const
 {
-	_bounding_box = boost::optional<Rect> (Rect (0, 0, _width, _height));
+	_bounding_box = Rect (0, 0, _width, _height);
 	_bounding_box_dirty = false;
 }
 

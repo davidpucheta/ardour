@@ -29,13 +29,13 @@ main (int argc, char* argv[])
 	assert (playlist);
 
 	/* And the region */
-	boost::shared_ptr<MidiRegion> region = boost::dynamic_pointer_cast<MidiRegion> (playlist->region_list().rlist().front());
+	boost::shared_ptr<MidiRegion> region = boost::dynamic_pointer_cast<MidiRegion> (playlist->region_list_property().rlist().front());
 	assert (region);
 
 	/* Duplicate it a lot */
 	session->begin_reversible_command ("foo");
 	playlist->clear_changes ();
-	playlist->duplicate (region, region->last_frame() + 1, 1000);
+	playlist->duplicate (region, region->last_sample() + 1, 1000);
 	session->add_command (new StatefulDiffCommand (playlist));
 	session->commit_reversible_command ();
 
@@ -45,7 +45,7 @@ main (int argc, char* argv[])
 	/* And do it again */
 	session->begin_reversible_command ("foo");
 	playlist->clear_changes ();
-	playlist->duplicate (region, region->last_frame() + 1, 1000);
+	playlist->duplicate (region, region->last_sample() + 1, 1000);
 	session->add_command (new StatefulDiffCommand (playlist));
 	session->commit_reversible_command ();
 }

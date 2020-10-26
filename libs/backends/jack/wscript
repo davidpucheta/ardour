@@ -49,7 +49,7 @@ def configure(conf):
                    uselib = 'JACK')
 
     # Check to see if jack_port_rename() is available and working
-    if Options.options.libjack_link == 'link':
+    if conf.env['libjack_link'] == 'link':
             conf.check_cxx(fragment = "#include <jack/jack.h>\nint main(void) { jack_client_t* c; jack_port_t* p; jack_port_rename (c, p, \"foo\"); return 0; }\n",
                    mandatory = False,
                    execute = False,
@@ -80,8 +80,8 @@ def build(bld):
     obj.use      = 'libardour libpbd ardouralsautil'
     obj.install_path  = os.path.join(bld.env['LIBDIR'], 'backends')
     if bld.env['build_target'] != 'mingw':
-        obj.cxxflags = [ '-fPIC' ]
-        obj.cflags   = [ '-fPIC' ]
+        obj.cxxflags = [ bld.env['compiler_flags_dict']['pic'] ]
+        obj.cflags   = [ bld.env['compiler_flags_dict']['pic'] ]
     else:
         obj.cxxflags = [ ]
         obj.cflags   = [ ]
@@ -108,7 +108,7 @@ def build(bld):
         obj.defines += [ 'USE_WEAK_JACK', 'HAVE_JACK_PORT_RENAME' ]
         obj.deps = [ 'weak_libjack.def' ]
 
-    obj.uselib   += [ 'GLIBMM', 'XML' ];
+    obj.uselib   += [ 'GLIBMM', 'XML', 'OSX'];
 
     #
     # device discovery code in the jack backend needs ALSA

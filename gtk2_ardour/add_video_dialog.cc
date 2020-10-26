@@ -1,27 +1,31 @@
 /*
-    Copyright (C) 2010-2013 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cstdio>
 #include <cmath>
 
 #include <sigc++/bind.h>
 #include <curl/curl.h>
+
+#include <gtkmm/box.h>
+#include <gtkmm/filechooserdialog.h>
+#include <gtkmm/scrolledwindow.h>
+#include <gtkmm/stock.h>
 
 #include "pbd/error.h"
 #include "pbd/convert.h"
@@ -34,8 +38,9 @@
 #include "ardour_ui.h"
 
 #include "add_video_dialog.h"
+#include "ardour_http.h"
 #include "utils_videotl.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace std;
@@ -108,6 +113,7 @@ AddVideoDialog::AddVideoDialog (Session* s)
 
 	/* file chooser */
 	chooser.set_border_width (4);
+	Gtkmm2ext::add_volume_shortcuts (chooser);
 #ifdef __APPLE__
 	/* some broken redraw behaviour - this is a bandaid */
 	chooser.signal_selection_changed().connect (mem_fun (chooser, &Widget::queue_draw));
@@ -192,8 +198,11 @@ AddVideoDialog::AddVideoDialog (Session* s)
 
 	/* xjadeo checkbox */
 	if (ARDOUR_UI::instance()->video_timeline->found_xjadeo()
+#ifndef PLATFORM_WINDOWS
 			/* TODO xjadeo setup w/ xjremote */
-			&& video_get_docroot(Config).size() > 0) {
+			&& video_get_docroot(Config).size() > 0
+#endif
+		 ) {
 		xjadeo_checkbox.set_active(true);  /* set in ardour_ui.cpp ?! */
 	} else {
 		printf("xjadeo was not found or video-server docroot is unset (remote video-server)\n");
@@ -322,8 +331,14 @@ AddVideoDialog::file_name (bool &local_file)
 		std::string video_server_url = video_get_server_url(Config);
 
 		/* check if video server is running locally */
-		if (video_get_docroot(Config).size() > 0 &&
-			(0 == video_server_url.compare (0, 16, "http://127.0.0.1") || 0 == video_server_url.compare (0, 16, "http://localhost"))
+		if (
+#ifdef PLATFORM_WINDOWS
+				(video_get_docroot(Config).size() > 0 || !show_advanced)
+#else
+				video_get_docroot(Config).size() > 0
+#endif
+				&&
+				(0 == video_server_url.compare (0, 16, "http://127.0.0.1") || 0 == video_server_url.compare (0, 16, "http://localhost"))
 		   )
 		{
 			/* check if the file can be accessed */
@@ -504,7 +519,7 @@ AddVideoDialog::harvid_request(std::string u)
 
 	harvid_list->clear();
 
-	char *res = a3_curl_http_get(url, &status);
+	char* res = ArdourCurl::http_get (url, &status, false);
 	if (status != 200) {
 		printf("request failed\n"); // XXX
 		harvid_path.set_text(" - request failed -");
@@ -684,7 +699,7 @@ AddVideoDialog::request_preview(std::string u)
 		, (long long) (video_duration * seek_slider.get_value() / 1000.0)
 		, clip_width, clip_height, u.c_str());
 
-	char *data = a3_curl_http_get(url, NULL);
+	char* data = ArdourCurl::http_get (url, NULL, false);
 	if (!data) {
 		printf("image preview request failed %s\n", url);
 		imgbuf->fill(RGBA_TO_UINT(0,0,0,255));

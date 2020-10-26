@@ -1,20 +1,21 @@
 /*
-    Copyright (C) 2013 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/window.h>
 
@@ -32,7 +33,7 @@
 #include "window_manager.h"
 #include "processor_box.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using std::string;
 using namespace WM;
@@ -66,13 +67,47 @@ Manager::register_window (ProxyBase* info)
 	if (!info->menu_name().empty()) {
 
 		if (!window_actions) {
-			window_actions = ARDOUR_UI::instance()->global_actions.create_action_group (X_("Window"));
+			window_actions = ActionManager::create_action_group (Gtkmm2ext::UI::instance()->global_bindings, X_("Window"));
 		}
 
-		info->set_action (ARDOUR_UI::instance()->global_actions.register_toggle_action (window_actions,
-			 info->action_name().c_str(), info->menu_name().c_str(),
-			 sigc::bind (sigc::mem_fun (*this, &Manager::toggle_window), info)));
+		ActionManager::register_toggle_action (window_actions,
+		                                       info->action_name().c_str(), info->menu_name().c_str(),
+		                                       sigc::bind (sigc::mem_fun (*this, &Manager::toggle_window), info));
+
+		info->signal_map.connect (sigc::bind (sigc::mem_fun (*this, &Manager::window_proxy_was_mapped), info));
+		info->signal_unmap.connect (sigc::bind (sigc::mem_fun (*this, &Manager::window_proxy_was_unmapped), info));
+
 	}
+}
+
+void
+Manager::window_proxy_was_mapped (ProxyBase* proxy)
+{
+	Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (string_compose ("%1/%2", window_actions->get_name(), proxy->action_name()));
+	if (!act) {
+		return;
+	}
+	Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic (act);
+	if (!tact) {
+		return;
+	}
+
+	tact->set_active (true);
+}
+
+void
+Manager::window_proxy_was_unmapped (ProxyBase* proxy)
+{
+	Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (string_compose ("%1/%2", window_actions->get_name(), proxy->action_name()));
+	if (!act) {
+		return;
+	}
+	Glib::RefPtr<Gtk::ToggleAction> tact = Glib::RefPtr<Gtk::ToggleAction>::cast_dynamic (act);
+	if (!tact) {
+		return;
+	}
+
+	tact->set_active (false);
 }
 
 void
@@ -89,8 +124,7 @@ Manager::remove (const ProxyBase* info)
 void
 Manager::toggle_window (ProxyBase* proxy)
 {
-
-	Glib::RefPtr<Gtk::Action> act = ARDOUR_UI::instance()->global_actions.find_action (string_compose ("%1/%2", window_actions->get_name(), proxy->action_name()));
+	Glib::RefPtr<Gtk::Action> act = ActionManager::get_action (string_compose ("%1/%2", window_actions->get_name(), proxy->action_name()));
 	if (!act) {
 		return;
 	}
@@ -111,10 +145,25 @@ Manager::show_visible() const
 {
 	for (Windows::const_iterator i = _windows.begin(); i != _windows.end(); ++i) {
 		if ((*i)->visible()) {
-			if (! (*i)->get (true)) {
+			Gtk::Window* win = (*i)->get (true);
+			if (!win) {
 				/* the window may be a plugin GUI for a plugin which
 				 * is disabled or longer present.
 				 */
+				continue;
+			}
+			if (dynamic_cast<ArdourDialog*> (win)) {
+				/* do not show dialogs at startup. Most
+				 * dialogs require some signal connection work
+				 * because we are trying to avoid recursive
+				 * event loops (connecting instead to
+				 * ::signal_response(). This means we need to
+				 * destroy the window as well, so that the code
+				 * which checks if it should be created will
+				 * find that it is missing and will create it
+				 * and connect to any necessary signals.
+				 */
+				(*i)->drop_window ();
 				continue;
 			}
 			(*i)->show_all ();
@@ -196,6 +245,7 @@ ProxyBase::setup ()
 {
 	WindowProxy::setup ();
 	set_session(_session);
+
 }
 
 /*-----------------------*/
@@ -205,11 +255,6 @@ ProxyTemporary::ProxyTemporary (const string& name, Gtk::Window* win)
 {
 	_window = win;
 }
-
-ProxyTemporary::~ProxyTemporary ()
-{
-}
-
 
 ARDOUR::SessionHandlePtr*
 ProxyTemporary::session_handle()

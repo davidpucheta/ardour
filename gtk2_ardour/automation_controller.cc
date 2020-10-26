@@ -1,22 +1,26 @@
 /*
-    Copyright (C) 2007 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iomanip>
 #include <cmath>
@@ -29,51 +33,51 @@
 #include "ardour/session.h"
 #include "ardour/tempo.h"
 
-#include "ardour_button.h"
+#include "widgets/ardour_button.h"
+#include "widgets/ardour_knob.h"
+
 #include "automation_controller.h"
+#include "context_menu_helper.h"
 #include "gui_thread.h"
 #include "note_select_dialog.h"
 #include "timers.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace Gtk;
+using namespace ArdourWidgets;
 
 using PBD::Controllable;
 
 AutomationBarController::AutomationBarController (
-		boost::shared_ptr<Automatable>       printer,
 		boost::shared_ptr<AutomationControl> ac,
 		Adjustment*                          adj)
-	: Gtkmm2ext::BarController(*adj, ac)
-	, _printer(printer)
-	, _controllable(ac)
+	: ArdourWidgets::BarController (*adj, ac)
+	, _controllable (ac)
 {
 }
 
 std::string
 AutomationBarController::get_label (double& xpos)
 {
-        xpos = 0.5;
-        return _printer->value_as_string (_controllable);
+	xpos = 0.5;
+	return _controllable->get_user_string();
 }
 
 AutomationBarController::~AutomationBarController()
 {
 }
 
-AutomationController::AutomationController(boost::shared_ptr<Automatable>       printer,
-                                           boost::shared_ptr<AutomationControl> ac,
-                                           Adjustment*                          adj)
+AutomationController::AutomationController(boost::shared_ptr<AutomationControl> ac,
+                                           Adjustment*                          adj,
+                                           bool                                 use_knob)
 	: _widget(NULL)
-	, _printer (printer)
 	, _controllable(ac)
 	, _adjustment(adj)
 	, _ignore_change(false)
+	, _grabbed(false)
 {
-	assert (_printer);
-
 	if (ac->toggled()) {
 		ArdourButton* but = manage(new ArdourButton());
 
@@ -85,12 +89,26 @@ AutomationController::AutomationController(boost::shared_ptr<Automatable>       
 		} else {
 			but->set_name("generic button");
 		}
+		but->set_fallthrough_to_parent(true);
 		but->set_controllable(ac);
-		but->signal_clicked.connect(
-			sigc::mem_fun(*this, &AutomationController::toggled));
+		but->signal_button_press_event().connect(
+			sigc::mem_fun(*this, &AutomationController::button_press));
+		but->signal_button_release_event().connect(
+			sigc::mem_fun(*this, &AutomationController::button_release));
+		const bool active = _adjustment->get_value() >= 0.5;
+		if (but->get_active() != active) {
+			but->set_active(active);
+		}
 		_widget = but;
+	} else if (use_knob) {
+		ArdourKnob* knob = manage (new ArdourKnob (ArdourKnob::default_elements, ArdourKnob::Detent));
+		knob->set_controllable (ac);
+		knob->set_name("processor control knob");
+		_widget = knob;
+		knob->StartGesture.connect(sigc::mem_fun(*this, &AutomationController::start_touch));
+		knob->StopGesture.connect(sigc::mem_fun(*this, &AutomationController::end_touch));
 	} else {
-		AutomationBarController* bar = manage(new AutomationBarController(_printer, ac, adj));
+		AutomationBarController* bar = manage(new AutomationBarController(ac, adj));
 
 		bar->set_name(X_("ProcessorControlSlider"));
 		bar->StartGesture.connect(
@@ -106,10 +124,13 @@ AutomationController::AutomationController(boost::shared_ptr<Automatable>       
 	_adjustment->signal_value_changed().connect(
 		sigc::mem_fun(*this, &AutomationController::value_adjusted));
 
-	_screen_update_connection = Timers::rapid_connect (
-			sigc::mem_fun (*this, &AutomationController::display_effective_value));
+	ac->Changed.connect (_changed_connections, invalidator (*this), boost::bind (&AutomationController::display_effective_value, this), gui_context());
+	display_effective_value ();
 
-	ac->Changed.connect (_changed_connection, invalidator (*this), boost::bind (&AutomationController::value_changed, this), gui_context());
+	if (ac->alist ()) {
+		ac->alist()->automation_state_changed.connect (_changed_connections, invalidator (*this), boost::bind (&AutomationController::automation_state_changed, this), gui_context());
+		automation_state_changed ();
+	}
 
 	add(*_widget);
 	show_all();
@@ -120,42 +141,63 @@ AutomationController::~AutomationController()
 }
 
 boost::shared_ptr<AutomationController>
-AutomationController::create(boost::shared_ptr<Automatable>       printer,
-                             const Evoral::Parameter&             param,
+AutomationController::create(const Evoral::Parameter&             param,
                              const ParameterDescriptor&           desc,
-                             boost::shared_ptr<AutomationControl> ac)
+                             boost::shared_ptr<AutomationControl> ac,
+                             bool use_knob)
 {
-	const double lo        = ac->internal_to_interface(desc.lower);
-	const double up        = ac->internal_to_interface(desc.upper);
-	const double normal    = ac->internal_to_interface(desc.normal);
-	const double smallstep = ac->internal_to_interface(desc.lower + desc.smallstep);
-	const double largestep = ac->internal_to_interface(desc.lower + desc.largestep);
+	const double lo        = ac->internal_to_interface(desc.lower, true);
+	const double normal    = ac->internal_to_interface(desc.normal, true);
+	const double smallstep = fabs (ac->internal_to_interface(desc.lower + desc.smallstep, true) - lo);
+	const double largestep = fabs (ac->internal_to_interface(desc.lower + desc.largestep, true) - lo);
 
-	Gtk::Adjustment* adjustment = manage (
-		new Gtk::Adjustment (normal, lo, up, smallstep, largestep));
+	/* even though internal_to_interface() may not generate the full range
+	 * 0..1, the interface range is 0..1 by definition,  so just hard code
+	 * that.
+	 */
+
+	Gtk::Adjustment* adjustment = manage (new Gtk::Adjustment (normal, 0.0, 1.0, smallstep, largestep));
 
 	assert (ac);
 	assert(ac->parameter() == param);
-	return boost::shared_ptr<AutomationController>(new AutomationController(printer, ac, adjustment));
+	return boost::shared_ptr<AutomationController>(new AutomationController(ac, adjustment, use_knob));
 }
 
 void
-AutomationController::display_effective_value()
+AutomationController::automation_state_changed ()
 {
-	double const interface_value = _controllable->internal_to_interface(_controllable->get_value());
+	bool x = _controllable->alist()->automation_state() & Play;
+	_widget->set_sensitive (!x);
+}
 
+void
+AutomationController::display_effective_value ()
+{
+	double const interface_value = _controllable->internal_to_interface(_controllable->get_value(), true);
+
+	if (_grabbed) {
+		/* we cannot use _controllable->touching() here
+		 * because that's only set in Write or Touch mode.
+		 * Besides ctrl-surfaces may also set touching()
+		 */
+		return;
+	}
 	if (_adjustment->get_value () != interface_value) {
 		_ignore_change = true;
 		_adjustment->set_value (interface_value);
 		_ignore_change = false;
 	}
+
 }
 
 void
 AutomationController::value_adjusted ()
 {
 	if (!_ignore_change) {
-		_controllable->set_value (_controllable->interface_to_internal(_adjustment->get_value()), Controllable::NoGroup);
+		const double new_val = _controllable->interface_to_internal(_adjustment->get_value(), true);
+		if (_controllable->user_double() != new_val) {
+			_controllable->set_value (new_val, Controllable::NoGroup);
+		}
 	}
 
 	/* A bar controller will automatically follow the adjustment, but for a
@@ -172,55 +214,36 @@ AutomationController::value_adjusted ()
 void
 AutomationController::start_touch()
 {
-	_controllable->start_touch (_controllable->session().transport_frame());
+	_grabbed = true;
+	_controllable->start_touch (_controllable->session().transport_sample());
 }
 
 void
 AutomationController::end_touch ()
 {
-	if (_controllable->automation_state() == Touch) {
-
-		bool mark = false;
-		double when = 0;
-
-		if (_controllable->session().transport_rolling()) {
-			mark = true;
-			when = _controllable->session().transport_frame();
-		}
-
-		_controllable->stop_touch (mark, when);
-	} else {
-		_controllable->stop_touch (false, _controllable->session().transport_frame());
+	_controllable->stop_touch (_controllable->session().transport_sample());
+	if (_grabbed) {
+		_grabbed = false;
+		display_effective_value ();
 	}
 }
 
-void
-AutomationController::toggled ()
+bool
+AutomationController::button_press (GdkEventButton*)
 {
 	ArdourButton* but = dynamic_cast<ArdourButton*>(_widget);
-	const AutoState as = _controllable->automation_state ();
-	const double where = _controllable->session ().audible_frame ();
-	const bool to_list = _controllable->list () && _controllable->session().transport_rolling () && (as == Touch || as == Write);
-
 	if (but) {
-		if (to_list) {
-			if (as == Touch && _controllable->list ()->in_new_write_pass ()) {
-				_controllable->alist ()->start_write_pass (where);
-			}
-			_controllable->list ()->set_in_write_pass (true, false, where);
-		}
-		/* set to opposite value.*/
-		_controllable->set_double (but->get_active () ? 0.0 : 1.0, where, to_list);
-
-		const bool active = _controllable->get_double (to_list, where) >= 0.5;
-		if (active && !but->get_active ()) {
-			_adjustment->set_value (1.0);
-			but->set_active (true);
-		} else if (!active && but->get_active ()) {
-			_adjustment->set_value (0.0);
-			but->set_active (false);
-		}
+		start_touch ();
+		_controllable->set_value (but->get_active () ? 0.0 : 1.0, Controllable::UseGroup);
 	}
+	return false;
+}
+
+bool
+AutomationController::button_release (GdkEventButton*)
+{
+	end_touch ();
+	return true;
 }
 
 static double
@@ -260,9 +283,9 @@ AutomationController::set_freq_beats(double beats)
 {
 	const ARDOUR::ParameterDescriptor& desc    = _controllable->desc();
 	const ARDOUR::Session&             session = _controllable->session();
-	const framepos_t                   pos     = session.transport_frame();
-	const ARDOUR::Tempo&               tempo   = session.tempo_map().tempo_at(pos);
-	const double                       bpm     = tempo.beats_per_minute();
+	const samplepos_t                  pos     = session.transport_sample();
+	const ARDOUR::Tempo&               tempo   = session.tempo_map().tempo_at_sample (pos);
+	const double                       bpm     = tempo.note_types_per_minute();
 	const double                       bps     = bpm / 60.0;
 	const double                       freq    = bps / beats;
 	_controllable->set_value(clamp(freq, desc.lower, desc.upper), Controllable::NoGroup);
@@ -287,14 +310,14 @@ AutomationController::on_button_release(GdkEventButton* ev)
 
 	const ARDOUR::ParameterDescriptor& desc = _controllable->desc();
 	if (desc.unit == ARDOUR::ParameterDescriptor::MIDI_NOTE) {
-		Gtk::Menu* menu  = manage(new Menu());
+		Gtk::Menu* menu  = ARDOUR_UI_UTILS::shared_popup_menu ();
 		MenuList&  items = menu->items();
 		items.push_back(MenuElem(_("Select Note..."),
 		                         sigc::mem_fun(*this, &AutomationController::run_note_select_dialog)));
 		menu->popup(1, ev->time);
 		return true;
 	} else if (desc.unit == ARDOUR::ParameterDescriptor::HZ) {
-		Gtk::Menu* menu  = manage(new Menu());
+		Gtk::Menu* menu  = ARDOUR_UI_UTILS::shared_popup_menu ();
 		MenuList&  items = menu->items();
 		items.push_back(MenuElem(_("Halve"),
 		                         sigc::bind(sigc::mem_fun(*this, &AutomationController::set_ratio),
@@ -322,12 +345,6 @@ AutomationController::on_button_release(GdkEventButton* ev)
 	return false;
 }
 
-void
-AutomationController::value_changed ()
-{
-	Gtkmm2ext::UI::instance()->call_slot (invalidator (*this), boost::bind (&AutomationController::display_effective_value, this));
-}
-
 /** Stop updating our value from our controllable */
 void
 AutomationController::stop_updating ()
@@ -341,7 +358,6 @@ AutomationController::disable_vertical_scroll ()
 	AutomationBarController* bar = dynamic_cast<AutomationBarController*>(_widget);
 	if (bar) {
 		bar->set_tweaks (
-			Gtkmm2ext::PixFader::Tweaks(bar->tweaks() |
-			                            Gtkmm2ext::PixFader::NoVerticalScroll));
+			ArdourWidgets::ArdourFader::Tweaks(bar->tweaks() | ArdourWidgets::ArdourFader::NoVerticalScroll));
 	}
 }

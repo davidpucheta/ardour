@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2003 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006 Jesse Chappell <jesse@essej.net>
+ * Copyright (C) 2006 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011-2012 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 
@@ -28,7 +32,7 @@
 #include "ardour/region_sorters.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace std;
@@ -38,7 +42,7 @@ AudioPlaylist::AudioPlaylist (Session& session, const XMLNode& node, bool hidden
 	: Playlist (session, node, DataType::AUDIO, hidden)
 {
 #ifndef NDEBUG
-	const XMLProperty* prop = node.property("type");
+	XMLProperty const * prop = node.property("type");
 	assert(!prop || DataType(prop->value()) == DataType::AUDIO);
 #endif
 
@@ -63,13 +67,13 @@ AudioPlaylist::AudioPlaylist (boost::shared_ptr<const AudioPlaylist> other, stri
 {
 }
 
-AudioPlaylist::AudioPlaylist (boost::shared_ptr<const AudioPlaylist> other, framepos_t start, framecnt_t cnt, string name, bool hidden)
+AudioPlaylist::AudioPlaylist (boost::shared_ptr<const AudioPlaylist> other, samplepos_t start, samplecnt_t cnt, string name, bool hidden)
 	: Playlist (other, start, cnt, name, hidden)
 {
 	RegionReadLock rlock2 (const_cast<AudioPlaylist*> (other.get()));
 	in_set_state++;
 
-	framepos_t const end = start + cnt - 1;
+	samplepos_t const end = start + cnt - 1;
 
 	/* Audio regions that have been created by the Playlist constructor
 	   will currently have the same fade in/out as the regions that they
@@ -82,8 +86,8 @@ AudioPlaylist::AudioPlaylist (boost::shared_ptr<const AudioPlaylist> other, fram
 		boost::shared_ptr<AudioRegion> region = boost::dynamic_pointer_cast<AudioRegion> (*i);
 		assert (region);
 
-		framecnt_t fade_in = 64;
-		framecnt_t fade_out = 64;
+		samplecnt_t fade_in = 64;
+		samplecnt_t fade_out = 64;
 
 		switch (region->coverage (start, end)) {
 		case Evoral::OverlapNone:
@@ -91,8 +95,8 @@ AudioPlaylist::AudioPlaylist (boost::shared_ptr<const AudioPlaylist> other, fram
 
 		case Evoral::OverlapInternal:
 		{
-			framecnt_t const offset = start - region->position ();
-			framecnt_t const trim = region->last_frame() - end;
+			samplecnt_t const offset = start - region->position ();
+			samplecnt_t const trim = region->last_sample() - end;
 			if (region->fade_in()->back()->when > offset) {
 				fade_in = region->fade_in()->back()->when - offset;
 			}
@@ -105,13 +109,13 @@ AudioPlaylist::AudioPlaylist (boost::shared_ptr<const AudioPlaylist> other, fram
 		case Evoral::OverlapStart: {
 			if (end > region->position() + region->fade_in()->back()->when)
 				fade_in = region->fade_in()->back()->when;  //end is after fade-in, preserve the fade-in
-			if (end > region->last_frame() - region->fade_out()->back()->when)
-				fade_out = region->fade_out()->back()->when - ( region->last_frame() - end );  //end is inside the fadeout, preserve the fades endpoint
+			if (end > region->last_sample() - region->fade_out()->back()->when)
+				fade_out = region->fade_out()->back()->when - ( region->last_sample() - end );  //end is inside the fadeout, preserve the fades endpoint
 			break;
 		}
 
 		case Evoral::OverlapEnd: {
-			if (start < region->last_frame() - region->fade_out()->back()->when)  //start is before fade-out, preserve the fadeout
+			if (start < region->last_sample() - region->fade_out()->back()->when)  //start is before fade-out, preserve the fadeout
 				fade_out = region->fade_out()->back()->when;
 
 			if (start < region->position() + region->fade_in()->back()->when)
@@ -151,18 +155,17 @@ struct ReadSorter {
 
 /** A segment of region that needs to be read */
 struct Segment {
-	Segment (boost::shared_ptr<AudioRegion> r, Evoral::Range<framepos_t> a) : region (r), range (a) {}
+	Segment (boost::shared_ptr<AudioRegion> r, Evoral::Range<samplepos_t> a) : region (r), range (a) {}
 
 	boost::shared_ptr<AudioRegion> region; ///< the region
-	Evoral::Range<framepos_t> range;       ///< range of the region to read, in session frames
+	Evoral::Range<samplepos_t> range;       ///< range of the region to read, in session samples
 };
 
-/** @param start Start position in session frames.
- *  @param cnt Number of frames to read.
+/** @param start Start position in session samples.
+ *  @param cnt Number of samples to read.
  */
-ARDOUR::framecnt_t
-AudioPlaylist::read (Sample *buf, Sample *mixdown_buffer, float *gain_buffer, framepos_t start,
-		     framecnt_t cnt, unsigned chan_n)
+ARDOUR::samplecnt_t
+AudioPlaylist::read (Sample *buf, Sample *mixdown_buffer, float *gain_buffer, samplepos_t start, samplecnt_t cnt, unsigned chan_n)
 {
 	DEBUG_TRACE (DEBUG::AudioPlayback, string_compose ("Playlist %1 read @ %2 for %3, channel %4, regions %5 mixdown @ %6 gain @ %7\n",
 							   name(), start, cnt, chan_n, regions.size(), mixdown_buffer, gain_buffer));
@@ -196,9 +199,9 @@ AudioPlaylist::read (Sample *buf, Sample *mixdown_buffer, float *gain_buffer, fr
 
 	/* This will be a list of the bits of our read range that we have
 	   handled completely (ie for which no more regions need to be read).
-	   It is a list of ranges in session frames.
+	   It is a list of ranges in session samples.
 	*/
-	Evoral::RangeList<framepos_t> done;
+	Evoral::RangeList<samplepos_t> done;
 
 	/* This will be a list of the bits of regions that we need to read */
 	list<Segment> to_do;
@@ -208,33 +211,40 @@ AudioPlaylist::read (Sample *buf, Sample *mixdown_buffer, float *gain_buffer, fr
 		boost::shared_ptr<AudioRegion> ar = boost::dynamic_pointer_cast<AudioRegion> (*i);
 
 		/* muted regions don't figure into it at all */
-		if ( ar->muted() )
+		if (ar->muted()) {
 			continue;
+		}
+
+		/* check for the case of solo_selection */
+		const bool force_transparent = (_session.solo_selection_active() && SoloSelectedActive() && !SoloSelectedListIncludes( (const Region*) &(**i)));
+		if (force_transparent) {
+			continue;
+		}
 
 		/* Work out which bits of this region need to be read;
 		   first, trim to the range we are reading...
 		*/
-		Evoral::Range<framepos_t> region_range = ar->range ();
+		Evoral::Range<samplepos_t> region_range = ar->range ();
 		region_range.from = max (region_range.from, start);
 		region_range.to = min (region_range.to, start + cnt - 1);
 
 		/* ... and then remove the bits that are already done */
 
-		Evoral::RangeList<framepos_t> region_to_do = Evoral::subtract (region_range, done);
+		Evoral::RangeList<samplepos_t> region_to_do = Evoral::subtract (region_range, done);
 
 		/* Make a note to read those bits, adding their bodies (the parts between end-of-fade-in
 		   and start-of-fade-out) to the `done' list.
 		*/
 
-		Evoral::RangeList<framepos_t>::List t = region_to_do.get ();
+		Evoral::RangeList<samplepos_t>::List t = region_to_do.get ();
 
-		for (Evoral::RangeList<framepos_t>::List::iterator j = t.begin(); j != t.end(); ++j) {
-			Evoral::Range<framepos_t> d = *j;
+		for (Evoral::RangeList<samplepos_t>::List::iterator j = t.begin(); j != t.end(); ++j) {
+			Evoral::Range<samplepos_t> d = *j;
 			to_do.push_back (Segment (ar, d));
 
 			if (ar->opaque ()) {
 				/* Cut this range down to just the body and mark it done */
-				Evoral::Range<framepos_t> body = ar->body_range ();
+				Evoral::Range<samplepos_t> body = ar->body_range ();
 				if (body.from < d.to && body.to > d.from) {
 					d.from = max (d.from, body.from);
 					d.to = min (d.to, body.to);
@@ -335,6 +345,11 @@ AudioPlaylist::region_changed (const PropertyChange& what_changed, boost::shared
 		return false;
 	}
 
+	PropertyChange bounds;
+	bounds.add (Properties::start);
+	bounds.add (Properties::position);
+	bounds.add (Properties::length);
+
 	PropertyChange our_interests;
 
 	our_interests.add (Properties::fade_in_active);
@@ -348,8 +363,8 @@ AudioPlaylist::region_changed (const PropertyChange& what_changed, boost::shared
 	bool parent_wants_notify;
 
 	parent_wants_notify = Playlist::region_changed (what_changed, region);
-
-	if (parent_wants_notify || (what_changed.contains (our_interests))) {
+	/* if bounds changed, we have already done notify_contents_changed ()*/
+	if ((parent_wants_notify || what_changed.contains (our_interests)) && !what_changed.contains (bounds)) {
 		notify_contents_changed ();
 	}
 
@@ -487,10 +502,10 @@ AudioPlaylist::load_legacy_crossfades (const XMLNode& node, int version)
 	for (XMLNodeConstIterator i = children.begin(); i != children.end(); ++i) {
 		if ((*i)->name() == X_("Crossfade")) {
 
-			XMLProperty* p = (*i)->property (X_("active"));
+			XMLProperty const * p = (*i)->property (X_("active"));
 			assert (p);
 
-			if (!string_is_affirmative (p->value())) {
+			if (!string_to<bool> (p->value())) {
 				continue;
 			}
 

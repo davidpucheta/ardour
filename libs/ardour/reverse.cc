@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 
@@ -43,11 +44,11 @@ Reverse::run (boost::shared_ptr<Region> r, Progress*)
 {
 	SourceList nsrcs;
 	SourceList::iterator si;
-	framecnt_t blocksize = 256 * 1024;
+	samplecnt_t blocksize = 256 * 1024;
 	Sample* buf = 0;
-	framepos_t fpos;
-	framepos_t fstart;
-	framecnt_t to_read;
+	samplepos_t fpos;
+	samplepos_t fstart;
+	samplecnt_t to_read;
 	int ret = -1;
 
 	boost::shared_ptr<AudioRegion> region = boost::dynamic_pointer_cast<AudioRegion>(r);
@@ -87,7 +88,7 @@ Reverse::run (boost::shared_ptr<Region> r, Progress*)
 
 			/* swap memory order */
 
-			for (framecnt_t i = 0; i < to_read/2; ++i) {
+			for (samplecnt_t i = 0; i < to_read/2; ++i) {
 				swap (buf[i],buf[to_read-1-i]);
 			}
 

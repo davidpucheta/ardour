@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 
@@ -30,7 +32,7 @@
 #include "group_tabs.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace ARDOUR;
@@ -126,12 +128,12 @@ RouteGroupDialog::RouteGroupDialog (RouteGroup* g, bool creating_new)
 	_active.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
 	_color.signal_color_set().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
 	_gain.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
- 	_relative.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
- 	_mute.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
- 	_solo.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
- 	_rec_enable.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
- 	_select.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
- 	_route_active.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
+	_relative.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
+	_mute.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
+	_solo.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
+	_rec_enable.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
+	_select.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
+	_route_active.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
 	_share_color.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
 	_share_monitoring.signal_toggled().connect (sigc::mem_fun (*this, &RouteGroupDialog::update));
 
@@ -170,43 +172,32 @@ RouteGroupDialog::RouteGroupDialog (RouteGroup* g, bool creating_new)
 		add_button (Stock::CANCEL, RESPONSE_CANCEL);
 		add_button (Stock::NEW, RESPONSE_OK);
 		set_default_response (RESPONSE_OK);
-	} else {
-		add_button (Stock::CLOSE, RESPONSE_CLOSE);
-		set_default_response (RESPONSE_CLOSE);
 	}
 
 	show_all_children ();
 }
 
-/** @return true if the route group edit was cancelled, otherwise false */
 bool
-RouteGroupDialog::do_run ()
+RouteGroupDialog::name_check () const
 {
-	while (1) {
-		int const r = run ();
-
-		if (r != Gtk::RESPONSE_OK) {
-			return true;
-		}
-
-		if (unique_name (_name.get_text())) {
-			/* not cancelled and the name is ok, so all is well */
-			return false;
-		}
-
-		_group->set_name (_initial_name);
-		MessageDialog msg (
-			_("The group name is not unique. Please use a different name."),
-			false,
-			Gtk::MESSAGE_ERROR,
-			Gtk::BUTTONS_OK,
-			true
-			);
-
-		msg.run ();
+	if (unique_name (_name.get_text())) {
+		/* not cancelled and the name is ok, so all is well */
+		return true;
 	}
 
-	abort(); /* NOTREACHED */
+	_group->set_name (_initial_name);
+
+	MessageDialog msg (
+		_("The group name is not unique. Please use a different name."),
+		false,
+		Gtk::MESSAGE_ERROR,
+		Gtk::BUTTONS_OK,
+		true
+		);
+
+	msg.set_position (WIN_POS_MOUSE);
+	msg.run ();
+
 	return false;
 }
 
@@ -215,17 +206,17 @@ RouteGroupDialog::update ()
 {
 	PropertyList plist;
 
-	plist.add (Properties::gain, _gain.get_active());
-	plist.add (Properties::recenable, _rec_enable.get_active());
-	plist.add (Properties::mute, _mute.get_active());
-	plist.add (Properties::solo, _solo.get_active ());
-	plist.add (Properties::select, _select.get_active());
-	plist.add (Properties::route_active, _route_active.get_active());
-	plist.add (Properties::relative, _relative.get_active());
+	plist.add (Properties::group_gain, _gain.get_active());
+	plist.add (Properties::group_recenable, _rec_enable.get_active());
+	plist.add (Properties::group_mute, _mute.get_active());
+	plist.add (Properties::group_solo, _solo.get_active ());
+	plist.add (Properties::group_select, _select.get_active());
+	plist.add (Properties::group_route_active, _route_active.get_active());
+	plist.add (Properties::group_relative, _relative.get_active());
+	plist.add (Properties::group_color, _share_color.get_active());
+	plist.add (Properties::group_monitoring, _share_monitoring.get_active());
 	plist.add (Properties::active, _active.get_active());
 	plist.add (Properties::name, string (_name.get_text()));
-	plist.add (Properties::color, _share_color.get_active());
-	plist.add (Properties::monitoring, _share_monitoring.get_active());
 
 	_group->apply_changes (plist);
 

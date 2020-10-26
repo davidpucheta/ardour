@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013 Michael Fisher <mfisher31@gmail.com>
+ * Copyright (C) 2014-2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdint.h>
 
@@ -34,7 +37,7 @@
 
 #include "midi_tracer.h"
 #include "gui_thread.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace std;
@@ -46,6 +49,7 @@ MidiTracer::MidiTracer ()
 	, line_count_adjustment (200, 1, 2000, 1, 10)
 	, line_count_spinner (line_count_adjustment)
 	, line_count_label (_("Line history: "))
+	, _last_receipt (0)
 	, autoscroll (true)
 	, show_hex (true)
 	, show_delta_time (false)
@@ -59,9 +63,6 @@ MidiTracer::MidiTracer ()
 {
 	ARDOUR::AudioEngine::instance()->PortRegisteredOrUnregistered.connect
 		(_manager_connection, invalidator (*this), boost::bind (&MidiTracer::ports_changed, this), gui_context());
-
-	_last_receipt.tv_sec = 0;
-	_last_receipt.tv_usec = 0;
 
 	VBox* vbox = manage (new VBox);
 	vbox->set_spacing (4);
@@ -121,7 +122,6 @@ MidiTracer::MidiTracer ()
 	port_changed ();
 }
 
-
 MidiTracer::~MidiTracer()
 {
 }
@@ -178,13 +178,13 @@ MidiTracer::port_changed ()
 		boost::shared_ptr<ARDOUR::MidiPort> mp = boost::dynamic_pointer_cast<ARDOUR::MidiPort> (p);
 
 		if (mp) {
-			mp->self_parser().any.connect_same_thread (_parser_connection, boost::bind (&MidiTracer::tracer, this, _1, _2, _3));
-			mp->set_trace_on (true);
+			my_parser.any.connect_same_thread (_parser_connection, boost::bind (&MidiTracer::tracer, this, _1, _2, _3, _4));
+			mp->set_trace (&my_parser);
 			traced_port = mp;
 		}
 
 	} else {
-		async->parser()->any.connect_same_thread (_parser_connection, boost::bind (&MidiTracer::tracer, this, _1, _2, _3));
+		async->parser()->any.connect_same_thread (_parser_connection, boost::bind (&MidiTracer::tracer, this, _1, _2, _3, _4));
 	}
 }
 
@@ -194,40 +194,31 @@ MidiTracer::disconnect ()
 	_parser_connection.disconnect ();
 
 	if (traced_port) {
-		traced_port->set_trace_on (false);
+		traced_port->set_trace (0);
 		traced_port.reset ();
 	}
 }
 
 void
-MidiTracer::tracer (Parser&, byte* msg, size_t len)
+MidiTracer::tracer (Parser&, byte* msg, size_t len, samplecnt_t now)
 {
 	stringstream ss;
-	struct timeval tv;
 	char* buf;
-	struct tm now;
 	size_t bufsize;
 	size_t s;
-
-	gettimeofday (&tv, 0);
 
 	buf = (char *) buffer_pool.alloc ();
 	bufsize = buffer_size;
 
-	if (_last_receipt.tv_sec != 0 && show_delta_time) {
-		struct timeval delta;
-		timersub (&tv, &_last_receipt, &delta);
-		s = snprintf (buf, bufsize, "+%02" PRId64 ":%06" PRId64, (int64_t) delta.tv_sec, (int64_t) delta.tv_usec);
+	if (_last_receipt != 0 && show_delta_time) {
+		s = snprintf (buf, bufsize, "+%12" PRId64, now - _last_receipt);
 		bufsize -= s;
 	} else {
-		localtime_r ((const time_t*)&tv.tv_sec, &now);
-		s = strftime (buf, bufsize, "%H:%M:%S", &now);
-		bufsize -= s;
-		s += snprintf (&buf[s], bufsize, ".%06" PRId64, (int64_t) tv.tv_usec);
+		s = snprintf (buf, bufsize, "%12" PRId64, now);
 		bufsize -= s;
 	}
 
-	_last_receipt = tv;
+	_last_receipt = now;
 
 	switch ((eventType) msg[0]&0xf0) {
 	case off:
@@ -342,20 +333,22 @@ MidiTracer::tracer (Parser&, byte* msg, size_t len)
 
 		} else if (len == 10 && msg[0] == 0xf0 && msg[1] == 0x7f && msg[9] == 0xf7)  {
 
-			/* MTC full frame */
-			s += snprintf (
-				&buf[s], bufsize, " MTC full frame to %02d:%02d:%02d:%02d\n", msg[5] & 0x1f, msg[6], msg[7], msg[8]
-				);
+			/* MTC full sample */
+			s += snprintf (&buf[s], bufsize, " MTC full sample to %02d:%02d:%02d:%02d\n", msg[5] & 0x1f, msg[6], msg[7], msg[8]);
 		} else if (len == 3 && msg[0] == MIDI::position) {
 
 			/* MIDI Song Position */
 			int midi_beats = (msg[2] << 7) | msg[1];
 			s += snprintf (&buf[s], bufsize, "%16s %d\n", "Position", (int) midi_beats);
+		} else if (len == 2 && msg[0] == MIDI::mtc_quarter) {
+
+			s += snprintf (&buf[s], bufsize, "%16s %02x\n", "MTC Quarter", msg[1]);
+
 		} else {
 
 			/* other sys-ex */
 
-			s += snprintf (&buf[s], bufsize, "%16s (%d) = [", "Sysex", (int) len);
+			s += snprintf (&buf[s], bufsize, "%16s (%" PRId64 ") = [", "Sysex", len);
 			bufsize -= s;
 
 			for (unsigned int i = 0; i < len && bufsize > 3; ++i) {

@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2002 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2002-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <list>
 #include <cerrno>
@@ -31,7 +33,7 @@
 
 #include <sndfile.h>
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -39,91 +41,201 @@ using namespace PBD;
 
 Pool Click::pool ("click", sizeof (Click), 1024);
 
-void
-Session::click (framepos_t start, framecnt_t nframes)
-{
-	TempoMap::BBTPointList::const_iterator points_begin;
-	TempoMap::BBTPointList::const_iterator points_end;
-	Sample *buf;
-	framecnt_t click_distance;
+/* pre-allocated vector for grid-point-lookup.
+ *
+ * Since Session::click() is never called concurrently
+ * from different threads, this can be static-global.
+ * (session.h does not include tempo.h so making this
+ *  a Session member variable is tricky.)
+ */
+static vector<TempoMap::BBTPoint> _click_points;
 
+void
+Session::add_click (samplepos_t pos, bool emphasis)
+{
+	if (emphasis) {
+		if (click_emphasis_data && Config->get_use_click_emphasis () == true) {
+			clicks.push_back (new Click (pos, click_emphasis_length, click_emphasis_data));
+		} else if (click_data && Config->get_use_click_emphasis () == false) {
+			clicks.push_back (new Click (pos, click_length, click_data));
+		}
+	} else if (click_data) {
+		clicks.push_back (new Click (pos, click_length, click_data));
+	}
+}
+
+void
+Session::click (samplepos_t cycle_start, samplecnt_t nframes)
+{
 	if (_click_io == 0) {
 		return;
 	}
 
+	/* transport_frame is audible-frame (what you hear,
+	 * incl output latency). So internally we're ahead,
+	 * we need to prepare frames that the user will hear
+	 * in "output latency's" worth of time.
+	 */
+	samplecnt_t offset = _click_io_latency;
+
 	Glib::Threads::RWLock::WriterLock clickm (click_lock, Glib::Threads::TRY_LOCK);
 
-	/* how far have we moved since the last time the clicks got cleared
-	 */
+	/* how far have we moved since the last time the clicks got cleared */
+	const samplecnt_t click_distance = cycle_start + offset - _clicks_cleared;
 
-	click_distance = start - _clicks_cleared;
-
-	if (!clickm.locked() || !_clicking || click_data == 0 || ((click_distance + nframes) < _worst_track_latency)) {
+	if (!clickm.locked() || !_clicking || click_data == 0 || ((click_distance + nframes) < 0)) {
 		_click_io->silence (nframes);
 		return;
 	}
 
-	start -= _worst_track_latency;
-	/* start could be negative at this point */
-	const framepos_t end = start + nframes;
-	/* correct start, potentially */
-	start = max (start, (framepos_t) 0);
+	if (_click_rec_only && !actively_recording()) {
+		return;
+	}
 
+	/* range to check for clicks */
+	samplepos_t start = cycle_start + offset;
+	/* correct start, potentially */
+	start = max (start, (samplepos_t) 0);
+
+	samplecnt_t remain = nframes;
+
+	while (remain > 0) {
+		samplecnt_t move = remain;
+
+		Location* loop_location = get_play_loop () ? locations()->auto_loop_location () : NULL;
+		if (loop_location) {
+			const samplepos_t loop_start = loop_location->start ();
+			const samplepos_t loop_end = loop_location->end ();
+			if (start >= loop_end) {
+				samplecnt_t off = (start - loop_end) % (loop_end - loop_start);
+				start = loop_start + off;
+				move = std::min (remain, loop_end - start);
+			} else if (start + move >= loop_end) {
+				move = std::min (remain, loop_end - start);
+			}
+			if (move == 0) {
+				start = loop_start;
+				const samplecnt_t looplen = loop_end - loop_start;
+				move = std::min (remain, looplen);
+			}
+		}
+
+		const samplepos_t end = start + move;
+
+		_click_points.clear ();
+		_tempo_map->get_grid (_click_points, start, end);
+
+		if (distance (_click_points.begin(), _click_points.end()) == 0) {
+			start += move;
+			remain -= move;
+			continue;
+		}
+
+		for (vector<TempoMap::BBTPoint>::iterator i = _click_points.begin(); i != _click_points.end(); ++i) {
+			assert ((*i).sample >= start && (*i).sample < end);
+			switch ((*i).beat) {
+				case 1:
+					add_click ((*i).sample, true);
+					break;
+				default:
+					if (click_emphasis_data == 0 || (Config->get_use_click_emphasis () == false) || (click_emphasis_data && (*i).beat != 1)) { // XXX why is this check needed ??  (*i).beat !=1 must be true here
+						add_click ((*i).sample, false);
+					}
+					break;
+			}
+		}
+
+		start += move;
+		remain -= move;
+	}
+
+	clickm.release ();
+	run_click (cycle_start, nframes);
+}
+
+void
+Session::run_click (samplepos_t start, samplepos_t nframes)
+{
+	Glib::Threads::RWLock::ReaderLock clickm (click_lock, Glib::Threads::TRY_LOCK);
+
+	/* align to output */
+	start += _click_io_latency;
+
+	if (!clickm.locked() || click_data == 0) {
+		_click_io->silence (nframes);
+		return;
+	}
+
+	Sample *buf;
 	BufferSet& bufs = get_scratch_buffers(ChanCount(DataType::AUDIO, 1));
 	buf = bufs.get_audio(0).data();
+	memset (buf, 0, sizeof (Sample) * nframes);
 
-	_tempo_map->get_grid (points_begin, points_end, start, end);
-
-	if (distance (points_begin, points_end) == 0) {
-		goto run_clicks;
+	/* given a large output latency, `start' can be offset by by > 1 cycle.
+	 * and needs to be mapped back into the loop-range */
+	Location* loop_location = get_play_loop () ? locations()->auto_loop_location () : NULL;
+	if (_count_in_samples > 0) {
+		loop_location = NULL;
 	}
-
-	for (TempoMap::BBTPointList::const_iterator i = points_begin; i != points_end; ++i) {
-		switch ((*i).beat) {
-		case 1:
-			if (click_emphasis_data && Config->get_use_click_emphasis () == true) {
-				clicks.push_back (new Click ((*i).frame, click_emphasis_length, click_emphasis_data));
-			} else if (click_data && Config->get_use_click_emphasis () == false) {
-				clicks.push_back (new Click ((*i).frame, click_length, click_data));
-			}
-			break;
-
-		default:
-			if (click_emphasis_data == 0 || (Config->get_use_click_emphasis () == false) || (click_emphasis_data && (*i).beat != 1)) {
-				clicks.push_back (new Click ((*i).frame, click_length, click_data));
-			}
-			break;
+	bool crossloop = false;
+	samplecnt_t span = nframes;
+	if (loop_location) {
+		const samplepos_t loop_start = loop_location->start ();
+		const samplepos_t loop_end = loop_location->end ();
+		if (start >= loop_end) {
+			samplecnt_t off = (start - loop_end) % (loop_end - loop_start);
+			start = loop_start + off;
+			span = std::min (nframes, loop_end - start);
+		} else if (start + nframes >= loop_end) {
+			crossloop = true;
+			span = std::min (nframes, loop_end - start);
 		}
 	}
-
-  run_clicks:
-	memset (buf, 0, sizeof (Sample) * nframes);
 
 	for (list<Click*>::iterator i = clicks.begin(); i != clicks.end(); ) {
 
-		framecnt_t copy;
-		framecnt_t internal_offset;
-		Click *clk;
+		Click *clk = *i;
 
-		clk = *i;
+		if (loop_location) {
+			const samplepos_t loop_start = loop_location->start ();
+			const samplepos_t loop_end = loop_location->end ();
+			/* remove any clicks that are outside loop location, and not currently playing */
+			if ((clk->start < loop_start || clk->start >= loop_end) && clk->offset == 0) {
+				delete clk;
+				i = clicks.erase (i);
+				continue;
+			}
+		}
 
-		if (clk->start < start) {
+		samplecnt_t internal_offset;
+
+		if (clk->start <= start || clk->offset > 0) {
 			internal_offset = 0;
-		} else {
+		} else if (clk->start < start + span) {
+			/* queue click at offset in current cycle */
 			internal_offset = clk->start - start;
+		} else if (crossloop) {
+			/* When loop wraps around in current cycle, take
+			 * clicks at loop-start into account */
+			const samplepos_t loop_start = loop_location->start ();
+			internal_offset = clk->start - loop_start + span;
+		} else if (_count_in_samples > 0) {
+			++i;
+			continue;
+		} else {
+			/* this can happen when locating
+			 * with an active click */
+			delete clk;
+			i = clicks.erase (i);
+			continue;
 		}
 
-		if (nframes < internal_offset) {
-		         /* we've just located or something..
-			    effectively going backwards.
-			    lets get the flock out of here */
-		        break;
+		if (internal_offset >= nframes) {
+			break;
 		}
 
-		copy = min (clk->duration - clk->offset, nframes - internal_offset);
-
+		samplecnt_t copy = min (clk->duration - clk->offset, nframes - internal_offset);
 		memcpy (buf + internal_offset, &clk->data[clk->offset], copy * sizeof (Sample));
-
 		clk->offset += copy;
 
 		if (clk->offset >= clk->duration) {
@@ -134,12 +246,12 @@ Session::click (framepos_t start, framecnt_t nframes)
 		}
 	}
 
-	_click_gain->run (bufs, 0, 0, nframes, false);
+	_click_gain->run (bufs, 0, 0, 1.0, nframes, false);
 	_click_io->copy_to_outputs (bufs, DataType::AUDIO, nframes, 0);
 }
 
 void
-Session::setup_click_sounds (Sample** data, Sample const * default_data, framecnt_t* length, framecnt_t default_length, string const & path)
+Session::setup_click_sounds (Sample** data, Sample const * default_data, samplecnt_t* length, samplecnt_t default_length, string const & path)
 {
 	if (*data != default_data) {
 		delete[] *data;
@@ -201,6 +313,7 @@ Session::setup_click_sounds (Sample** data, Sample const * default_data, framecn
 void
 Session::setup_click_sounds (int which)
 {
+	_click_points.reserve (8);
 	clear_clicks ();
 
 	if (which == 0 || which == 1) {
@@ -234,5 +347,15 @@ Session::clear_clicks ()
 	}
 
 	clicks.clear ();
-	_clicks_cleared = _transport_frame;
+	_clicks_cleared = _transport_sample;
+}
+
+void
+Session::click_io_resync_latency (bool playback)
+{
+	if (deletion_in_progress() || !playback) {
+		return;
+	}
+
+	_click_io_latency = _click_io->connected_latency (true);
 }

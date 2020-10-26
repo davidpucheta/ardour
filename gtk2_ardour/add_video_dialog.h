@@ -1,22 +1,20 @@
 /*
-    Copyright (C) 2010-2013 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #ifndef __gtk_ardour_add_video_dialog_h__
 #define __gtk_ardour_add_video_dialog_h__
 
@@ -26,7 +24,18 @@
 #undef interface
 #endif
 
-#include <gtkmm.h>
+#include <gtkmm/box.h>
+#include <gtkmm/button.h>
+#include <gtkmm/cellrendererpixbuf.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/filechooserwidget.h>
+#include <gtkmm/image.h>
+#include <gtkmm/label.h>
+#include <gtkmm/liststore.h>
+#include <gtkmm/notebook.h>
+#include <gtkmm/scale.h>
+#include <gtkmm/treemodel.h>
+#include <gtkmm/treeview.h>
 
 #include "ardour/types.h"
 #include "ardour/template_utils.h"
@@ -40,7 +49,7 @@ enum VtlImportOption {
 
 class AddVideoDialog : public ArdourDialog
 {
-  public:
+public:
 	AddVideoDialog (ARDOUR::Session*);
 	~AddVideoDialog ();
 
@@ -49,7 +58,7 @@ class AddVideoDialog : public ArdourDialog
 	bool launch_xjadeo ();
 	bool auto_set_session_fps ();
 
-  private:
+private:
 	void on_show ();
 	bool page_switch();
 	void set_action_ok(bool yn);
@@ -87,7 +96,7 @@ class AddVideoDialog : public ArdourDialog
 	/* Harvid Browser related */
 	class HarvidColumns : public Gtk::TreeModel::ColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<std::string> id;
 		Gtk::TreeModelColumn<std::string> uri;
 		Gtk::TreeModelColumn<std::string> filename;

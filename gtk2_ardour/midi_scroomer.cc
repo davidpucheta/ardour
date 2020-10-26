@@ -1,35 +1,35 @@
 /*
-    Copyright (C) 2008 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
-
-#include "midi_scroomer.h"
-
-#include <cairomm/context.h>
+ * Copyright (C) 2008-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
+#include <cairomm/context.h>
 
-using namespace Gtkmm2ext;
+#include "midi_scroomer.h"
+#include "ui_config.h"
+
 using namespace Gtk;
 using namespace std;
 
 //std::map<int, Glib::RefPtr<Gdk::Pixmap> > MidiScroomer::piano_pixmaps;
 
 MidiScroomer::MidiScroomer(Adjustment& adj)
-	: Gtkmm2ext::Scroomer(adj)
+	: ArdourWidgets::Scroomer(adj)
 {
 
 	adj.set_lower(0);
@@ -164,5 +164,5 @@ MidiScroomer::get_colors(double color[], Component comp)
 void
 MidiScroomer::on_size_request(Gtk::Requisition* r)
 {
-	r->width = 12;
+	r->width = std::max (12.f, rintf (12.f * UIConfiguration::instance().get_ui_scale()));
 }

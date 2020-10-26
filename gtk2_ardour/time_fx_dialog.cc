@@ -1,28 +1,31 @@
 /*
-    Copyright (C) 2000-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 
 #include <iostream>
 #include <cstdlib>
 #include <cmath>
-
 #include <string>
+
+#include <gtkmm/stock.h>
 
 #include "pbd/error.h"
 #include "pbd/pthread_utils.h"
@@ -30,7 +33,7 @@
 #include "pbd/unwind.h"
 #include "pbd/stacktrace.h"
 
-#include <gtkmm2ext/utils.h>
+#include "gtkmm2ext/utils.h"
 
 #include "audio_clock.h"
 #include "editor.h"
@@ -45,7 +48,7 @@
 using namespace RubberBand;
 #endif
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -53,7 +56,7 @@ using namespace PBD;
 using namespace Gtk;
 using namespace Gtkmm2ext;
 
-TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, framecnt_t oldlen, framecnt_t new_length, framepos_t position)
+TimeFXDialog::TimeFXDialog (Editor& e, bool pitch, samplecnt_t oldlen, samplecnt_t new_length, samplepos_t position)
 	: ArdourDialog (X_("time fx dialog"))
 	, editor (e)
 	, pitching (pitch)
@@ -245,7 +248,6 @@ TimeFXDialog::timer_update ()
 void
 TimeFXDialog::cancel_in_progress ()
 {
-	status = -2;
 	request.cancel = true;
 	first_cancel.disconnect();
 }
@@ -253,7 +255,6 @@ TimeFXDialog::cancel_in_progress ()
 gint
 TimeFXDialog::delete_in_progress (GdkEventAny*)
 {
-	status = -2;
 	request.cancel = true;
 	first_delete.disconnect();
 	return TRUE;
@@ -301,7 +302,7 @@ TimeFXDialog::duration_adjustment_changed ()
 
 	PBD::Unwinder<bool> uw (ignore_clock_change, true);
 
-	duration_clock->set ((framecnt_t) (original_length * (duration_adjustment.get_value()/ 100.0)));
+	duration_clock->set ((samplecnt_t) (original_length * (duration_adjustment.get_value()/ 100.0)));
 }
 
 void

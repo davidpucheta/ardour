@@ -1,27 +1,31 @@
 /*
-    Copyright (C) 2006 Paul Davis
+ * Copyright (C) 2006-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2018 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2015 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
-
-#include <iostream>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 
-#include "evoral/Curve.hpp"
+#include "evoral/Curve.h"
 
 #include "ardour/amp.h"
 #include "ardour/audio_buffer.h"
@@ -31,20 +35,18 @@
 #include "ardour/rc_configuration.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
 
-// used for low-pass filter denormal protection
-#define GAIN_COEFF_TINY (1e-10) // -200dB
+#define GAIN_COEFF_DELTA (1e-5)
 
 Amp::Amp (Session& s, const std::string& name, boost::shared_ptr<GainControl> gc, bool control_midi_also)
 	: Processor(s, "Amp")
-	, _apply_gain(true)
 	, _apply_gain_automation(false)
 	, _current_gain(GAIN_COEFF_ZERO)
-	, _current_automation_frame (INT64_MAX)
+	, _current_automation_sample (INT64_MAX)
 	, _gain_control (gc)
 	, _gain_automation_buffer(0)
 	, _midi_amp (control_midi_also)
@@ -70,83 +72,87 @@ Amp::configure_io (ChanCount in, ChanCount out)
 	return Processor::configure_io (in, out);
 }
 
+static void
+scale_midi_velocity(Evoral::Event<MidiBuffer::TimeType>& ev, float factor)
+{
+	factor = std::max(factor, 0.0f);
+	ev.set_velocity(std::min(127L, lrintf(ev.velocity() * factor)));
+}
+
 void
-Amp::run (BufferSet& bufs, framepos_t /*start_frame*/, framepos_t /*end_frame*/, pframes_t nframes, bool)
+Amp::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sample*/, double /*speed*/, pframes_t nframes, bool)
 {
 	if (!_active && !_pending_active) {
+		/* disregard potentially prepared gain-automation. */
+		_apply_gain_automation = false;
 		return;
 	}
 
-	if (_apply_gain) {
+	if (_apply_gain_automation) {
 
-		if (_apply_gain_automation) {
+		gain_t* gab = _gain_automation_buffer;
+		assert (gab);
 
-			gain_t* gab = _gain_automation_buffer;
-			assert (gab);
+		/* see note in PluginInsert::connect_and_run -- effectively emit Changed signal */
+		_gain_control->set_value_unchecked (gab[0]);
 
-			if (_midi_amp) {
-				for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
-					MidiBuffer& mb (*i);
-					for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
-						Evoral::MIDIEvent<MidiBuffer::TimeType> ev = *m;
-						if (ev.is_note_on()) {
-							assert(ev.time() >= 0 && ev.time() < nframes);
-							ev.scale_velocity (fabsf (gab[ev.time()]));
-						}
+		if (_midi_amp) {
+			for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
+				MidiBuffer& mb (*i);
+				for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
+					Evoral::Event<MidiBuffer::TimeType> ev = *m;
+					if (ev.is_note_on()) {
+						assert(ev.time() >= 0 && ev.time() < nframes);
+						scale_midi_velocity (ev, fabsf (gab[ev.time()]));
 					}
 				}
 			}
+		}
 
+		const gain_t a = 156.825f / (gain_t)_session.nominal_sample_rate(); // 25 Hz LPF; see Amp::apply_gain for details
+		gain_t lpf = _current_gain;
 
-			const double a = 156.825 / _session.nominal_frame_rate(); // 25 Hz LPF; see Amp::apply_gain for details
-			double lpf = _current_gain;
-
-			for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i) {
-				Sample* const sp = i->data();
-				lpf = _current_gain;
-				for (pframes_t nx = 0; nx < nframes; ++nx) {
-					sp[nx] *= lpf;
-					lpf += a * (gab[nx] - lpf);
-				}
+		for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i) {
+			Sample* const sp = i->data();
+			lpf = _current_gain;
+			for (pframes_t nx = 0; nx < nframes; ++nx) {
+				sp[nx] *= lpf;
+				lpf += a * (gab[nx] - lpf);
 			}
+		}
 
-			if (fabs (lpf) < GAIN_COEFF_TINY) {
-				_current_gain = GAIN_COEFF_ZERO;
-			} else {
-				_current_gain = lpf;
-			}
+		if (fabsf (lpf) < GAIN_COEFF_SMALL) {
+			_current_gain = GAIN_COEFF_ZERO;
+		} else {
+			_current_gain = lpf;
+		}
 
-		} else { /* manual (scalar) gain */
+		/* used it, don't do it again until setup_gain_automation() is
+		 * called successfully.
+		*/
+		_apply_gain_automation = false;
 
-			gain_t const dg = _gain_control->user_double();
+	} else { /* manual (scalar) gain */
 
-			if (_current_gain != dg) {
+		gain_t const target_gain = _gain_control->get_value();
 
-				_current_gain = Amp::apply_gain (bufs, _session.nominal_frame_rate(), nframes, _current_gain, dg, _midi_amp);
+		if (fabsf (_current_gain - target_gain) >= GAIN_COEFF_DELTA) {
 
-			} else if (_current_gain != GAIN_COEFF_UNITY) {
+			_current_gain = Amp::apply_gain (bufs, _session.nominal_sample_rate(), nframes, _current_gain, target_gain, _midi_amp);
 
-				/* gain has not changed, but its non-unity */
+			/* see note in PluginInsert::connect_and_run ()
+			 * set_value_unchecked() won't emit a signal since the value is effectively unchanged
+			 */
+			_gain_control->Changed (false, PBD::Controllable::NoGroup);
 
-				if (_midi_amp) {
-					/* don't Trim midi velocity -- only relevant for Midi on Audio tracks */
-					for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
+		} else if (target_gain != GAIN_COEFF_UNITY) {
 
-						MidiBuffer& mb (*i);
+			_current_gain = target_gain;
+			apply_simple_gain (bufs, nframes, _current_gain, _midi_amp);
 
-						for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
-							Evoral::MIDIEvent<MidiBuffer::TimeType> ev = *m;
-							if (ev.is_note_on()) {
-								ev.scale_velocity (fabsf (_current_gain));
-							}
-						}
-					}
-				}
-
-				for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i) {
-					apply_gain_to_buffer (i->data(), nframes, _current_gain);
-				}
-			}
+		} else {
+			/* unity target gain */
+			_current_gain = target_gain;
 		}
 	}
 
@@ -154,9 +160,9 @@ Amp::run (BufferSet& bufs, framepos_t /*start_frame*/, framepos_t /*end_frame*/,
 }
 
 gain_t
-Amp::apply_gain (BufferSet& bufs, framecnt_t sample_rate, framecnt_t nframes, gain_t initial, gain_t target, bool midi_amp)
+Amp::apply_gain (BufferSet& bufs, samplecnt_t sample_rate, samplecnt_t nframes, gain_t initial, gain_t target, bool midi_amp)
 {
-        /** Apply a (potentially) declicked gain to the buffers of @a bufs */
+	/** Apply a (potentially) declicked gain to the buffers of @a bufs */
 	gain_t rv = target;
 
 	if (nframes == 0 || bufs.count().n_total() == 0) {
@@ -169,39 +175,12 @@ Amp::apply_gain (BufferSet& bufs, framecnt_t sample_rate, framecnt_t nframes, ga
 		return target;
 	}
 
-	/* MIDI Gain */
-	if (midi_amp) {
-		/* don't Trim midi velocity -- only relevant for Midi on Audio tracks */
-		for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
-
-			gain_t  delta;
-			if (target < initial) {
-				/* fade out: remove more and more of delta from initial */
-				delta = -(initial - target);
-			} else {
-				/* fade in: add more and more of delta from initial */
-				delta = target - initial;
-			}
-
-			MidiBuffer& mb (*i);
-
-			for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
-				Evoral::MIDIEvent<MidiBuffer::TimeType> ev = *m;
-
-				if (ev.is_note_on()) {
-					const gain_t scale = delta * (ev.time()/(double) nframes);
-					ev.scale_velocity (fabsf (initial+scale));
-				}
-			}
-		}
-	}
-
-	/* Audio Gain */
-
-	/* Low pass filter coefficient: 1.0 - e^(-2.0 * π * f / 48000) f in Hz.
+	/* Apply Audio Gain first, calculate target LFP'ed gain coefficient
+	 *
+	 * Low pass filter coefficient: 1.0 - e^(-2.0 * π * f / 48000) f in Hz.
 	 * for f << SR,  approx a ~= 6.2 * f / SR;
 	 */
-	const double a = 156.825 / sample_rate; // 25 Hz LPF
+	const gain_t a = 156.825f / (gain_t)sample_rate; // 25 Hz LPF
 
 	for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i) {
 		Sample* const buffer = i->data();
@@ -215,57 +194,61 @@ Amp::apply_gain (BufferSet& bufs, framecnt_t sample_rate, framecnt_t nframes, ga
 			rv = lpf;
 		}
 	}
-	if (fabsf (rv - target) < GAIN_COEFF_TINY) return target;
-	if (fabsf (rv) < GAIN_COEFF_TINY) return GAIN_COEFF_ZERO;
-	return rv;
-}
 
-void
-Amp::declick (BufferSet& bufs, framecnt_t nframes, int dir)
-{
-	if (nframes == 0 || bufs.count().n_total() == 0) {
-		return;
+	if (fabsf (rv - target) < GAIN_COEFF_DELTA) {
+		rv = target;
 	}
 
-	const framecnt_t declick = std::min ((framecnt_t) 512, nframes);
-	const double     fractional_shift = 1.0 / declick ;
-	gain_t           delta, initial;
+	/* MIDI Velocity scale from initial to LPF target */
+	if (midi_amp) {
+		/* don't Trim midi velocity -- only relevant for Midi on Audio tracks */
+		for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
 
-	if (dir < 0) {
-		/* fade out: remove more and more of delta from initial */
-		delta = -1.0;
-                initial = GAIN_COEFF_UNITY;
-	} else {
-		/* fade in: add more and more of delta from initial */
-		delta = 1.0;
-                initial = GAIN_COEFF_ZERO;
-	}
+			gain_t  delta;
+			if (rv < initial) {
+				/* fade out: remove more and more of delta from initial */
+				delta = -(initial - rv);
+			} else {
+				/* fade in: add more and more of delta from initial */
+				delta = rv - initial;
+			}
 
-	/* Audio Gain */
-	for (BufferSet::audio_iterator i = bufs.audio_begin(); i != bufs.audio_end(); ++i) {
-		Sample* const buffer = i->data();
+			MidiBuffer& mb (*i);
 
-		double fractional_pos = 0.0;
+			for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ) {
+				Evoral::Event<MidiBuffer::TimeType> ev = *m;
 
-		for (pframes_t nx = 0; nx < declick; ++nx) {
-			buffer[nx] *= initial + (delta * fractional_pos);
-			fractional_pos += fractional_shift;
-		}
+				if (ev.is_note_on() || ev.is_note_off()) {
+					const gain_t scale = fabsf (initial + delta * (ev.time() / (double) nframes));
+					if (scale < GAIN_COEFF_SMALL) {
+						m = mb.erase (m);
+						continue;
+					} else if (ev.is_note_on()) {
+						scale_midi_velocity (ev, scale);
+					}
+				}
+				++m;
+			}
 
-		/* now ensure the rest of the buffer has the target value applied, if necessary. */
-		if (declick != nframes) {
-			if (dir < 0) {
-                                memset (&buffer[declick], 0, sizeof (Sample) * (nframes - declick));
+			/* queue MIDI all-note-off when going silent */
+			if (initial > GAIN_COEFF_SMALL && rv <= GAIN_COEFF_SMALL) {
+				for (uint8_t channel = 0; channel <= 0xF; channel++) {
+					uint8_t ev[3] = { ((uint8_t) (MIDI_CMD_CONTROL | channel)), ((uint8_t) MIDI_CTL_SUSTAIN), 0 };
+					mb.push_back (nframes - 1, Evoral::MIDI_EVENT, 3, ev);
+					ev[1] = MIDI_CTL_ALL_NOTES_OFF;
+					mb.push_back (nframes - 1, Evoral::MIDI_EVENT, 3, ev);
+				}
 			}
 		}
 	}
+
+	return rv;
 }
 
-
 gain_t
-Amp::apply_gain (AudioBuffer& buf, framecnt_t sample_rate, framecnt_t nframes, gain_t initial, gain_t target)
+Amp::apply_gain (AudioBuffer& buf, samplecnt_t sample_rate, samplecnt_t nframes, gain_t initial, gain_t target, sampleoffset_t offset)
 {
-        /* Apply a (potentially) declicked gain to the contents of @a buf
+	/* Apply a (potentially) declicked gain to the contents of @a buf
 	 * -- used by MonitorProcessor::run()
 	 */
 
@@ -275,38 +258,38 @@ Amp::apply_gain (AudioBuffer& buf, framecnt_t sample_rate, framecnt_t nframes, g
 
 	// if we don't need to declick, defer to apply_simple_gain
 	if (initial == target) {
-		apply_simple_gain (buf, nframes, target);
+		apply_simple_gain (buf, nframes, target, offset);
 		return target;
 	}
 
-        Sample* const buffer = buf.data();
-	const double a = 156.825 / sample_rate; // 25 Hz LPF, see [other] Amp::apply_gain() above for details
+	Sample* const buffer = buf.data (offset);
+	const gain_t a = 156.825f / (gain_t)sample_rate; // 25 Hz LPF, see [other] Amp::apply_gain() above for details
 
-	double lpf = initial;
-        for (pframes_t nx = 0; nx < nframes; ++nx) {
-                buffer[nx] *= lpf;
+	gain_t lpf = initial;
+	for (pframes_t nx = 0; nx < nframes; ++nx) {
+		buffer[nx] *= lpf;
 		lpf += a * (target - lpf);
-        }
+	}
 
-	if (fabs (lpf - target) < GAIN_COEFF_TINY) return target;
-	if (fabs (lpf) < GAIN_COEFF_TINY) return GAIN_COEFF_ZERO;
+	if (fabsf (lpf - target) < GAIN_COEFF_DELTA) return target;
 	return lpf;
 }
 
 void
-Amp::apply_simple_gain (BufferSet& bufs, framecnt_t nframes, gain_t target, bool midi_amp)
+Amp::apply_simple_gain (BufferSet& bufs, samplecnt_t nframes, gain_t target, bool midi_amp)
 {
 	if (fabsf (target) < GAIN_COEFF_SMALL) {
 
 		if (midi_amp) {
-			/* don't Trim midi velocity -- only relevant for Midi on Audio tracks */
 			for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
 				MidiBuffer& mb (*i);
 
-				for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
-					Evoral::MIDIEvent<MidiBuffer::TimeType> ev = *m;
-					if (ev.is_note_on()) {
-						ev.set_velocity (0);
+				for (MidiBuffer::iterator m = mb.begin(); m != mb.end();) {
+					Evoral::Event<MidiBuffer::TimeType> ev = *m;
+					if (ev.is_note_on() || ev.is_note_off()) {
+						m = mb.erase (m);
+					} else {
+						++m;
 					}
 				}
 			}
@@ -319,14 +302,13 @@ Amp::apply_simple_gain (BufferSet& bufs, framecnt_t nframes, gain_t target, bool
 	} else if (target != GAIN_COEFF_UNITY) {
 
 		if (midi_amp) {
-			/* don't Trim midi velocity -- only relevant for Midi on Audio tracks */
 			for (BufferSet::midi_iterator i = bufs.midi_begin(); i != bufs.midi_end(); ++i) {
 				MidiBuffer& mb (*i);
 
 				for (MidiBuffer::iterator m = mb.begin(); m != mb.end(); ++m) {
-					Evoral::MIDIEvent<MidiBuffer::TimeType> ev = *m;
+					Evoral::Event<MidiBuffer::TimeType> ev = *m;
 					if (ev.is_note_on()) {
-						ev.scale_velocity (fabsf (target));
+						scale_midi_velocity(ev, fabsf (target));
 					}
 				}
 			}
@@ -339,20 +321,33 @@ Amp::apply_simple_gain (BufferSet& bufs, framecnt_t nframes, gain_t target, bool
 }
 
 void
-Amp::apply_simple_gain (AudioBuffer& buf, framecnt_t nframes, gain_t target)
+Amp::apply_simple_gain (AudioBuffer& buf, samplecnt_t nframes, gain_t target, sampleoffset_t offset)
 {
 	if (fabsf (target) < GAIN_COEFF_SMALL) {
-                memset (buf.data(), 0, sizeof (Sample) * nframes);
+		memset (buf.data (offset), 0, sizeof (Sample) * nframes);
 	} else if (target != GAIN_COEFF_UNITY) {
-                apply_gain_to_buffer (buf.data(), nframes, target);
+		apply_gain_to_buffer (buf.data(offset), nframes, target);
 	}
 }
 
 XMLNode&
-Amp::state (bool full_state)
+Amp::state ()
 {
-	XMLNode& node (Processor::state (full_state));
-	node.add_property("type", _gain_control->parameter().type() == GainAutomation ? "amp" : "trim");
+	XMLNode& node (Processor::state ());
+	switch (_gain_control->parameter().type()) {
+		case GainAutomation:
+			node.set_property("type", "amp");
+			break;
+		case TrimAutomation:
+			node.set_property("type", "trim");
+			break;
+		case MainOutVolume:
+			node.set_property("type", "main-volume");
+			break;
+		default:
+			assert (0);
+			break;
+	}
 	node.add_child_nocopy (_gain_control->get_state());
 
 	return node;
@@ -361,13 +356,13 @@ Amp::state (bool full_state)
 int
 Amp::set_state (const XMLNode& node, int version)
 {
-        XMLNode* gain_node;
+	XMLNode* gain_node;
 
 	Processor::set_state (node, version);
 
-        if ((gain_node = node.child (Controllable::xml_node_name.c_str())) != 0) {
-                _gain_control->set_state (*gain_node, version);
-        }
+	if ((gain_node = node.child (Controllable::xml_node_name.c_str ())) != 0) {
+		_gain_control->set_state (*gain_node, version);
+	}
 
 	return 0;
 }
@@ -375,9 +370,12 @@ Amp::set_state (const XMLNode& node, int version)
 /** Write gain automation for this cycle into the buffer previously passed in to
  *  set_gain_automation_buffer (if we are in automation playback mode and the
  *  transport is rolling).
+ *
+ *  After calling this, the gain-automation buffer is valid for the next run.
+ *  so make sure to call ::run() which invalidates the buffer again.
  */
 void
-Amp::setup_gain_automation (framepos_t start_frame, framepos_t end_frame, framecnt_t nframes)
+Amp::setup_gain_automation (samplepos_t start_sample, samplepos_t end_sample, samplecnt_t nframes)
 {
 	Glib::Threads::Mutex::Lock am (control_lock(), Glib::Threads::TRY_LOCK);
 
@@ -386,15 +384,16 @@ Amp::setup_gain_automation (framepos_t start_frame, framepos_t end_frame, framec
 	    && _gain_control->automation_playback())
 	{
 		assert (_gain_automation_buffer);
-		_apply_gain_automation = _gain_control->list()->curve().rt_safe_get_vector (
-			start_frame, end_frame, _gain_automation_buffer, nframes);
-		if (start_frame != _current_automation_frame) {
+
+		_apply_gain_automation = _gain_control->get_masters_curve ( start_sample, end_sample, _gain_automation_buffer, nframes);
+
+		if (start_sample != _current_automation_sample && _session.bounce_processing ()) {
 			_current_gain = _gain_automation_buffer[0];
 		}
-		_current_automation_frame = end_frame;
+		_current_automation_sample = end_sample;
 	} else {
 		_apply_gain_automation = false;
-		_current_automation_frame = INT64_MAX;
+		_current_automation_sample = INT64_MAX;
 	}
 }
 
@@ -404,23 +403,10 @@ Amp::visible() const
 	return true;
 }
 
-std::string
-Amp::value_as_string (boost::shared_ptr<AutomationControl> ac) const
-{
-	if (ac == _gain_control) {
-		char buffer[32];
-		snprintf (buffer, sizeof (buffer), _("%.2fdB"), ac->internal_to_user (ac->get_value ()));
-		return buffer;
-	}
-
-	return Automatable::value_as_string (ac);
-}
-
 /** Sets up the buffer that setup_gain_automation and ::run will use for
  *  gain automationc curves.  Must be called before setup_gain_automation,
  *  and must be called with process lock held.
  */
-
 void
 Amp::set_gain_automation_buffer (gain_t* g)
 {

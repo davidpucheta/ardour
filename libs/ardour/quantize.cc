@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cmath>
 
 #include "pbd/basename.h"
@@ -23,7 +25,7 @@
 #include "ardour/quantize.h"
 #include "ardour/midi_model.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -111,8 +113,8 @@ swing_position (double pos, double grid, double swing, double offset)
 
 Command*
 Quantize::operator () (boost::shared_ptr<MidiModel> model,
-                       Evoral::Beats position,
-                       std::vector<Evoral::Sequence<Evoral::Beats>::Notes>& seqs)
+                       Temporal::Beats position,
+                       std::vector<Evoral::Sequence<Temporal::Beats>::Notes>& seqs)
 {
 	/* TODO: Rewrite this to be precise with fixed point? */
 
@@ -125,7 +127,7 @@ Quantize::operator () (boost::shared_ptr<MidiModel> model,
 
 	MidiModel::NoteDiffCommand* cmd = new MidiModel::NoteDiffCommand (model, "quantize");
 
-	for (std::vector<Evoral::Sequence<Evoral::Beats>::Notes>::iterator s = seqs.begin(); s != seqs.end(); ++s) {
+	for (std::vector<Evoral::Sequence<Temporal::Beats>::Notes>::iterator s = seqs.begin(); s != seqs.end(); ++s) {
 
 		for (Evoral::Sequence<MidiModel::TimeType>::Notes::iterator i = (*s).begin(); i != (*s).end(); ++i) {
 
@@ -167,10 +169,10 @@ Quantize::operator () (boost::shared_ptr<MidiModel> model,
 				delta = new_end - (*i)->end_time().to_double();
 
 				if (fabs (delta) >= _threshold) {
-					Evoral::Beats new_dur(new_end - new_start);
+					Temporal::Beats new_dur(new_end - new_start);
 
 					if (!new_dur) {
-						new_dur = Evoral::Beats(_end_grid);
+						new_dur = Temporal::Beats(_end_grid);
 					}
 
 					cmd->change ((*i), MidiModel::NoteDiffCommand::Length, new_dur);

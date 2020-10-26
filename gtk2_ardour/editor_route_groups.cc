@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-config.h"
@@ -26,8 +28,12 @@
 
 #include "fix_carbon.h"
 
+#include <gtkmm/stock.h>
+
 #include "gtkmm2ext/gtk_ui.h"
 #include "gtkmm2ext/cell_renderer_color_selector.h"
+
+#include "widgets/tooltips.h"
 
 #include "ardour/route_group.h"
 #include "ardour/route.h"
@@ -41,26 +47,25 @@
 #include "gui_thread.h"
 #include "keyboard.h"
 #include "marker.h"
-#include "prompter.h"
 #include "route_group_dialog.h"
 #include "route_time_axis.h"
 #include "time_axis_view.h"
-#include "tooltips.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
 using namespace ARDOUR_UI_UTILS;
+using namespace ArdourWidgets;
 using namespace PBD;
 using namespace Gtk;
 using Gtkmm2ext::Keyboard;
 
 struct ColumnInfo {
-    int         index;
-    const char* label;
-    const char* tooltip;
+	int         index;
+	const char* label;
+	const char* tooltip;
 };
 
 EditorRouteGroups::EditorRouteGroups (Editor* e)
@@ -268,16 +273,13 @@ EditorRouteGroups::button_press_event (GdkEventButton* ev)
 		color_dialog.get_colorsel()->set_current_color (c);
 
 		switch (color_dialog.run()) {
-		case RESPONSE_CANCEL:
-			break;
-		case RESPONSE_ACCEPT:
-			c = color_dialog.get_colorsel()->get_current_color();
-			GroupTabs::set_group_color (group, gdk_color_to_rgba (c));
-			break;
+			case RESPONSE_ACCEPT:
+				c = color_dialog.get_colorsel()->get_current_color();
+				GroupTabs::set_group_color (group, gdk_color_to_rgba (c));
+				break;
 
-		default:
-			break;
-
+			default:
+				break;
 		}
 
 		color_dialog.hide ();
@@ -380,21 +382,22 @@ EditorRouteGroups::row_change (const Gtk::TreeModel::Path&, const Gtk::TreeModel
 	plist.add (Properties::name, string ((*iter)[_columns.text]));
 
 	bool val = (*iter)[_columns.gain];
-	plist.add (Properties::gain, val);
+	plist.add (Properties::group_gain, val);
 	val = (*iter)[_columns.gain_relative];
-	plist.add (Properties::relative, val);
+	plist.add (Properties::group_relative, val);
 	val = (*iter)[_columns.mute];
-	plist.add (Properties::mute, val);
+	plist.add (Properties::group_mute, val);
 	val = (*iter)[_columns.solo];
-	plist.add (Properties::solo, val);
+	plist.add (Properties::group_solo, val);
 	val = (*iter)[_columns.record];
-	plist.add (Properties::recenable, val);
+	plist.add (Properties::group_recenable, val);
 	val = (*iter)[_columns.monitoring];
-	plist.add (Properties::monitoring, val);
+	plist.add (Properties::group_monitoring, val);
 	val = (*iter)[_columns.select];
-	plist.add (Properties::select, val);
+	plist.add (Properties::group_select, val);
 	val = (*iter)[_columns.active_shared];
-	plist.add (Properties::route_active, val);
+	plist.add (Properties::group_route_active, val);
+
 	val = (*iter)[_columns.active_state];
 	plist.add (Properties::active, val);
 	val = (*iter)[_columns.is_visible];
@@ -517,7 +520,6 @@ EditorRouteGroups::property_changed (RouteGroup* group, const PropertyChange&)
 			}
 		}
 	}
-	_editor->_routes->reset_remote_control_ids ();
 }
 
 void
@@ -563,7 +565,7 @@ EditorRouteGroups::set_session (Session* s)
 	}
 
 	PBD::PropertyChange pc;
-	pc.add (Properties::select);
+	pc.add (Properties::group_select);
 	pc.add (Properties::active);
 
 	groups_changed ();
@@ -572,9 +574,7 @@ EditorRouteGroups::set_session (Session* s)
 void
 EditorRouteGroups::run_new_group_dialog ()
 {
-	RouteList rl;
-
-	return _editor->_group_tabs->run_new_group_dialog (rl);
+	return _editor->_group_tabs->run_new_group_dialog (0, false);
 }
 
 /** Called when a model row is deleted, but also when the model is

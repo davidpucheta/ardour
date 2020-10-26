@@ -1,22 +1,23 @@
 /*
-    Copyright (C) 2010-2013 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2014 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <stdio.h>
 #include <string.h>
 #include <sstream>
@@ -27,11 +28,12 @@
 #include "pbd/file_utils.h"
 #include "gui_thread.h"
 
+#include "ardour/filesystem_paths.h"
+
 #include "transcode_ffmpeg.h"
 #include "utils_videotl.h"
-#include "video_tool_paths.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 using namespace VideoUtils;
@@ -50,7 +52,7 @@ TranscodeFfmpeg::TranscodeFfmpeg (std::string f)
 	debug_enable = false;
 #endif
 
-	if (!ArdourVideoToolPaths::transcoder_exe(ffmpeg_exe, ffprobe_exe)) {
+	if (!ARDOUR::ArdourVideoToolPaths::transcoder_exe(ffmpeg_exe, ffprobe_exe)) {
 		warning << string_compose(
 				_(
 					"ffmpeg installation was not found on this system.\n"
@@ -97,7 +99,7 @@ TranscodeFfmpeg::probe ()
 	ffcmd = new ARDOUR::SystemExec(ffprobe_exe, argp);
 	ffcmd->ReadStdout.connect_same_thread (*this, boost::bind (&TranscodeFfmpeg::ffprobeparse, this, _1 ,_2));
 	ffcmd->Terminated.connect (*this, invalidator (*this), boost::bind (&TranscodeFfmpeg::ffexit, this), gui_context());
-	if (ffcmd->start(1)) {
+	if (ffcmd->start (SystemExec::IgnoreAndClose)) {
 		ffexit();
 		return false;
 	}
@@ -186,7 +188,7 @@ TranscodeFfmpeg::probe ()
 					} else if (key == X_("timecode") && m_duration == 0 && m_fps > 0) {
 						int h,m,s; char f[32];
 						if (sscanf(i->at(16).c_str(), "%d:%d:%d:%32s",&h,&m,&s,f) == 4) {
-							m_duration = (ARDOUR::framecnt_t) floor(m_fps * (
+							m_duration = (ARDOUR::samplecnt_t) floor(m_fps * (
 									h * 3600.0
 								+ m * 60.0
 								+ s * 1.0
@@ -294,38 +296,6 @@ TranscodeFfmpeg::default_meta_data ()
 	return ffm;
 }
 
-char *
-TranscodeFfmpeg::format_metadata (std::string key, std::string value)
-{
-	size_t start_pos = 0;
-	std::string v1 = value;
-	while((start_pos = v1.find_first_not_of(
-			"abcdefghijklmnopqrstuvwxyz ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789(),.\"'",
-			start_pos)) != std::string::npos)
-	{
-		v1.replace(start_pos, 1, "_");
-		start_pos += 1;
-	}
-
-	start_pos = 0;
-	while((start_pos = v1.find("\"", start_pos)) != std::string::npos) {
-		v1.replace(start_pos, 1, "\\\"");
-		start_pos += 2;
-	}
-
-	size_t len = key.length() + v1.length() + 4;
-	char *mds = (char*) calloc(len, sizeof(char));
-#ifdef PLATFORM_WINDOWS
-	/* SystemExec::make_wargs() adds quotes around the complete argument
-	 * windows uses CreateProcess() with a parameter string
-	 * (and not an array list of separate arguments)
-	 */
-	snprintf(mds, len, "%s=%s", key.c_str(), v1.c_str());
-#else
-	snprintf(mds, len, "%s=\"%s\"", key.c_str(), v1.c_str());
-#endif
-	return mds;
-}
 
 bool
 TranscodeFfmpeg::encode (std::string outfile, std::string inf_a, std::string inf_v, TranscodeFfmpeg::FFSettings ffs, TranscodeFfmpeg::FFSettings meta, bool map)
@@ -353,7 +323,7 @@ TranscodeFfmpeg::encode (std::string outfile, std::string inf_a, std::string inf
 	}
 	for(TranscodeFfmpeg::FFSettings::const_iterator it = meta.begin(); it != meta.end(); ++it) {
 		argp[a++] = strdup("-metadata");
-		argp[a++] = format_metadata(it->first.c_str(), it->second.c_str());
+		argp[a++] = SystemExec::format_key_value_parameter (it->first.c_str(), it->second.c_str());
 	}
 
 	if (m_fps > 0) {
@@ -417,7 +387,7 @@ TranscodeFfmpeg::encode (std::string outfile, std::string inf_a, std::string inf
 	ffcmd = new ARDOUR::SystemExec(ffmpeg_exe, argp);
 	ffcmd->ReadStdout.connect_same_thread (*this, boost::bind (&TranscodeFfmpeg::ffmpegparse_v, this, _1 ,_2));
 	ffcmd->Terminated.connect (*this, invalidator (*this), boost::bind (&TranscodeFfmpeg::ffexit, this), gui_context());
-	if (ffcmd->start(2)) {
+	if (ffcmd->start (SystemExec::MergeWithStdin)) {
 		ffexit();
 		return false;
 	}
@@ -425,7 +395,7 @@ TranscodeFfmpeg::encode (std::string outfile, std::string inf_a, std::string inf
 }
 
 bool
-TranscodeFfmpeg::extract_audio (std::string outfile, ARDOUR::framecnt_t /*samplerate*/, unsigned int stream)
+TranscodeFfmpeg::extract_audio (std::string outfile, ARDOUR::samplecnt_t /*samplerate*/, unsigned int stream)
 {
 	if (!probeok) return false;
   if (stream >= m_audio.size()) return false;
@@ -465,7 +435,7 @@ TranscodeFfmpeg::extract_audio (std::string outfile, ARDOUR::framecnt_t /*sample
 	ffcmd = new ARDOUR::SystemExec(ffmpeg_exe, argp);
 	ffcmd->ReadStdout.connect_same_thread (*this, boost::bind (&TranscodeFfmpeg::ffmpegparse_a, this, _1 ,_2));
 	ffcmd->Terminated.connect (*this, invalidator (*this), boost::bind (&TranscodeFfmpeg::ffexit, this), gui_context());
-	if (ffcmd->start(2)) {
+	if (ffcmd->start (SystemExec::MergeWithStdin)) {
 		ffexit();
 		return false;
 	}
@@ -525,7 +495,7 @@ TranscodeFfmpeg::transcode (std::string outfile, const int outw, const int outh,
 	ffcmd = new ARDOUR::SystemExec(ffmpeg_exe, argp);
 	ffcmd->ReadStdout.connect_same_thread (*this, boost::bind (&TranscodeFfmpeg::ffmpegparse_v, this, _1 ,_2));
 	ffcmd->Terminated.connect (*this, invalidator (*this), boost::bind (&TranscodeFfmpeg::ffexit, this), gui_context());
-	if (ffcmd->start(2)) {
+	if (ffcmd->start (SystemExec::MergeWithStdin)) {
 		ffexit();
 		return false;
 	}
@@ -566,12 +536,12 @@ TranscodeFfmpeg::ffmpegparse_a (std::string d, size_t /* s */)
 {
 	const char *t;
 	int h,m,s; char f[7];
-	ARDOUR::framecnt_t p = -1;
+	ARDOUR::samplecnt_t p = -1;
 
 	if (!(t=strstr(d.c_str(), "time="))) { return; }
 
 	if (sscanf(t+5, "%d:%d:%d.%s",&h,&m,&s,f) == 4) {
-		p = (ARDOUR::framecnt_t) floor( 100.0 * (
+		p = (ARDOUR::samplecnt_t) floor( 100.0 * (
 		      h * 3600.0
 		    + m * 60.0
 		    + s * 1.0
@@ -598,10 +568,9 @@ TranscodeFfmpeg::ffmpegparse_v (std::string d, size_t /* s */)
 		  printf("ffmpeg: '%s'\n", d.c_str());
 		}
 #endif
-		Progress(0, 0); /* EMIT SIGNAL */
 		return;
 	}
-	ARDOUR::framecnt_t f = atol(d.substr(6));
+	ARDOUR::samplecnt_t f = atol(d.substr(6));
 	if (f == 0) {
 		Progress(0, 0); /* EMIT SIGNAL */
 	} else {

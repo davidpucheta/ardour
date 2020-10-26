@@ -1,8 +1,29 @@
+/*
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #undef  Marker
 #define Marker FuckYouAppleAndYourLackOfNameSpaces
 
 #include <sys/time.h>
 #include <gtkmm/button.h>
+#include <gtkmm/comboboxtext.h>
 #include <gdk/gdkquartz.h>
 
 #include "pbd/convert.h"
@@ -37,14 +58,17 @@
 #import <AudioUnit/AUCocoaUIView.h>
 #import <CoreAudioKit/AUGenericView.h>
 #import <objc/runtime.h>
+
+#ifndef __ppc__
 #include <dispatch/dispatch.h>
+#endif
 
 #undef Marker
 
 #include "keyboard.h"
 #include "utils.h"
 #include "public_editor.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include "gtk2ardour-config.h"
 
@@ -206,11 +230,24 @@ dump_view_tree (NSView* view, int depth, int maxdepth)
  * certainly be possible to make it work for Ardour.
  */
 
-static IMP original_nsview_drawIfNeeded;
-static std::vector<id> plugin_views;
 static uint32_t block_plugin_redraws = 0;
 static const uint32_t minimum_redraw_rate = 30; /* frames per second */
 static const uint32_t block_plugin_redraw_count = 15; /* number of combined plugin redraws to block, if blocking */
+
+#ifdef __ppc__
+
+/* PowerPC versions of OS X do not support libdispatch, which we use below when swizzling objective C. But they also don't have Retina
+ * which is the underlying reason for this code. So just skip it on those CPUs.
+ */
+
+
+static void add_plugin_view (id view) {}
+static void remove_plugin_view (id view) {}
+
+#else
+
+static IMP original_nsview_drawIfNeeded;
+static std::vector<id> plugin_views;
 
 static void add_plugin_view (id view)
 {
@@ -263,6 +300,8 @@ static void interposed_drawIfNeeded (id receiver, SEL selector, NSRect rect)
 }
 
 @end
+
+#endif /* __ppc__ */
 
 /* END OF THE PLUGIN REDRAW HACK */
 
@@ -382,49 +421,17 @@ AUPluginUI::AUPluginUI (boost::shared_ptr<PluginInsert> insert)
 
 	/* stuff some stuff into the top of the window */
 
-	HBox* smaller_hbox = manage (new HBox);
-
-	smaller_hbox->set_spacing (6);
-	smaller_hbox->pack_start (preset_label, false, false, 4);
-	smaller_hbox->pack_start (_preset_modified, false, false);
-	smaller_hbox->pack_start (_preset_combo, false, false);
-	smaller_hbox->pack_start (add_button, false, false);
-#if 0
-	/* Ardour does not currently allow to overwrite existing presets
-	 * see save_property_list() in audio_unit.cc
-	 */
-	smaller_hbox->pack_start (save_button, false, false);
-#endif
-#if 0
-	/* one day these might be useful with an AU plugin, but not yet */
-	smaller_hbox->pack_start (automation_mode_label, false, false);
-	smaller_hbox->pack_start (automation_mode_selector, false, false);
-#endif
-	smaller_hbox->pack_start (reset_button, false, false);
-	smaller_hbox->pack_start (bypass_button, false, true);
-
-	VBox* v1_box = manage (new VBox);
-	VBox* v2_box = manage (new VBox);
-
-	v1_box->pack_start (*smaller_hbox, false, true);
-	v2_box->pack_start (focus_button, false, true);
 
 	top_box.set_homogeneous (false);
 	top_box.set_spacing (6);
 	top_box.set_border_width (6);
+	add_common_widgets (&top_box);
 
-	top_box.pack_end (*v2_box, false, false);
-	top_box.pack_end (*v1_box, false, false);
-
-	set_spacing (6);
+	set_spacing (0);
 	pack_start (top_box, false, false);
 	pack_start (low_box, true, true);
 
-	preset_label.show ();
-	_preset_combo.show ();
-	automation_mode_label.show ();
-	automation_mode_selector.show ();
-	bypass_button.show ();
+	top_box.show_all ();
 	top_box.show ();
 	low_box.show ();
 
@@ -584,7 +591,7 @@ AUPluginUI::create_cocoa_view ()
 
 	if ((result == noErr) && (numberOfClasses > 0) ) {
 
-		DEBUG_TRACE(DEBUG::AudioUnits,
+		DEBUG_TRACE(DEBUG::AudioUnitGUI,
 			    string_compose ( "based on %1, there are %2 cocoa UI classes\n", dataSize, numberOfClasses));
 
 		cocoaViewInfo = (AudioUnitCocoaViewInfo *)malloc(dataSize);
@@ -601,12 +608,12 @@ AUPluginUI::create_cocoa_view ()
 			// we only take the first view in this example.
 			factoryClassName	= (NSString *)cocoaViewInfo->mCocoaAUViewClass[0];
 
-			DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("the factory name is %1 bundle is %2\n",
+			DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("the factory name is %1 bundle is %2\n",
 									[factoryClassName UTF8String], CocoaViewBundlePath));
 
 		} else {
 
-			DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("No cocoaUI property cocoaViewInfo = %1\n", cocoaViewInfo));
+			DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("No cocoaUI property cocoaViewInfo = %1\n", cocoaViewInfo));
 
 			if (cocoaViewInfo != NULL) {
 				free (cocoaViewInfo);
@@ -620,14 +627,14 @@ AUPluginUI::create_cocoa_view ()
 	if (CocoaViewBundlePath && factoryClassName) {
 		NSBundle *viewBundle	= [NSBundle bundleWithPath:[CocoaViewBundlePath path]];
 
-		DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("tried to create bundle, result = %1\n", viewBundle));
+		DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("tried to create bundle, result = %1\n", viewBundle));
 
 		if (viewBundle == NULL) {
 			error << _("AUPluginUI: error loading AU view's bundle") << endmsg;
 			return -1;
 		} else {
 			Class factoryClass = [viewBundle classNamed:factoryClassName];
-			DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("tried to create factory class, result = %1\n", factoryClass));
+			DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("tried to create factory class, result = %1\n", factoryClass));
 			if (!factoryClass) {
 				error << _("AUPluginUI: error getting AU view's factory class from bundle") << endmsg;
 				return -1;
@@ -645,12 +652,12 @@ AUPluginUI::create_cocoa_view ()
 				return -1;
 			}
 
-			DEBUG_TRACE (DEBUG::AudioUnits, "got a factory instance\n");
+			DEBUG_TRACE (DEBUG::AudioUnitGUI, "got a factory instance\n");
 
 			// make a view
 			au_view = [factory uiViewForAudioUnit:*au->get_au() withSize:NSZeroSize];
 
-			DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("view created @ %1\n", au_view));
+			DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("view created @ %1\n", au_view));
 
 			// cleanup
 			[CocoaViewBundlePath release];
@@ -667,10 +674,10 @@ AUPluginUI::create_cocoa_view ()
 
 	if (!wasAbleToLoadCustomView) {
 		// load generic Cocoa view
-		DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("Loading generic view using %1 -> %2\n", au,
+		DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("Loading generic view using %1 -> %2\n", au,
 								au->get_au()));
 		au_view = [[AUGenericView alloc] initWithAudioUnit:*au->get_au()];
-		DEBUG_TRACE (DEBUG::AudioUnits, string_compose ("view created @ %1\n", au_view));
+		DEBUG_TRACE (DEBUG::AudioUnitGUI, string_compose ("view created @ %1\n", au_view));
 		[(AUGenericView *)au_view setShowsExpertParameters:1];
 	}
 
@@ -1071,7 +1078,7 @@ AUPluginUI::parent_cocoa_window ()
 	gtk_widget_translate_coordinates(
 			GTK_WIDGET(low_box.gobj()),
 			GTK_WIDGET(low_box.get_parent()->gobj()),
-			8, 6, &xx, &yy);
+			0, 0, &xx, &yy);
 	[au_view setFrame:NSMakeRect(xx, yy, req_width, req_height)];
 
 	last_au_frame = [au_view frame];

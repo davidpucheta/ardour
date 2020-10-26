@@ -1,28 +1,32 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #ifndef __gtk_ardour_video_server_dialog_h__
 #define __gtk_ardour_video_server_dialog_h__
 
 #include <string>
 
-#include <gtkmm.h>
+#include <gtkmm/adjustment.h>
+#include <gtkmm/button.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/comboboxtext.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/label.h>
+#include <gtkmm/spinbutton.h>
 
 #include "ardour/types.h"
 #include "ardour/template_utils.h"
@@ -33,7 +37,7 @@
  */
 class VideoServerDialog : public ArdourDialog
 {
-  public:
+public:
 	VideoServerDialog (ARDOUR::Session*);
 	~VideoServerDialog ();
 
@@ -44,7 +48,7 @@ class VideoServerDialog : public ArdourDialog
 	int get_cachesize () { return cachesize_spinner.get_value_as_int();}
 	bool show_again () { return showagain_checkbox.get_active();}
 
-  private:
+private:
 	void on_show ();
 	void open_path_dialog ();
 	void open_docroot_dialog ();

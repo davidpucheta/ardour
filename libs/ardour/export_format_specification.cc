@@ -1,37 +1,50 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2013 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2014 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2016-2018 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/export_format_specification.h"
-
-#include <sstream>
 
 #include "ardour/export_format_compatibility.h"
 #include "ardour/export_formats.h"
 #include "ardour/session.h"
+#include "ardour/types_convert.h"
 
 #include "pbd/error.h"
 #include "pbd/xml++.h"
 #include "pbd/enumwriter.h"
-#include "pbd/convert.h"
+#include "pbd/enum_convert.h"
+#include "pbd/string_convert.h"
+#include "pbd/types_convert.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
+
+namespace PBD {
+	DEFINE_ENUM_CONVERT (ARDOUR::ExportFormatBase::FormatId)
+	DEFINE_ENUM_CONVERT (ARDOUR::ExportFormatBase::SampleRate)
+	DEFINE_ENUM_CONVERT (ARDOUR::ExportFormatBase::SampleFormat)
+	DEFINE_ENUM_CONVERT (ARDOUR::ExportFormatBase::DitherType)
+	DEFINE_ENUM_CONVERT (ARDOUR::ExportFormatBase::SRCQuality)
+	DEFINE_ENUM_CONVERT (ARDOUR::ExportFormatBase::Type)
+}
 
 namespace ARDOUR
 {
@@ -47,11 +60,11 @@ ExportFormatSpecification::Time::operator= (AnyTime const & other)
 	return *this;
 }
 
-framecnt_t
-ExportFormatSpecification::Time::get_frames_at (framepos_t position, framecnt_t target_rate) const
+samplecnt_t
+ExportFormatSpecification::Time::get_samples_at (samplepos_t position, samplecnt_t target_rate) const
 {
-	framecnt_t duration = session.any_duration_to_frames (position, *this);
-	return ((double) target_rate / session.frame_rate()) * duration + 0.5;
+	samplecnt_t duration = session.any_duration_to_samples (position, *this);
+	return ((double) target_rate / session.sample_rate()) * duration + 0.5;
 }
 
 XMLNode &
@@ -60,25 +73,25 @@ ExportFormatSpecification::Time::get_state ()
 
 	XMLNode * node = new XMLNode ("Duration");
 
-	node->add_property ("format", enum_2_string (type));
+	node->set_property ("format", type);
 
 	switch (type) {
 	  case Timecode:
-		node->add_property ("hours", to_string (timecode.hours, std::dec));
-		node->add_property ("minutes", to_string (timecode.minutes, std::dec));
-		node->add_property ("seconds", to_string (timecode.seconds, std::dec));
-		node->add_property ("frames", to_string (timecode.frames, std::dec));
+		node->set_property ("hours", timecode.hours);
+		node->set_property ("minutes", timecode.minutes);
+		node->set_property ("seconds", timecode.seconds);
+		node->set_property ("frames", timecode.frames);
 		break;
 	  case BBT:
-		node->add_property ("bars", to_string (bbt.bars, std::dec));
-		node->add_property ("beats", to_string (bbt.beats, std::dec));
-		node->add_property ("ticks", to_string (bbt.ticks, std::dec));
+		node->set_property ("bars", bbt.bars);
+		node->set_property ("beats", bbt.beats);
+		node->set_property ("ticks", bbt.ticks);
 		break;
-	  case Frames:
-		node->add_property ("frames", to_string (frames, std::dec));
+	  case Samples:
+		node->set_property ("samples", samples);
 		break;
 	  case Seconds:
-		node->add_property ("seconds", to_string (seconds, std::dec));
+		node->set_property ("seconds", seconds);
 		break;
 	}
 
@@ -88,63 +101,32 @@ ExportFormatSpecification::Time::get_state ()
 int
 ExportFormatSpecification::Time::set_state (const XMLNode & node)
 {
-	XMLProperty const * prop;
-
-	prop = node.property ("format");
-
-	if (!prop) { return -1; }
-
-	type = (Type) string_2_enum (prop->value(), Type);
+	if (!node.get_property ("format", type)) {
+		return -1;
+	}
 
 	switch (type) {
-	  case Timecode:
-		if ((prop = node.property ("hours"))) {
-			timecode.hours = atoi (prop->value());
-		}
-
-		if ((prop = node.property ("minutes"))) {
-			timecode.minutes = atoi (prop->value());
-		}
-
-		if ((prop = node.property ("seconds"))) {
-			timecode.seconds = atoi (prop->value());
-		}
-
-		if ((prop = node.property ("frames"))) {
-			timecode.frames = atoi (prop->value());
-		}
-
+	case Timecode:
+		node.get_property ("hours", timecode.hours);
+		node.get_property ("minutes", timecode.minutes);
+		node.get_property ("seconds", timecode.seconds);
+		node.get_property ("frames", timecode.frames);
 		break;
 
-	  case BBT:
-		if ((prop = node.property ("bars"))) {
-			bbt.bars = atoi (prop->value());
-		}
-
-		if ((prop = node.property ("beats"))) {
-			bbt.beats = atoi (prop->value());
-		}
-
-		if ((prop = node.property ("ticks"))) {
-			bbt.ticks = atoi (prop->value());
-		}
-
+	case BBT:
+		node.get_property ("bars", bbt.bars);
+		node.get_property ("beats", bbt.beats);
+		node.get_property ("ticks", bbt.ticks);
 		break;
 
-	  case Frames:
-		if ((prop = node.property ("frames"))) {
-			std::istringstream iss (prop->value());
-			iss >> frames;
-		}
-
+	case Samples:
+		node.get_property ("samples", samples);
 		break;
 
-	  case Seconds:
-		if ((prop = node.property ("seconds"))) {
-			seconds = atof (prop->value());
-		}
-
+	case Seconds:
+		node.get_property ("seconds", seconds);
 		break;
+
 	}
 
 	return 0;
@@ -152,9 +134,9 @@ ExportFormatSpecification::Time::set_state (const XMLNode & node)
 
 ExportFormatSpecification::ExportFormatSpecification (Session & s)
 	: session (s)
-
 	, has_sample_format (false)
 	, supports_tagging (false)
+	, _has_codec_quality (false)
 	, _has_broadcast_info (false)
 	, _channel_limit (0)
 	, _dither_type (D_None)
@@ -175,8 +157,12 @@ ExportFormatSpecification::ExportFormatSpecification (Session & s)
 	, _with_cue (false)
 	, _with_mp4chaps (false)
 	, _soundcloud_upload (false)
+	, _demo_noise_level (-20)
+	, _demo_noise_duration (0)
+	, _demo_noise_interval (0)
 	, _command ("")
 	, _analyse (true)
+	, _codec_quality (0)
 {
 	format_ids.insert (F_None);
 	endiannesses.insert (E_FileDefault);
@@ -187,9 +173,9 @@ ExportFormatSpecification::ExportFormatSpecification (Session & s)
 
 ExportFormatSpecification::ExportFormatSpecification (Session & s, XMLNode const & state)
 	: session (s)
-
 	, has_sample_format (false)
 	, supports_tagging (false)
+	, _has_codec_quality (false)
 	, _has_broadcast_info (false)
 	, _channel_limit (0)
 	, _dither_type (D_None)
@@ -210,8 +196,12 @@ ExportFormatSpecification::ExportFormatSpecification (Session & s, XMLNode const
 	, _with_cue (false)
 	, _with_mp4chaps (false)
 	, _soundcloud_upload (false)
+	, _demo_noise_level (-20)
+	, _demo_noise_duration (0)
+	, _demo_noise_interval (0)
 	, _command ("")
 	, _analyse (true)
+	, _codec_quality (0)
 {
 	_silence_beginning.type = Time::Timecode;
 	_silence_end.type = Time::Timecode;
@@ -224,8 +214,16 @@ ExportFormatSpecification::ExportFormatSpecification (ExportFormatSpecification 
 	, session (other.session)
 	, _silence_beginning (other.session)
 	, _silence_end (other.session)
+	, _with_toc (other._with_toc)
+	, _with_cue (other._with_cue)
+	, _with_mp4chaps (other._with_mp4chaps)
 	, _soundcloud_upload (false)
+	, _demo_noise_level (other._demo_noise_level)
+	, _demo_noise_duration (other._demo_noise_duration)
+	, _demo_noise_interval (other._demo_noise_interval)
+	, _command (other._command)
 	, _analyse (other._analyse)
+	, _codec_quality (other._codec_quality)
 {
 	if (modify_name) {
 		set_name (other.name() + " (copy)");
@@ -235,8 +233,8 @@ ExportFormatSpecification::ExportFormatSpecification (ExportFormatSpecification 
 
 	_format_name = other._format_name;
 	has_sample_format = other.has_sample_format;
-
 	supports_tagging = other.supports_tagging;
+	_has_codec_quality = other._has_codec_quality;
 	_has_broadcast_info = other._has_broadcast_info;
 	_channel_limit = other._channel_limit;
 
@@ -275,60 +273,72 @@ ExportFormatSpecification::get_state ()
 	XMLNode * node;
 	XMLNode * root = new XMLNode ("ExportFormatSpecification");
 
-	root->add_property ("name", _name);
-	root->add_property ("id", _id.to_s());
-	root->add_property ("with-cue", _with_cue ? "true" : "false");
-	root->add_property ("with-toc", _with_toc ? "true" : "false");
-	root->add_property ("with-mp4chaps", _with_mp4chaps ? "true" : "false");
-	root->add_property ("command", _command);
+	root->set_property ("name", _name);
+	root->set_property ("id", _id.to_s());
+	root->set_property ("with-cue", _with_cue);
+	root->set_property ("with-toc", _with_toc);
+	root->set_property ("with-mp4chaps", _with_mp4chaps);
+	root->set_property ("command", _command);
+	root->set_property ("analyse", _analyse);
+	root->set_property ("soundcloud-upload", _soundcloud_upload);
 
 	node = root->add_child ("Encoding");
-	node->add_property ("id", enum_2_string (format_id()));
-	node->add_property ("type", enum_2_string (type()));
-	node->add_property ("extension", extension());
-	node->add_property ("name", _format_name);
-	node->add_property ("has-sample-format", has_sample_format ? "true" : "false");
-	node->add_property ("channel-limit", to_string (_channel_limit, std::dec));
+	node->set_property ("id", format_id());
+	node->set_property ("type", type());
+	node->set_property ("extension", extension());
+	node->set_property ("name", _format_name);
+	node->set_property ("has-sample-format", has_sample_format);
+	node->set_property ("channel-limit", _channel_limit);
 
 	node = root->add_child ("SampleRate");
-	node->add_property ("rate", to_string (sample_rate(), std::dec));
+	node->set_property ("rate", sample_rate());
 
 	node = root->add_child ("SRCQuality");
-	node->add_property ("quality", enum_2_string (src_quality()));
+	node->set_property ("quality", src_quality());
+
+	node = root->add_child ("Watermark");
+	node->set_property ("level",    demo_noise_level ());
+	node->set_property ("duration", demo_noise_duration ());
+	node->set_property ("interval", demo_noise_interval ());
+
+	if (_has_codec_quality) {
+		node = root->add_child ("CodecQuality");
+		node->set_property ("quality", codec_quality());
+	}
 
 	XMLNode * enc_opts = root->add_child ("EncodingOptions");
 
-	add_option (enc_opts, "sample-format", enum_2_string (sample_format()));
-	add_option (enc_opts, "dithering", enum_2_string (dither_type()));
-	add_option (enc_opts, "tag-metadata", _tag ? "true" : "false");
-	add_option (enc_opts, "tag-support", supports_tagging ? "true" : "false");
-	add_option (enc_opts, "broadcast-info", _has_broadcast_info ? "true" : "false");
+	add_option (enc_opts, "sample-format", to_string(sample_format()));
+	add_option (enc_opts, "dithering", to_string (dither_type()));
+	add_option (enc_opts, "tag-metadata", to_string (_tag));
+	add_option (enc_opts, "tag-support", to_string (supports_tagging));
+	add_option (enc_opts, "broadcast-info", to_string (_has_broadcast_info));
 
 	XMLNode * processing = root->add_child ("Processing");
 
 	node = processing->add_child ("Normalize");
-	node->add_property ("enabled", normalize() ? "true" : "false");
-	node->add_property ("loudness", normalize_loudness() ? "yes" : "no");
-	node->add_property ("dbfs", to_string (normalize_dbfs(), std::dec));
-	node->add_property ("lufs", to_string (normalize_lufs(), std::dec));
-	node->add_property ("dbtp", to_string (normalize_dbtp(), std::dec));
+	node->set_property ("enabled", normalize());
+	node->set_property ("loudness", normalize_loudness());
+	node->set_property ("dbfs", normalize_dbfs());
+	node->set_property ("lufs", normalize_lufs());
+	node->set_property ("dbtp", normalize_dbtp());
 
 	XMLNode * silence = processing->add_child ("Silence");
 	XMLNode * start = silence->add_child ("Start");
 	XMLNode * end = silence->add_child ("End");
 
 	node = start->add_child ("Trim");
-	node->add_property ("enabled", trim_beginning() ? "true" : "false");
+	node->set_property ("enabled", trim_beginning());
 
 	node = start->add_child ("Add");
-	node->add_property ("enabled", _silence_beginning.not_zero() ? "true" : "false");
+	node->set_property ("enabled", _silence_beginning.not_zero());
 	node->add_child_nocopy (_silence_beginning.get_state());
 
 	node = end->add_child ("Trim");
-	node->add_property ("enabled", trim_end() ? "true" : "false");
+	node->set_property ("enabled", trim_end());
 
 	node = end->add_child ("Add");
-	node->add_property ("enabled", _silence_end.not_zero() ? "true" : "false");
+	node->set_property ("enabled", _silence_end.not_zero());
 	node->add_child_nocopy (_silence_end.get_state());
 
 	return *root;
@@ -337,83 +347,97 @@ ExportFormatSpecification::get_state ()
 int
 ExportFormatSpecification::set_state (const XMLNode & root)
 {
-	XMLProperty const * prop;
 	XMLNode const * child;
-	string value;
+	string str;
 
-	if ((prop = root.property ("name"))) {
-		_name = prop->value();
+	root.get_property ("name", _name);
+
+	if (root.get_property ("id", str)) {
+		_id = str;
 	}
 
-	if ((prop = root.property ("id"))) {
-		_id = prop->value();
-	}
-
-	if ((prop = root.property ("with-cue"))) {
-		_with_cue = string_is_affirmative (prop->value());
-	} else {
+	if (!root.get_property ("with-cue", _with_cue)) {
 		_with_cue = false;
 	}
 
-	if ((prop = root.property ("with-toc"))) {
-		_with_toc = string_is_affirmative (prop->value());
-	} else {
+	if (!root.get_property ("with-toc", _with_toc)) {
 		_with_toc = false;
 	}
 
-	if ((prop = root.property ("with-mp4chaps"))) {
-		_with_mp4chaps = string_is_affirmative (prop->value());
-	} else {
+	if (!root.get_property ("with-mp4chaps", _with_mp4chaps)) {
 		_with_mp4chaps = false;
 	}
 
-	if ((prop = root.property ("command"))) {
-		_command = prop->value();
-	} else {
+	if (!root.get_property ("command", _command)) {
 		_command = "";
+	}
+
+	if (!root.get_property ("analyse", _analyse)) {
+		_analyse = false;
+	}
+
+	if (!root.get_property ("soundcloud-upload", _soundcloud_upload)) {
+		_soundcloud_upload = false;
 	}
 
 	/* Encoding and SRC */
 
 	if ((child = root.child ("Encoding"))) {
-		if ((prop = child->property ("id"))) {
-			set_format_id ((FormatId) string_2_enum (prop->value(), FormatId));
+		FormatId fid;
+		if (child->get_property ("id", fid)) {
+			set_format_id (fid);
 		}
 
-		if ((prop = child->property ("type"))) {
-			set_type ((Type) string_2_enum (prop->value(), Type));
+		ExportFormatBase::Type type;
+		if (child->get_property ("type", type)) {
+			set_type (type);
 		}
 
-		if ((prop = child->property ("extension"))) {
-			set_extension (prop->value());
+		if (child->get_property ("extension", str)) {
+			set_extension (str);
 		}
 
-		if ((prop = child->property ("name"))) {
-			_format_name = prop->value();
-		}
-
-		if ((prop = child->property ("has-sample-format"))) {
-			has_sample_format = string_is_affirmative (prop->value());
-		}
-
-		if ((prop = child->property ("has-sample-format"))) {
-			has_sample_format = string_is_affirmative (prop->value());
-		}
-
-		if ((prop = child->property ("channel-limit"))) {
-			_channel_limit = atoi (prop->value());
-		}
+		child->get_property ("name", _format_name);
+		child->get_property ("has-sample-format", has_sample_format);
+		child->get_property ("channel-limit", _channel_limit);
 	}
 
 	if ((child = root.child ("SampleRate"))) {
-		if ((prop = child->property ("rate"))) {
-			set_sample_rate ( (SampleRate) string_2_enum (prop->value(), SampleRate));
+		SampleRate rate;
+		if (child->get_property ("rate", rate)) {
+			set_sample_rate (rate);
 		}
 	}
 
 	if ((child = root.child ("SRCQuality"))) {
-		if ((prop = child->property ("quality"))) {
-			_src_quality = (SRCQuality) string_2_enum (prop->value(), SRCQuality);
+		child->get_property ("quality", _src_quality);
+	}
+
+	if ((child = root.child ("Watermark"))) {
+		child->get_property ("level", _demo_noise_level);
+		child->get_property ("duration", _demo_noise_duration);
+		child->get_property ("interval", _demo_noise_interval);
+	}
+
+	if ((child = root.child ("CodecQuality"))) {
+		child->get_property ("quality", _codec_quality);
+		_has_codec_quality = true;
+	} else {
+		_has_codec_quality = false;
+	}
+
+	/* fixup codec quality for old states */
+	if (!_has_codec_quality) {
+		/* We'd need an instance of ExportFormatManager to look up
+		 * defaults for a given type -- in the future there may even be
+		 * difference qualities depending on sub-type, so we just
+		 * hardcode them here for the time being.
+		 */
+		if (format_id() == F_FFMPEG) {
+			_codec_quality = -2; // ExportFormatOggVorbis::default_codec_quality();
+		}
+		else if (format_id() == F_Ogg) {
+			_codec_quality = 40; // ExportFormatFFMPEG::default_codec_quality();
 		}
 	}
 
@@ -422,9 +446,9 @@ ExportFormatSpecification::set_state (const XMLNode & root)
 	if ((child = root.child ("EncodingOptions"))) {
 		set_sample_format ((SampleFormat) string_2_enum (get_option (child, "sample-format"), SampleFormat));
 		set_dither_type ((DitherType) string_2_enum (get_option (child, "dithering"), DitherType));
-		set_tag (!(get_option (child, "tag-metadata").compare ("true")));
-		supports_tagging = (!(get_option (child, "tag-support").compare ("true")));
-		_has_broadcast_info = (!(get_option (child, "broadcast-info").compare ("true")));
+		set_tag (string_to<bool>(get_option (child, "tag-metadata")));
+		supports_tagging = string_to<bool>(get_option (child, "tag-support"));
+		_has_broadcast_info = string_to<bool>(get_option (child, "broadcast-info"));
 	}
 
 	/* Processing */
@@ -433,30 +457,13 @@ ExportFormatSpecification::set_state (const XMLNode & root)
 	if (!proc) { std::cerr << X_("Could not load processing for export format") << std::endl; return -1; }
 
 	if ((child = proc->child ("Normalize"))) {
-		if ((prop = child->property ("enabled"))) {
-			_normalize = (!prop->value().compare ("true"));
-		}
-
+		child->get_property ("enabled", _normalize);
 		// old formats before ~ 4.7-930ish
-		if ((prop = child->property ("target"))) {
-			_normalize_dbfs = atof (prop->value());
-		}
-
-		if ((prop = child->property ("loudness"))) {
-			_normalize_loudness = string_is_affirmative (prop->value());
-		}
-
-		if ((prop = child->property ("dbfs"))) {
-			_normalize_dbfs = atof (prop->value());
-		}
-
-		if ((prop = child->property ("lufs"))) {
-			_normalize_lufs = atof (prop->value());
-		}
-
-		if ((prop = child->property ("dbtp"))) {
-			_normalize_dbtp = atof (prop->value());
-		}
+		child->get_property ("target", _normalize_dbfs);
+		child->get_property ("loudness", _normalize_loudness);
+		child->get_property ("dbfs", _normalize_dbfs);
+		child->get_property ("lufs", _normalize_lufs);
+		child->get_property ("dbtp", _normalize_dbtp);
 	}
 
 	XMLNode const * silence = proc->child ("Silence");
@@ -469,40 +476,33 @@ ExportFormatSpecification::set_state (const XMLNode & root)
 	/* Silence start */
 
 	if ((child = start->child ("Trim"))) {
-		if ((prop = child->property ("enabled"))) {
-			_trim_beginning = (!prop->value().compare ("true"));
-		}
+		child->get_property ("enabled", _trim_beginning);
 	}
 
+	bool enabled;
 	if ((child = start->child ("Add"))) {
-		if ((prop = child->property ("enabled"))) {
-			if (!prop->value().compare ("true")) {
-				if ((child = child->child ("Duration"))) {
-					_silence_beginning.set_state (*child);
-				}
-			} else {
-				_silence_beginning.type = Time::Timecode;
+		if (child->get_property ("enabled", enabled) && enabled) {
+			if ((child = child->child ("Duration"))) {
+				_silence_beginning.set_state (*child);
 			}
+		} else {
+			_silence_beginning.type = Time::Timecode;
 		}
 	}
 
 	/* Silence end */
 
 	if ((child = end->child ("Trim"))) {
-		if ((prop = child->property ("enabled"))) {
-			_trim_end = (!prop->value().compare ("true"));
-		}
+		child->get_property ("enabled", _trim_end);
 	}
 
 	if ((child = end->child ("Add"))) {
-		if ((prop = child->property ("enabled"))) {
-			if (!prop->value().compare ("true")) {
-				if ((child = child->child ("Duration"))) {
-					_silence_end.set_state (*child);
-				}
-			} else {
-				_silence_end.type = Time::Timecode;
+		if (child->get_property ("enabled", enabled) && enabled) {
+			if ((child = child->child ("Duration"))) {
+				_silence_end.set_state (*child);
 			}
+		} else {
+				_silence_end.type = Time::Timecode;
 		}
 	}
 
@@ -565,7 +565,10 @@ void
 ExportFormatSpecification::set_format (boost::shared_ptr<ExportFormat> format)
 {
 	if (format) {
-		set_format_id (format->get_format_id ());
+		FormatId new_fmt = format->get_format_id ();
+		bool fmt_changed = format_id() != new_fmt;
+		set_format_id (new_fmt);
+
 		set_type (format->get_type());
 		set_extension (format->extension());
 
@@ -581,6 +584,13 @@ ExportFormatSpecification::set_format (boost::shared_ptr<ExportFormat> format)
 			_has_broadcast_info = true;
 		}
 
+		_has_codec_quality = format->has_codec_quality();
+		if (!_has_codec_quality) {
+			_codec_quality = 0;
+		} else if (fmt_changed) {
+			_codec_quality = boost::dynamic_pointer_cast<HasCodecQuality> (format)->default_codec_quality();
+		}
+
 		supports_tagging = format->supports_tagging ();
 		_channel_limit = format->get_channel_limit();
 
@@ -593,6 +603,7 @@ ExportFormatSpecification::set_format (boost::shared_ptr<ExportFormat> format)
 		has_sample_format = false;
 		supports_tagging = false;
 		_channel_limit = 0;
+		_codec_quality = 0;
 		_format_name = "";
 	}
 }
@@ -666,8 +677,8 @@ ExportFormatSpecification::description (bool include_name)
 		components.push_back ("CUE");
 	}
 
-	if (_with_mp4chaps) {
-		components.push_back ("MP4ch");
+	if (_demo_noise_duration > 0 && _demo_noise_interval > 0) {
+		components.push_back ("Demo-Noise");
 	}
 
 	if (!_command.empty()) {
@@ -690,8 +701,8 @@ void
 ExportFormatSpecification::add_option (XMLNode * node, std::string const & name, std::string const & value)
 {
 	node = node->add_child ("Option");
-	node->add_property ("name", name);
-	node->add_property ("value", value);
+	node->set_property ("name", name);
+	node->set_property ("value", value);
 }
 
 std::string
@@ -700,11 +711,10 @@ ExportFormatSpecification::get_option (XMLNode const * node, std::string const &
 	XMLNodeList list (node->children ("Option"));
 
 	for (XMLNodeList::iterator it = list.begin(); it != list.end(); ++it) {
-		XMLProperty * prop = (*it)->property ("name");
-		if (prop && !name.compare (prop->value())) {
-			prop = (*it)->property ("value");
-			if (prop) {
-				return prop->value();
+		std::string str;
+		if ((*it)->get_property ("name", str) && name == str) {
+			if ((*it)->get_property ("value", str)) {
+				return str;
 			}
 		}
 	}

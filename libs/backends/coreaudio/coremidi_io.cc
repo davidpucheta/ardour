@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <sstream>
@@ -57,7 +57,7 @@ static void notifyProc (const MIDINotification *message, void *refCon) {
 static void print_packet (const MIDIPacket *p) {
 	fprintf (stderr, "CoreMIDI: Packet %d bytes [ ", p->length);
 	for (int bb = 0; bb < p->length; ++bb) {
-		fprintf (stderr, "%02x ", ((uint8_t*)p->data)[bb]);
+		fprintf (stderr, "%02x ", ((const uint8_t*)p->data)[bb]);
 	}
 	fprintf (stderr, "]\n");
 }
@@ -82,7 +82,7 @@ static void midiInputCallback(const MIDIPacketList *list, void *procRef, void *s
 #endif
 		return;
 	}
-	RingBuffer<uint8_t> * rb  = static_cast<RingBuffer < uint8_t > *> (srcRef);
+	PBD::RingBuffer<uint8_t> * rb  = static_cast<PBD::RingBuffer < uint8_t > *> (srcRef);
 	if (!rb) {
 #ifndef NDEBUG
 		if (_debug_mode & 4) {
@@ -153,7 +153,7 @@ CoreMidiIo::CoreMidiIo()
 	pthread_mutex_init (&_discovery_lock, 0);
 
 #ifndef NDEBUG
-	const char *p = getenv ("COREMIDIDEBUG");
+	const char *p = getenv ("ARDOUR_COREMIDI_DEBUG");
 	if (p && *p) _debug_mode = atoi (p);
 #endif
 }
@@ -268,13 +268,21 @@ CoreMidiIo::recv_event (uint32_t port, double cycle_time_us, uint64_t &time, uin
 		if ((*it)->timeStamp < end) {
 			if ((*it)->timeStamp < start) {
 				uint64_t dt = AudioConvertHostTimeToNanos(start - (*it)->timeStamp);
-				if (dt > 1e7) { // 10ms,
+				if (dt > 1e7 && (*it)->timeStamp != 0) { // 10ms slack and a timestamp is given
 #ifndef NDEBUG
 					printf("Dropped Stale Midi Event. dt:%.2fms\n", dt * 1e-6);
 #endif
 					it = _input_queue[port].erase(it);
 					continue;
 				} else {
+					/* events without a valid timestamp, or events that arrived
+					 * less than 10ms in the past are allowed and
+					 * queued at the beginning of the cycle:
+					 * time (relative to cycle start) = 0
+					 *
+					 * The latter use needed for the "Avid Artist" Control Surface
+					 * the OSX driver sends no timestamps.
+					 */
 #if 0
 					printf("Stale Midi Event. dt:%.2fms\n", dt * 1e-6);
 #endif
@@ -313,10 +321,10 @@ CoreMidiIo::send_events (uint32_t port, double timescale, const void *b)
 	MIDIPacket *cur = MIDIPacketListInit(mpl);
 
 	for (CoreMidiBuffer::const_iterator mit = src->begin (); mit != src->end (); ++mit) {
-		assert((*mit)->size() < 256);
+		assert(mit->size() < 256);
 		cur = MIDIPacketListAdd(mpl, sizeof(bytes), cur,
-				AudioConvertNanosToHostTime(ts + (*mit)->timestamp() / timescale),
-				(*mit)->size(), (*mit)->data());
+				AudioConvertNanosToHostTime(ts + mit->timestamp() / timescale),
+				mit->size(), mit->data());
 		if (!cur) {
 #ifndef DEBUG
 			printf("CoreMidi: Packet list overflow, dropped events\n");
@@ -442,7 +450,7 @@ CoreMidiIo::discover()
 		_input_ports = (MIDIPortRef *) malloc (srcCount * sizeof(MIDIPortRef));
 		_input_endpoints = (MIDIEndpointRef*) malloc (srcCount * sizeof(MIDIEndpointRef));
 		_input_queue = (CoreMIDIQueue*) calloc (srcCount, sizeof(CoreMIDIQueue));
-		_rb = (RingBuffer<uint8_t> **) malloc (srcCount * sizeof(RingBuffer<uint8_t>*));
+		_rb = (PBD::RingBuffer<uint8_t> **) malloc (srcCount * sizeof(PBD::RingBuffer<uint8_t>*));
 	}
 	if (dstCount > 0) {
 		_output_ports = (MIDIPortRef *) malloc (dstCount * sizeof(MIDIPortRef));
@@ -465,7 +473,7 @@ CoreMidiIo::discover()
 			fprintf(stderr, "Cannot create Midi Output\n");
 			continue;
 		}
-		_rb[_n_midi_in] = new RingBuffer<uint8_t>(32768);
+		_rb[_n_midi_in] = new PBD::RingBuffer<uint8_t>(32768);
 		_input_queue[_n_midi_in] = CoreMIDIQueue();
 		MIDIPortConnectSource(_input_ports[_n_midi_in], src, (void*) _rb[_n_midi_in]);
 		CFRelease(port_name);

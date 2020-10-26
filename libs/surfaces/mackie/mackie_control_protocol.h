@@ -1,20 +1,25 @@
 /*
-    Copyright (C) 2006,2007 John Anderson
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2007 John Anderson
+ * Copyright (C) 2007-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2016 Len Ovens <len@ovenwerks.net>
+ * Copyright (C) 2016-2018 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef ardour_mackie_control_protocol_h
 #define ardour_mackie_control_protocol_h
@@ -41,6 +46,7 @@
 #include "timer.h"
 #include "device_info.h"
 #include "device_profile.h"
+#include "subview.h"
 
 namespace ARDOUR {
 	class AutomationControl;
@@ -62,26 +68,6 @@ namespace Mackie {
 }
 
 gboolean ipmidi_input_handler (GIOChannel*, GIOCondition condition, void *data);
-
-/**
-	This handles the plugin duties, and the midi encoding and decoding,
-	and the signal callbacks, mostly from ARDOUR::Route.
-
-	The model of the control surface is handled by classes in controls.h
-
-	What happens is that each strip on the control surface has
-	a corresponding route in ControlProtocol::route_table. When
-	an incoming midi message is signaled, the correct route
-	is looked up, and the relevant changes made to it.
-
-	For each route currently in route_table, there's a RouteSignal object
-	which encapsulates the signals that indicate that there are changes
-	to be sent to the surface. The signals are handled by this class.
-
-	Calls to signal handlers pass a Route object which is used to look
-	up the relevant Strip in Surface. Then the state is retrieved from
-	the Route and encoded as the correct midi message.
-*/
 
 struct MackieControlUIRequest : public BaseUI::BaseRequestObject {
 public:
@@ -115,14 +101,6 @@ class MackieControlProtocol
 		Plugins,
 	};
 
-	enum SubViewMode {
-		None,
-		EQ,
-		Dynamics,
-		Sends,
-		TrackView,
-	};
-
 	enum FlipMode {
 		Normal, /* fader controls primary, vpot controls secondary */
 		Mirror, /* fader + vpot control secondary */
@@ -149,26 +127,23 @@ class MackieControlProtocol
 
 	FlipMode flip_mode () const { return _flip_mode; }
 	ViewMode view_mode () const { return _view_mode; }
-	SubViewMode subview_mode () const { return _subview_mode; }
-	static bool subview_mode_would_be_ok (SubViewMode, boost::shared_ptr<ARDOUR::Route>);
-	boost::shared_ptr<ARDOUR::Route> subview_route() const;
+	boost::shared_ptr<Mackie::Subview> subview() { return _subview; }
 	bool zoom_mode () const { return modifier_state() & MODIFIER_ZOOM; }
 	bool     metering_active () const { return _metering_active; }
 
-	bool is_track (boost::shared_ptr<ARDOUR::Route>) const;
-	bool is_audio_track (boost::shared_ptr<ARDOUR::Route>) const;
-	bool is_midi_track (boost::shared_ptr<ARDOUR::Route>) const;
-	bool selected (boost::shared_ptr<ARDOUR::Route>) const;
-	bool is_hidden (boost::shared_ptr<ARDOUR::Route>) const;
-	bool is_mapped (boost::shared_ptr<ARDOUR::Route>) const;
-	boost::shared_ptr<ARDOUR::Route> first_selected_route () const;
+	bool is_track (boost::shared_ptr<ARDOUR::Stripable>) const;
+	bool is_audio_track (boost::shared_ptr<ARDOUR::Stripable>) const;
+	bool is_midi_track (boost::shared_ptr<ARDOUR::Stripable>) const;
+	bool is_mapped (boost::shared_ptr<ARDOUR::Stripable>) const;
+	boost::shared_ptr<ARDOUR::Stripable> first_selected_stripable () const;
 
 	void check_fader_automation_state ();
 	void update_fader_automation_state ();
 	void set_automation_state (ARDOUR::AutoState);
 
 	void set_view_mode (ViewMode);
-	int set_subview_mode (SubViewMode, boost::shared_ptr<ARDOUR::Route>);
+	bool set_subview_mode (Mackie::Subview::Mode, boost::shared_ptr<ARDOUR::Stripable>);
+	bool redisplay_subview_mode ();
 	void set_flip_mode (FlipMode);
 	void display_view_mode ();
 
@@ -191,6 +166,7 @@ class MackieControlProtocol
 	boost::shared_ptr<Mackie::Surface> nth_surface (uint32_t) const;
 
 	uint32_t global_index (Mackie::Strip&);
+	uint32_t global_index_locked (Mackie::Strip&);
 
 	std::list<boost::shared_ptr<ARDOUR::Bundle> > bundles ();
 
@@ -205,17 +181,19 @@ class MackieControlProtocol
 
 	void handle_button_event (Mackie::Surface&, Mackie::Button& button, Mackie::ButtonState);
 
-	void notify_subview_route_deleted ();
-	void notify_route_added_or_removed ();
-	void notify_route_added (ARDOUR::RouteList &);
-	void notify_remote_id_changed();
+	void notify_subview_stripable_deleted ();
+	void notify_stripable_removed ();
+	void notify_routes_added (ARDOUR::RouteList &);
+	void notify_vca_added (ARDOUR::VCAList &);
+
+	void notify_presentation_info_changed(PBD::PropertyChange const &);
 
 	void recalibrate_faders ();
 	void toggle_backlight ();
 	void set_touch_sensitivity (int);
 
-	/// rebuild the current bank. Called on route added/removed and
-	/// remote id changed.
+	/// rebuild the current bank. Called on route or vca added/removed and
+	/// presentation info changed.
 	void refresh_current_bank();
 
 	// button-related signals
@@ -238,7 +216,7 @@ class MackieControlProtocol
 	void update_global_led (int id, Mackie::LedState);
 
 	ARDOUR::Session & get_session() { return *session; }
-	framepos_t transport_frame() const;
+	samplepos_t transport_sample() const;
 
 	int modifier_state() const { return _modifier_state; }
 	int main_modifier_state() const { return _modifier_state & MAIN_MODIFIER_MASK; }
@@ -247,11 +225,11 @@ class MackieControlProtocol
 
 	void add_down_button (ARDOUR::AutomationType, int surface, int strip);
 	void remove_down_button (ARDOUR::AutomationType, int surface, int strip);
-	ControlList down_controls (ARDOUR::AutomationType);
+	ControlList down_controls (ARDOUR::AutomationType, uint32_t pressed);
 
 	void add_down_select_button (int surface, int strip);
 	void remove_down_select_button (int surface, int strip);
-	void select_range ();
+	void select_range (uint32_t pressed);
 
 	int16_t ipmidi_base() const { return _ipmidi_base; }
 	void    set_ipmidi_base (int16_t);
@@ -274,11 +252,11 @@ class MackieControlProtocol
 	void zero_all();
 
 	/**
-	   Fetch the set of routes to be considered for control by the
+	   Fetch the set of Stripables to be considered for control by the
 	   surface. Excluding master, hidden and control routes, and inactive routes
 	*/
-	typedef std::vector<boost::shared_ptr<ARDOUR::Route> > Sorted;
-	Sorted get_sorted_routes();
+	typedef std::vector<boost::shared_ptr<ARDOUR::Stripable> > Sorted;
+	Sorted get_sorted_stripables();
 
 	// bank switching
 	int switch_banks (uint32_t first_remote_id, bool force = false);
@@ -288,15 +266,15 @@ class MackieControlProtocol
 	// also called from poll_automation to update timecode display
 	void update_timecode_display();
 
-	std::string format_bbt_timecode (ARDOUR::framepos_t now_frame);
-	std::string format_timecode_timecode (ARDOUR::framepos_t now_frame);
+	std::string format_bbt_timecode (ARDOUR::samplepos_t now_sample);
+	std::string format_timecode_timecode (ARDOUR::samplepos_t now_sample);
 
 	void do_request (MackieControlUIRequest*);
 	int stop ();
 
 	void thread_init ();
 
-	bool route_is_locked_to_strip (boost::shared_ptr<ARDOUR::Route>) const;
+	bool stripable_is_locked_to_strip (boost::shared_ptr<ARDOUR::Stripable>) const;
 
   private:
 
@@ -324,15 +302,14 @@ class MackieControlProtocol
 	uint32_t                 _current_initial_bank;
 	PBD::ScopedConnectionList audio_engine_connections;
 	PBD::ScopedConnectionList session_connections;
-	PBD::ScopedConnectionList route_connections;
-	PBD::ScopedConnectionList subview_route_connections;
+	PBD::ScopedConnectionList stripable_connections;
 	PBD::ScopedConnectionList gui_connections;
 	PBD::ScopedConnectionList fader_automation_connections;
 	// timer for two quick marker left presses
 	Mackie::Timer            _frm_left_last;
 	// last written timecode string
 	std::string              _timecode_last;
-	framepos_t				 _frame_last;
+	samplepos_t				 _sample_last;
 	// Which timecode are we displaying? BBT or Timecode
 	ARDOUR::AnyTime::Type    _timecode_type;
 	// Bundle to represent our input ports
@@ -343,8 +320,7 @@ class MackieControlProtocol
 	bool                     _scrub_mode;
 	FlipMode                 _flip_mode;
 	ViewMode                 _view_mode;
-	SubViewMode              _subview_mode;
-	boost::shared_ptr<ARDOUR::Route> _subview_route;
+	boost::shared_ptr<Mackie::Subview> _subview;
 	int                      _current_selected_track;
 	int                      _modifier_state;
 	ButtonMap                 button_map;
@@ -352,7 +328,6 @@ class MackieControlProtocol
 	bool                      needs_ipmidi_restart;
 	bool                     _metering_active;
 	bool                     _initialized;
-	ARDOUR::RouteNotificationList _last_selected_routes;
 	XMLNode*                 configuration_state;
 	int                      state_version;
 	int                      _last_bank[9];
@@ -371,16 +346,14 @@ class MackieControlProtocol
 	int create_surfaces ();
 	bool periodic();
 	bool redisplay();
-	bool redisplay_subview_mode ();
 	bool hui_heartbeat ();
 	void build_gui ();
 	bool midi_input_handler (Glib::IOCondition ioc, MIDI::Port* port);
 	void clear_ports ();
 	void clear_surfaces ();
-	void force_special_route_to_strip (boost::shared_ptr<ARDOUR::Route> r, uint32_t surface, uint32_t strip_number);
+	void force_special_stripable_to_strip (boost::shared_ptr<ARDOUR::Stripable> r, uint32_t surface, uint32_t strip_number);
 	void build_button_map ();
-	void gui_track_selection_changed (ARDOUR::RouteNotificationListPtr, bool save_list);
-	void _gui_track_selection_changed (ARDOUR::RouteNotificationList*, bool save_list, bool gui_did_change);
+	void stripable_selection_changed ();
 	int ipmidi_restart ();
         void initialize ();
         int set_device_info (const std::string& device_name);
@@ -398,7 +371,7 @@ class MackieControlProtocol
 	DownButtonMap  _down_buttons;
 	DownButtonList _down_select_buttons;
 
-	void pull_route_range (DownButtonList&, ARDOUR::RouteList&);
+	void pull_stripable_range (DownButtonList&, ARDOUR::StripableList&, uint32_t pressed);
 
 	/* implemented button handlers */
 	Mackie::LedState stop_press(Mackie::Button &);
@@ -462,22 +435,22 @@ class MackieControlProtocol
 	Mackie::LedState flip_release (Mackie::Button &);
 	Mackie::LedState name_value_press (Mackie::Button &);
 	Mackie::LedState name_value_release (Mackie::Button &);
-	Mackie::LedState F1_press (Mackie::Button &);
-	Mackie::LedState F1_release (Mackie::Button &);
-	Mackie::LedState F2_press (Mackie::Button &);
-	Mackie::LedState F2_release (Mackie::Button &);
-	Mackie::LedState F3_press (Mackie::Button &);
-	Mackie::LedState F3_release (Mackie::Button &);
-	Mackie::LedState F4_press (Mackie::Button &);
-	Mackie::LedState F4_release (Mackie::Button &);
-	Mackie::LedState F5_press (Mackie::Button &);
-	Mackie::LedState F5_release (Mackie::Button &);
-	Mackie::LedState F6_press (Mackie::Button &);
-	Mackie::LedState F6_release (Mackie::Button &);
-	Mackie::LedState F7_press (Mackie::Button &);
-	Mackie::LedState F7_release (Mackie::Button &);
-	Mackie::LedState F8_press (Mackie::Button &);
-	Mackie::LedState F8_release (Mackie::Button &);
+//	Mackie::LedState F1_press (Mackie::Button &);
+//	Mackie::LedState F1_release (Mackie::Button &);
+//	Mackie::LedState F2_press (Mackie::Button &);
+//	Mackie::LedState F2_release (Mackie::Button &);
+//	Mackie::LedState F3_press (Mackie::Button &);
+//	Mackie::LedState F3_release (Mackie::Button &);
+//	Mackie::LedState F4_press (Mackie::Button &);
+//	Mackie::LedState F4_release (Mackie::Button &);
+//	Mackie::LedState F5_press (Mackie::Button &);
+//	Mackie::LedState F5_release (Mackie::Button &);
+//	Mackie::LedState F6_press (Mackie::Button &);
+//	Mackie::LedState F6_release (Mackie::Button &);
+//	Mackie::LedState F7_press (Mackie::Button &);
+//	Mackie::LedState F7_release (Mackie::Button &);
+//	Mackie::LedState F8_press (Mackie::Button &);
+//	Mackie::LedState F8_release (Mackie::Button &);
 	Mackie::LedState touch_press (Mackie::Button &);
 	Mackie::LedState touch_release (Mackie::Button &);
 	Mackie::LedState enter_press (Mackie::Button &);

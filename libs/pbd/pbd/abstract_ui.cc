@@ -1,20 +1,25 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2007-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <unistd.h>
 #include <iostream>
@@ -26,7 +31,7 @@
 #include "pbd/failed_constructor.h"
 #include "pbd/debug.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #ifdef COMPILER_MSVC
 #include <ardourext/misc.h>  // Needed for 'DECLARE_DEFAULT_COMPARISONS'. Objects in an STL container can be
@@ -78,9 +83,20 @@ AbstractUI<RequestObject>::AbstractUI (const string& name)
 	vector<EventLoop::ThreadBufferMapping> tbm = EventLoop::get_request_buffers_for_target_thread (event_loop_name());
 
 	{
-		Glib::Threads::Mutex::Lock lm (request_buffer_map_lock);
+		Glib::Threads::Mutex::Lock rbml (request_buffer_map_lock);
 		for (vector<EventLoop::ThreadBufferMapping>::iterator t = tbm.begin(); t != tbm.end(); ++t) {
 			request_buffers[t->emitting_thread] = static_cast<RequestBuffer*> (t->request_buffer);
+		}
+	}
+}
+
+template <typename RequestObject>
+AbstractUI<RequestObject>::~AbstractUI ()
+{
+	for (RequestBufferMapIterator i = request_buffers.begin(); i != request_buffers.end(); ++i) {
+		if ((*i).second->dead) {
+			EventLoop::remove_request_buffer_from_map ((*i).second);
+			delete (*i).second;
 		}
 	}
 }
@@ -113,7 +129,7 @@ AbstractUI<RequestObject>::register_thread (pthread_t thread_id, string thread_n
 
 		DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("create new request buffer for %1 in %2\n", thread_name, event_loop_name()));
 
-		b = new RequestBuffer (num_requests);
+		b = new RequestBuffer (num_requests); // XXX leaks
 		/* set this thread's per_thread_request_buffer to this new
 		   queue/ringbuffer. remember that only this thread will
 		   get this queue when it calls per_thread_request_buffer.get()
@@ -135,7 +151,7 @@ AbstractUI<RequestObject>::register_thread (pthread_t thread_id, string thread_n
 		   only at thread initialization time, not repeatedly,
 		   and so this is of little consequence.
 		*/
-		Glib::Threads::Mutex::Lock lm (request_buffer_map_lock);
+		Glib::Threads::Mutex::Lock rbml (request_buffer_map_lock);
 		request_buffers[thread_id] = b;
 	}
 
@@ -168,7 +184,6 @@ AbstractUI<RequestObject>::get_request (RequestType rt)
 		DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1: allocated per-thread request of type %2, caller %3\n", event_loop_name(), rt, pthread_name()));
 
 		vec.buf[0]->type = rt;
-		vec.buf[0]->valid = true;
 		return vec.buf[0];
 	}
 
@@ -192,14 +207,35 @@ AbstractUI<RequestObject>::handle_ui_requests ()
 	RequestBufferVector vec;
 
 	/* check all registered per-thread buffers first */
+	Glib::Threads::Mutex::Lock rbml (request_buffer_map_lock);
 
-	request_buffer_map_lock.lock ();
+	/* clean up any dead invalidation records (object was deleted) */
+	trash.sort();
+	trash.unique();
+	for (std::list<InvalidationRecord*>::iterator r = trash.begin(); r != trash.end();) {
+		if (!(*r)->in_use ()) {
+			assert (!(*r)->valid ());
+			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1 drop invalidation trash %2\n", event_loop_name(), *r));
+			std::list<InvalidationRecord*>::iterator tmp = r;
+			++tmp;
+			delete *r;
+			trash.erase (r);
+			r = tmp;
+		} else {
+			++r;
+		}
+	}
+#ifndef NDEBUG
+	if (trash.size() > 0) {
+		DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1 items in trash: %2\n", event_loop_name(), trash.size()));
+	}
+#endif
 
 	DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1 check %2 request buffers for requests\n", event_loop_name(), request_buffers.size()));
 
 	for (i = request_buffers.begin(); i != request_buffers.end(); ++i) {
 
-		while (true) {
+		while (!(*i).second->dead) {
 
 			/* we must process requests 1 by 1 because
 			 * the request may run a recursive main
@@ -214,56 +250,60 @@ AbstractUI<RequestObject>::handle_ui_requests ()
 			i->second->get_read_vector (&vec);
 
 			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1 reading requests from RB[%2] @ %5, requests = %3 + %4\n",
-			                                                     event_loop_name(), std::distance (request_buffers.begin(), i), vec.len[0], vec.len[1], i->second));
+						event_loop_name(), std::distance (request_buffers.begin(), i), vec.len[0], vec.len[1], i->second));
 
 			if (vec.len[0] == 0) {
 				break;
 			} else {
-				if (vec.buf[0]->valid) {
+				if (vec.buf[0]->invalidation && !vec.buf[0]->invalidation->valid ()) {
+					DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1: skipping invalidated request\n", event_loop_name()));
+					rbml.release ();
+				} else {
+
 					DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1: valid request, unlocking before calling\n", event_loop_name()));
-					request_buffer_map_lock.unlock ();
+					rbml.release ();
+
 					DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1: valid request, calling ::do_request()\n", event_loop_name()));
 					do_request (vec.buf[0]);
-
-					/* if the request was CallSlot, then we need to ensure that we reset the functor in the request, in case it
-					 * held a shared_ptr<>. Failure to do so can lead to dangling references to objects passed to PBD::Signals.
-					 *
-					 * Note that this method (::handle_ui_requests()) is by definition called from the event loop thread, so
-					 * caller_is_self() is true, which means that the execution of the functor has definitely happened after
-					 * do_request() returns and we no longer need the functor for any reason.
-					 */
-
-					if (vec.buf[0]->type == CallSlot) {
-						vec.buf[0]->the_slot = 0;
-					}
-
-					request_buffer_map_lock.lock ();
-					if (vec.buf[0]->invalidation) {
-						DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1: removing invalidation record for that request\n", event_loop_name()));
-						vec.buf[0]->invalidation->requests.remove (vec.buf[0]);
-					} else {
-						DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1: no invalidation record for that request\n", event_loop_name()));
-					}
-				} else {
-					DEBUG_TRACE (PBD::DEBUG::AbstractUI, "invalid request, ignoring\n");
 				}
+
+				/* if the request was CallSlot, then we need to ensure that we reset the functor in the request, in case it
+				 * held a shared_ptr<>. Failure to do so can lead to dangling references to objects passed to PBD::Signals.
+				 *
+				 * Note that this method (::handle_ui_requests()) is by definition called from the event loop thread, so
+				 * caller_is_self() is true, which means that the execution of the functor has definitely happened after
+				 * do_request() returns and we no longer need the functor for any reason.
+				 */
+
+				if (vec.buf[0]->type == CallSlot) {
+					vec.buf[0]->the_slot = 0;
+				}
+
+				rbml.acquire ();
+				if (vec.buf[0]->invalidation) {
+					vec.buf[0]->invalidation->unref ();
+				}
+				vec.buf[0]->invalidation = NULL;
 				i->second->increment_read_ptr (1);
 			}
 		}
 	}
 
-	/* clean up any dead request buffers (their thread has exited) */
-
+	assert (rbml.locked ());
 	for (i = request_buffers.begin(); i != request_buffers.end(); ) {
 		if ((*i).second->dead) {
-			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 deleting dead per-thread request buffer for %3 @ %4\n",
-			                                                     event_loop_name(), pthread_name(), i->second));
-			/* remove it from the EventLoop static map of all request buffers */
-			EventLoop::remove_request_buffer_from_map ((*i).second);
-			/* delete it */
-			delete (*i).second;
+			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 deleting dead per-thread request buffer for %3 @ %4 (%5 requests)\n", event_loop_name(), pthread_name(), i->second, (*i).second->read_space()));
 			RequestBufferMapIterator tmp = i;
 			++tmp;
+			/* remove it from the EventLoop static map of all request buffers */
+			EventLoop::remove_request_buffer_from_map ((*i).second);
+			/* delete it
+			 *
+			 * Deleting the ringbuffer destroys all RequestObjects
+			 * and thereby drops any InvalidationRecord references of
+			 * requests that have not been processed.
+			 */
+			delete (*i).second;
 			/* remove it from this thread's list of request buffers */
 			request_buffers.erase (i);
 			i = tmp;
@@ -272,43 +312,22 @@ AbstractUI<RequestObject>::handle_ui_requests ()
 		}
 	}
 
-	request_buffer_map_lock.unlock ();
-
 	/* and now, the generic request buffer. same rules as above apply */
 
-	Glib::Threads::Mutex::Lock lm (request_list_lock);
-
 	while (!request_list.empty()) {
+		assert (rbml.locked ());
 		RequestObject* req = request_list.front ();
 		request_list.pop_front ();
-
-		/* We need to use this lock, because its the one
-		 * returned by slot_invalidation_mutex() and protects
-		 * against request invalidation.
-		 */
-
-		request_buffer_map_lock.lock ();
-		if (!req->valid) {
-			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 handling invalid heap request, type %3, deleting\n", event_loop_name(), pthread_name(), req->type));
-			delete req;
-			request_buffer_map_lock.unlock ();
-			continue;
-		}
 
 		/* we're about to execute this request, so its
 		 * too late for any invalidation. mark
 		 * the request as "done" before we start.
 		 */
 
-		if (req->invalidation) {
-			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 remove request from its invalidation list\n", event_loop_name(), pthread_name()));
-
-			/* after this call, if the object referenced by the
-			 * invalidation record is deleted, it will no longer
-			 * try to mark the request as invalid.
-			 */
-
-			req->invalidation->requests.remove (req);
+		if (req->invalidation && !req->invalidation->valid()) {
+			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 handling invalid heap request, type %3, deleting\n", event_loop_name(), pthread_name(), req->type));
+			delete req;
+			continue;
 		}
 
 		/* at this point, an object involved in a functor could be
@@ -320,14 +339,16 @@ AbstractUI<RequestObject>::handle_ui_requests ()
 		 * references to objects to enter into the request queue.
 		 */
 
-		request_buffer_map_lock.unlock ();
-
 		/* unlock the request lock while we execute the request, so
 		 * that we don't needlessly block other threads (note: not RT
 		 * threads since they have their own queue) from making requests.
 		 */
 
-		lm.release ();
+		/* also the request may destroy the object itself resulting in a direct
+		 * path to EventLoop::invalidate_request () from here
+		 * which takes the lock */
+
+		rbml.release ();
 
 		DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 execute request type %3\n", event_loop_name(), pthread_name(), req->type));
 
@@ -343,8 +364,10 @@ AbstractUI<RequestObject>::handle_ui_requests ()
 
 		/* re-acquire the list lock so that we check again */
 
-		lm.acquire();
+		rbml.acquire();
 	}
+
+	rbml.release ();
 }
 
 template <typename RequestObject> void
@@ -356,6 +379,7 @@ AbstractUI<RequestObject>::send_request (RequestObject *req)
 	 */
 
 	if (base_instance() == 0) {
+		delete req;
 		return; /* XXX is this the right thing to do ? */
 	}
 
@@ -383,14 +407,14 @@ AbstractUI<RequestObject>::send_request (RequestObject *req)
 		RequestBuffer* rbuf = per_thread_request_buffer.get ();
 
 		if (rbuf != 0) {
-			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 send per-thread request type %3 using ringbuffer @ %4\n", event_loop_name(), pthread_name(), req->type, rbuf));
+			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 send per-thread request type %3 using ringbuffer @ %4 IR: %5\n", event_loop_name(), pthread_name(), req->type, rbuf, req->invalidation));
 			rbuf->increment_write_ptr (1);
 		} else {
 			/* no per-thread buffer, so just use a list with a lock so that it remains
-			   single-reader/single-writer semantics
-			*/
-			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 send heap request type %3\n", event_loop_name(), pthread_name(), req->type));
-			Glib::Threads::Mutex::Lock lm (request_list_lock);
+			 * single-reader/single-writer semantics
+			 */
+			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 send heap request type %3 IR %4\n", event_loop_name(), pthread_name(), req->type, req->invalidation));
+			Glib::Threads::Mutex::Lock lm (request_buffer_map_lock);
 			request_list.push_back (req);
 		}
 
@@ -411,9 +435,31 @@ AbstractUI<RequestObject>::call_slot (InvalidationRecord* invalidation, const bo
 		return;
 	}
 
+	/* object destruction may race with realtime signal emission.
+	 *
+	 * There may be a concurrent event-loop in progress of deleting
+	 * the slot-object. That's perfectly fine. But we need to mark
+	 * the invalidation record itself as being used by the request.
+	 *
+	 * The IR needs to be kept around until the last signal using
+	 * it is disconnected and then it can be deleted in the event-loop
+	 * (GUI thread).
+	 */
+	if (invalidation) {
+		if (!invalidation->valid()) {
+			DEBUG_TRACE (PBD::DEBUG::AbstractUI, string_compose ("%1/%2 ignoring call-slot using functor @ %3, dead invalidation %4\n", event_loop_name(), pthread_name(), &f, invalidation));
+			return;
+		}
+		invalidation->ref ();
+		invalidation->event_loop = this;
+	}
+
 	RequestObject *req = get_request (BaseUI::CallSlot);
 
 	if (req == 0) {
+		if (invalidation) {
+			invalidation->unref ();
+		}
 		return;
 	}
 
@@ -433,18 +479,13 @@ AbstractUI<RequestObject>::call_slot (InvalidationRecord* invalidation, const bo
 
 	req->invalidation = invalidation;
 
-	if (invalidation) {
-		invalidation->requests.push_back (req);
-		invalidation->event_loop = this;
-	}
-
 	send_request (req);
 }
 
 template<typename RequestObject> void*
 AbstractUI<RequestObject>::request_buffer_factory (uint32_t num_requests)
 {
-	RequestBuffer*  mcr = new RequestBuffer (num_requests); // leaks
+	RequestBuffer*  mcr = new RequestBuffer (num_requests); // XXX leaks
 	per_thread_request_buffer.set (mcr);
 	return mcr;
 }

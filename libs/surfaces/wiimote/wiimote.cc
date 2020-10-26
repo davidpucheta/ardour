@@ -1,22 +1,21 @@
 /*
-    Copyright (C) 2009-2013 Paul Davis
-    Authors: Sampo Savolainen, Jannis Pohlmann
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 
@@ -24,7 +23,7 @@
 #include "pbd/error.h"
 #include "ardour/debug.h"
 #include "ardour/session.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include "wiimote.h"
 
@@ -89,7 +88,7 @@ XMLNode&
 WiimoteControlProtocol::get_state ()
 {
 	XMLNode& node (ControlProtocol::get_state());
-	node.add_property (X_("feedback"), "0");
+	node.set_property (X_("feedback"), "0");
 	return node;
 }
 
@@ -300,7 +299,7 @@ WiimoteControlProtocol::update_led_state ()
 	}
 
 	// enable LED1 if Ardour is playing
-	if (session->transport_rolling ()) {
+	if (transport_rolling ()) {
 		DEBUG_TRACE (DEBUG::WiimoteControl, "WiimoteControlProtocol::update_led_state playing, activate LED1\n");
 		state |= CWIID_LED1_ON;
 	}
@@ -376,7 +375,7 @@ WiimoteControlProtocol::wiimote_callback (int mesg_count, union cwiid_mesg mesg[
 
 			// B + Home = add marker at playhead
 			if (b & CWIID_BTN_HOME) {
-				access_action ("Editor/add-location-from-playhead");
+				access_action ("Common/add-location-from-playhead");
 			}
 
 			// B + minus = move playhead to the start
@@ -406,12 +405,12 @@ WiimoteControlProtocol::wiimote_callback (int mesg_count, union cwiid_mesg mesg[
 
 			// left = move playhead back a bit
 			if (b & CWIID_BTN_LEFT) {
-				access_action ("Editor/nudge-playhead-backward");
+				access_action ("Common/nudge-playhead-backward");
 			}
 
 			// right = move playhead forward a bit
 			if (b & CWIID_BTN_RIGHT) {
-				access_action ("Editor/nudge-playhead-forward");
+				access_action ("Common/nudge-playhead-forward");
 			}
 
 			// up = select previous track

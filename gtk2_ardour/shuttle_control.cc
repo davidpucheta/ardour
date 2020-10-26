@@ -1,20 +1,26 @@
 /*
-    Copyright (C) 2011 Paul Davis
+ * Copyright (C) 2011-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2012-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+#define BASELINESTRETCH (1.25)
 
 #include <algorithm>
 
@@ -25,23 +31,24 @@
 #include "ardour/rc_configuration.h"
 #include "ardour/session.h"
 
+#include "gtkmm2ext/colors.h"
 #include "gtkmm2ext/keyboard.h"
 #include "gtkmm2ext/gui_thread.h"
-#include "gtkmm2ext/cairocell.h"
 #include "gtkmm2ext/utils.h"
 #include "gtkmm2ext/rgb_macros.h"
+
+#include "widgets/tooltips.h"
 
 #include "actions.h"
 #include "rgb_macros.h"
 #include "shuttle_control.h"
-#include "tooltips.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace Gtkmm2ext;
 using namespace ARDOUR;
-using namespace ARDOUR_UI_UTILS;
+using namespace ArdourWidgets;
 using std::min;
 using std::max;
 
@@ -54,6 +61,13 @@ ShuttleControl::ShuttleControl ()
 	: _controllable (new ShuttleControllable (*this))
 	, binding_proxy (_controllable)
 {
+	_info_button.set_layout_font (UIConfiguration::instance().get_NormalFont());
+	_info_button.set_sizing_text (S_("LogestShuttle|< +00 st"));
+	_info_button.set_name ("shuttle text");
+	_info_button.set_sensitive (false);
+	_info_button.set_visual_state (Gtkmm2ext::NoVisualState);
+	_info_button.set_elements (ArdourButton::Text);
+
 	set_tooltip (*this, _("Shuttle speed control (Context-click for options)"));
 
 	pattern = 0;
@@ -63,20 +77,19 @@ ShuttleControl::ShuttleControl ()
 	shuttle_grabbed = false;
 	shuttle_speed_on_grab = 0;
 	shuttle_fract = 0.0;
-	shuttle_max_speed = 8.0f;
-	shuttle_style_menu = 0;
-	shuttle_unit_menu = 0;
+	shuttle_max_speed = Config->get_max_transport_speed();
 	shuttle_context_menu = 0;
 	_hovering = false;
 
 	set_flags (CAN_FOCUS);
 	add_events (Gdk::ENTER_NOTIFY_MASK|Gdk::LEAVE_NOTIFY_MASK|Gdk::BUTTON_RELEASE_MASK|Gdk::BUTTON_PRESS_MASK|Gdk::POINTER_MOTION_MASK|Gdk::SCROLL_MASK);
-	set_size_request (85, 20);
 	set_name (X_("ShuttleControl"));
+
+	ensure_style ();
 
 	shuttle_max_speed = Config->get_shuttle_max_speed();
 
-	if      (shuttle_max_speed >= 8.f) { shuttle_max_speed = 8.0f; }
+	if      (shuttle_max_speed >= Config->get_max_transport_speed()) { shuttle_max_speed = Config->get_max_transport_speed(); }
 	else if (shuttle_max_speed >= 6.f) { shuttle_max_speed = 6.0f; }
 	else if (shuttle_max_speed >= 4.f) { shuttle_max_speed = 4.0f; }
 	else if (shuttle_max_speed >= 3.f) { shuttle_max_speed = 3.0f; }
@@ -84,6 +97,7 @@ ShuttleControl::ShuttleControl ()
 	else                               { shuttle_max_speed = 1.5f; }
 
 	Config->ParameterChanged.connect (parameter_connection, MISSING_INVALIDATOR, boost::bind (&ShuttleControl::parameter_changed, this, _1), gui_context());
+	UIConfiguration::instance().ColorsChanged.connect (sigc::mem_fun (*this, &ShuttleControl::set_colors));
 
 	/* gtkmm 2.4: the C++ wrapper doesn't work */
 	g_signal_connect ((GObject*) gobj(), "query-tooltip", G_CALLBACK (qt), NULL);
@@ -94,6 +108,7 @@ ShuttleControl::~ShuttleControl ()
 {
 	cairo_pattern_destroy (pattern);
 	cairo_pattern_destroy (shine_pattern);
+	delete shuttle_context_menu;
 }
 
 void
@@ -140,12 +155,18 @@ ShuttleControl::on_size_allocate (Gtk::Allocation& alloc)
 void
 ShuttleControl::map_transport_state ()
 {
-	float speed = _session->transport_speed ();
+	float speed;
+
+	if (!_session) {
+		speed = 0.0;
+	} else {
+		speed = _session->actual_speed ();
+	}
 
 	if ( (fabsf( speed - last_speed_displayed) < 0.005f) // dead-zone
-			&& !( speed == 1.f && last_speed_displayed != 1.f)
-			&& !( speed == 0.f && last_speed_displayed != 0.f)
-	   )
+	     && !( speed == 1.f && last_speed_displayed != 1.f)
+	     && !( speed == 0.f && last_speed_displayed != 0.f)
+		)
 	{
 		return; // nothing to see here, move along.
 	}
@@ -208,6 +229,8 @@ ShuttleControl::build_shuttle_context_menu ()
 
 	RadioMenuItem::Group speed_group;
 
+	/* XXX this code assumes that Config->get_max_transport_speed() returns 8 */
+
 	speed_items.push_back (RadioMenuElem (speed_group, "8", sigc::bind (sigc::mem_fun (*this, &ShuttleControl::set_shuttle_max_speed), 8.0f)));
 	if (shuttle_max_speed == 8.0) {
 		static_cast<RadioMenuItem*>(&speed_items.back())->set_active ();
@@ -240,18 +263,12 @@ ShuttleControl::build_shuttle_context_menu ()
 }
 
 void
-ShuttleControl::show_shuttle_context_menu ()
-{
-	if (shuttle_context_menu == 0) {
-		build_shuttle_context_menu ();
-	}
-
-	shuttle_context_menu->popup (1, gtk_get_current_event_time());
-}
-
-void
 ShuttleControl::reset_speed ()
 {
+	if (!_session) {
+		return;
+	}
+
 	if (_session->transport_rolling()) {
 		_session->request_transport_speed (1.0, true);
 	} else {
@@ -279,7 +296,10 @@ ShuttleControl::on_button_press_event (GdkEventButton* ev)
 	}
 
 	if (Keyboard::is_context_menu_event (ev)) {
-		show_shuttle_context_menu ();
+		if (shuttle_context_menu == 0) {
+			build_shuttle_context_menu ();
+		}
+		shuttle_context_menu->popup (ev->button, ev->time);
 		return true;
 	}
 
@@ -292,11 +312,12 @@ ShuttleControl::on_button_press_event (GdkEventButton* ev)
 		} else {
 			add_modal_grab ();
 			shuttle_grabbed = true;
-			shuttle_speed_on_grab = _session->transport_speed ();
+			shuttle_speed_on_grab = _session->actual_speed ();
+			requested_speed = shuttle_speed_on_grab;
 			mouse_shuttle (ev->x, true);
 			gdk_pointer_grab(ev->window,false,
-					GdkEventMask( Gdk::POINTER_MOTION_MASK | Gdk::BUTTON_PRESS_MASK |Gdk::BUTTON_RELEASE_MASK),
-					NULL,NULL,ev->time);
+			                 GdkEventMask( Gdk::POINTER_MOTION_MASK | Gdk::BUTTON_PRESS_MASK |Gdk::BUTTON_RELEASE_MASK),
+			                 NULL,NULL,ev->time);
 		}
 		break;
 
@@ -538,125 +559,120 @@ ShuttleControl::use_shuttle_fract (bool force, bool zero_ok)
 		speed = shuttle_max_speed * shuttle_fract;
 	}
 
-	if (zero_ok) {
-		_session->request_transport_speed (speed, Config->get_shuttle_behaviour() == Wheel);
-	} else {
-		_session->request_transport_speed_nonzero (speed, Config->get_shuttle_behaviour() == Wheel);
+	requested_speed = speed;
+
+	if (_session) {
+		if (zero_ok) {
+			_session->request_transport_speed (speed, Config->get_shuttle_behaviour() == Wheel);
+		} else {
+			_session->request_transport_speed_nonzero (speed, Config->get_shuttle_behaviour() == Wheel);
+		}
 	}
 }
 
 void
-ShuttleControl::render (cairo_t* cr, cairo_rectangle_t*)
+ShuttleControl::set_colors ()
 {
-	cairo_text_extents_t extents;
+	int r, g, b, a;
 
-	//black border
-	cairo_set_source_rgb (cr, 0, 0.0, 0.0);
-	rounded_rectangle (cr, 0, 0, get_width(), get_height(), 4);
-	cairo_fill (cr);
+	uint32_t bg_color = UIConfiguration::instance().color (X_("shuttle bg"));
 
-	float speed = 0.0;
+	UINT_TO_RGBA (bg_color, &r, &g, &b, &a);
+	bg_r = r/255.0;
+	bg_g = g/255.0;
+	bg_b = b/255.0;
+}
 
-	if (_session) {
-		speed = _session->transport_speed ();
+void
+ShuttleControl::render (Cairo::RefPtr<Cairo::Context> const& ctx, cairo_rectangle_t*)
+{
+	cairo_t* cr = ctx->cobj();
+	// center slider line
+	float yc = get_height() / 2;
+	float lw = 3;
+	cairo_set_line_cap (cr, CAIRO_LINE_CAP_ROUND);
+	cairo_set_line_width (cr, 3);
+	cairo_move_to (cr, lw, yc);
+	cairo_line_to (cr, get_width () - lw, yc);
+	cairo_set_source_rgb (cr, bg_r, bg_g, bg_b);
+	if (UIConfiguration::instance().get_widget_prelight() && _hovering) {
+		cairo_stroke_preserve (cr);
+		cairo_set_source_rgba (cr, 1, 1, 1, 0.15);
 	}
-
-	/* Marker */
-	float visual_fraction = std::min (1.0f, speed / shuttle_max_speed);
-	float marker_size = get_height() - 5.0;
-	float avail_width = get_width() - marker_size - 4;
-	float x = get_width() * 0.5 + visual_fraction * avail_width * 0.5;
-//	cairo_set_source_rgb (cr, 0, 1, 0.0);
-	cairo_set_source (cr, pattern);
-	if (speed == 1.0) {
-		cairo_move_to( cr, x, 2.5);
-		cairo_line_to( cr, x + marker_size * .577, 2.5 + marker_size * 0.5);
-		cairo_line_to( cr, x, 2.5 + marker_size);
-		cairo_close_path(cr);
-	} else if ( speed ==0.0 )
-		rounded_rectangle (cr, x, 2.5, marker_size, marker_size, 1);
-	else
-		cairo_arc (cr, x, 2.5 + marker_size * .5, marker_size * 0.47, 0, 2.0 * M_PI);
-	cairo_set_line_width (cr, 1.75);
 	cairo_stroke (cr);
 
-	/* speed text */
-
+	float speed = 0.0;
+	float acutal_speed = 0.0;
 	char buf[32];
 
-	if (speed != 0) {
+	if (_session) {
+		speed = _session->actual_speed ();
+		acutal_speed = speed;
+		if (shuttle_grabbed) {
+			speed = requested_speed;
+		}
+	}
 
+	/* marker */
+	float visual_fraction = std::max (-1.0f, std::min (1.0f, speed / shuttle_max_speed));
+	float marker_size = round (get_height() * 0.66);
+	float avail_width = get_width() - marker_size;
+	float x = 0.5 * (get_width() + visual_fraction * avail_width - marker_size);
+
+	rounded_rectangle (cr, x, 0, marker_size, get_height(), 5);
+	cairo_set_source_rgba (cr, 0, 0, 0, 1);
+	cairo_fill(cr);
+	rounded_rectangle (cr, x + 1, 1, marker_size - 2, get_height() - 2, 3.5);
+	if (_flat_buttons) {
+		uint32_t col = UIConfiguration::instance().color ("shuttle");
+		Gtkmm2ext::set_source_rgba (cr, col);
+	} else {
+		cairo_set_source (cr, pattern);
+	}
+	if (UIConfiguration::instance().get_widget_prelight() && _hovering) {
+		cairo_fill_preserve (cr);
+		cairo_set_source_rgba (cr, 1, 1, 1, 0.15);
+	}
+	cairo_fill(cr);
+
+	/* text */
+	if (acutal_speed != 0) {
 		if (Config->get_shuttle_units() == Percentage) {
-
-			if (speed == 1.0) {
-				snprintf (buf, sizeof (buf), "%s", _("Playing"));
+			if (acutal_speed == 1.0) {
+				snprintf (buf, sizeof (buf), "%s", _("Play"));
 			} else {
-				if (speed < 0.0) {
-					snprintf (buf, sizeof (buf), "<<< %.1f%%", -speed * 100.f);
+				if (acutal_speed < 0.0) {
+					snprintf (buf, sizeof (buf), "< %.1f%%", -acutal_speed * 100.f);
 				} else {
-					snprintf (buf, sizeof (buf), ">>> %.1f%%", speed * 100.f);
+					snprintf (buf, sizeof (buf), "> %.1f%%", acutal_speed * 100.f);
 				}
 			}
-
 		} else {
-
 			bool reversed;
-			int semi = speed_as_semitones (speed, reversed);
-
+			int semi = speed_as_semitones (acutal_speed, reversed);
 			if (reversed) {
-				snprintf (buf, sizeof (buf), _("<<< %+d semitones"), semi);
+				snprintf (buf, sizeof (buf), _("< %+2d st"), semi);
 			} else {
-				snprintf (buf, sizeof (buf), _(">>> %+d semitones"), semi);
+				snprintf (buf, sizeof (buf), _("> %+2d st"), semi);
 			}
 		}
-
 	} else {
-		snprintf (buf, sizeof (buf), "%s", _("Stopped"));
+		snprintf (buf, sizeof (buf), "%s", _("Stop"));
 	}
 
-	last_speed_displayed = speed;
+	last_speed_displayed = acutal_speed;
 
-	// TODO use a proper pango layout, scale font
-	cairo_set_source_rgb (cr, 0.6, 0.6, 0.6);
-	cairo_set_font_size (cr, 13.0);
-	cairo_text_extents (cr, "0|", &extents); // note the descender
-	const float text_ypos = (get_height() + extents.height - 1.) * .5;
+	_info_button.set_text (buf);
 
-	cairo_move_to (cr, 10, text_ypos);
-	cairo_show_text (cr, buf);
-
-	/* style text */
-
-
-	switch (Config->get_shuttle_behaviour()) {
-	case Sprung:
-		snprintf (buf, sizeof (buf), "%s", _("Sprung"));
-		break;
-	case Wheel:
-		snprintf (buf, sizeof (buf), "%s", _("Wheel"));
-		break;
-	}
-
-	cairo_text_extents (cr, buf, &extents);
-	cairo_move_to (cr, get_width() - (fabs(extents.x_advance) + 5), text_ypos);
-	cairo_show_text (cr, buf);
-
+#if 0
 	if (UIConfiguration::instance().get_widget_prelight()) {
 		if (_hovering) {
-			rounded_rectangle (cr, 1, 1, get_width()-2, get_height()-2, 4.0);
-			cairo_set_source_rgba (cr, 1, 1, 1, 0.2);
+			rounded_rectangle (cr, 0, 0, get_width(), get_height(), 3.5);
+			cairo_set_source_rgba (cr, 1, 1, 1, 0.15);
 			cairo_fill (cr);
 		}
 	}
-}
-
-void
-ShuttleControl::shuttle_unit_clicked ()
-{
-	if (shuttle_unit_menu == 0) {
-		shuttle_unit_menu = dynamic_cast<Menu*> (ActionManager::get_widget ("/ShuttleUnitPopup"));
-	}
-	shuttle_unit_menu->popup (1, gtk_get_current_event_time());
+#endif
 }
 
 void
@@ -699,7 +715,7 @@ ShuttleControl::parameter_changed (std::string p)
 			 */
 			if (_session) {
 				if (_session->transport_rolling()) {
-					if (_session->transport_speed() == 1.0) {
+					if (_session->actual_speed() == 1.0) {
 						queue_draw ();
 					} else {
 						/* reset current speed and
@@ -719,6 +735,8 @@ ShuttleControl::parameter_changed (std::string p)
 			break;
 		}
 
+	} else if (p == "shuttle-max-speed") {
+		queue_draw ();
 	} else if (p == "shuttle-units") {
 		queue_draw ();
 	}

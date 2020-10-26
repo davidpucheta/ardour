@@ -3,8 +3,8 @@
 
 require "../gnu-windows/src/local-paths.lib";
 
-$msvc_mixbus_version = "3.00.0";
-$major = 3;
+$msvc_mixbus_version = "5.00.0";
+$major = 5;
 $minor = 0;
 $micro = 0;
 $interface_age = 0;
@@ -13,20 +13,20 @@ $scanner_major = 2;
 $scanner_minor = 0;
 $scanner_micro = 0;
 $scanner_interface_age = 0;
-$binary_age = 3000;
+$binary_age = 5000;
 $current_minus_age = 0;
 $exec_prefix = "lib";
 $dll_suffix = "32";
 $lib_ext = ".dll";
 $monospace = "ArdourMono";
-$font_small = 9;
+$font_small = 8.5;
 $font_smaller = 8;
-$font_normal = 10;
-$font_big = 14;
-$font_large = 18;
-$font_larger = 24;
-$font_huger = 34;
-$font_massive = 60;
+$font_normal = 9;
+$font_big = 11;
+$font_large = 14.5;
+$font_larger = 19;
+$font_huger = 27;
+$font_massive = 48;
 
 sub process_file
 {
@@ -96,8 +96,9 @@ process_file ("gtk2_ardour/default_ui_config");
 
 my $command=join(' ',@ARGV);
 if ($command eq -buildall) {
-	process_file ("MSVCardour3/MSVCArdour3.vsprops");
-	process_file ("MSVCMixbus3/MSVCMixbus3.vsprops");
+	process_file ("MSVCardour3/MSVCArdour5.vsprops");
+	process_file ("MSVCMixbus3/MSVCMixbus5.vsprops");
 	process_file ("MSVCvst_scan/vst_scan.rc");
-	process_file ("icons/win32/msvc_resources.rc");
+	process_file ("MSVCvst_scan/vst3_scan.rc");
+	process_file ("gtk2_ardour/win32/msvc_resources.rc");
 }

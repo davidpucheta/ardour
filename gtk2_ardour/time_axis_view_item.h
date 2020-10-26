@@ -1,21 +1,26 @@
 /*
-    Copyright (C) 2003 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2009 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2017-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_time_axis_view_item_h__
 #define __gtk_ardour_time_axis_view_item_h__
@@ -33,12 +38,12 @@ namespace ArdourCanvas {
 	class Pixbuf;
 	class Rectangle;
 	class Item;
-        class Container;
- 	class Text;
+	class Container;
+	class Text;
 }
 
-using ARDOUR::framepos_t;
-using ARDOUR::framecnt_t;
+using ARDOUR::samplepos_t;
+using ARDOUR::samplecnt_t;
 
 /**
  * Base class for items that may appear upon a TimeAxisView.
@@ -46,17 +51,17 @@ using ARDOUR::framecnt_t;
 
 class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 {
-   public:
+public:
 	virtual ~TimeAxisViewItem();
 
-	virtual bool set_position(framepos_t, void*, double* delta = 0);
-	framepos_t get_position() const;
-	virtual bool set_duration(framecnt_t, void*);
-	framecnt_t get_duration() const;
-	virtual void set_max_duration(framecnt_t, void*);
-	framecnt_t get_max_duration() const;
-	virtual void set_min_duration(framecnt_t, void*);
-	framecnt_t get_min_duration() const;
+	virtual bool set_position(samplepos_t, void*, double* delta = 0);
+	samplepos_t get_position() const;
+	virtual bool set_duration(samplecnt_t, void*);
+	samplecnt_t get_duration() const;
+	virtual void set_max_duration(samplecnt_t, void*);
+	samplecnt_t get_max_duration() const;
+	virtual void set_min_duration(samplecnt_t, void*);
+	samplecnt_t get_min_duration() const;
 	virtual void set_position_locked(bool, void*);
 	bool get_position_locked() const;
 	void set_max_duration_active(bool, void*);
@@ -106,8 +111,8 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	static const double GRAB_HANDLE_WIDTH;
 
 	/* these are not constant, but vary with the pixel size
-	   of the font used to display the item name.
-	*/
+	 * of the font used to display the item name.
+	 */
 	static int    NAME_HEIGHT;
 	static double NAME_Y_OFFSET;
 	static double NAME_HIGHLIGHT_SIZE;
@@ -127,19 +132,19 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	sigc::signal<void,std::string,std::string,void*> NameChanged;
 
 	/** Emiited when the position of this item changes */
-	sigc::signal<void,framepos_t,void*> PositionChanged;
+	sigc::signal<void,samplepos_t,void*> PositionChanged;
 
 	/** Emitted when the position lock of this item is changed */
 	sigc::signal<void,bool,void*> PositionLockChanged;
 
 	/** Emitted when the duration of this item changes */
-	sigc::signal<void,framecnt_t,void*> DurationChanged;
+	sigc::signal<void,samplecnt_t,void*> DurationChanged;
 
 	/** Emitted when the maximum item duration is changed */
-	sigc::signal<void,framecnt_t,void*> MaxDurationChanged;
+	sigc::signal<void,samplecnt_t,void*> MaxDurationChanged;
 
 	/** Emitted when the mionimum item duration is changed */
-	sigc::signal<void,framecnt_t,void*> MinDurationChanged;
+	sigc::signal<void,samplecnt_t,void*> MinDurationChanged;
 
 	enum Visibility {
 		ShowFrame = 0x1,
@@ -152,15 +157,17 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 		FullWidthNameHighlight = 0x80
 	};
 
-  protected:
+	virtual void update_visibility () {}
+
+protected:
 	TimeAxisViewItem (const std::string &, ArdourCanvas::Item&, TimeAxisView&, double, uint32_t fill_color,
-			  framepos_t, framecnt_t, bool recording = false, bool automation = false, Visibility v = Visibility (0));
+	                  samplepos_t, samplecnt_t, bool recording = false, bool automation = false, Visibility v = Visibility (0));
 
 	TimeAxisViewItem (const TimeAxisViewItem&);
 
-        void init (ArdourCanvas::Item*, double, uint32_t, framepos_t, framepos_t, Visibility, bool, bool);
+	void init (ArdourCanvas::Item*, double, uint32_t, samplepos_t, samplepos_t, Visibility, bool, bool);
 
-        virtual bool canvas_group_event (GdkEvent*);
+	virtual bool canvas_group_event (GdkEvent*);
 
 	virtual void set_colors();
 	virtual void set_frame_color();
@@ -178,16 +185,16 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	bool position_locked;
 
 	/** position of this item on the timeline */
-	framepos_t frame_position;
+	samplepos_t sample_position;
 
 	/** duration of this item upon the timeline */
-	framecnt_t item_duration;
+	samplecnt_t item_duration;
 
 	/** maximum duration that this item can have */
-	framecnt_t max_item_duration;
+	samplecnt_t max_item_duration;
 
 	/** minimum duration that this item can have */
-	framecnt_t min_item_duration;
+	samplecnt_t min_item_duration;
 
 	/** indicates whether the max duration constraint is active */
 	bool max_duration_active;
@@ -195,7 +202,7 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	/** indicates whether the min duration constraint is active */
 	bool min_duration_active;
 
-	/** frames per canvas pixel */
+	/** samples per canvas pixel */
 	double samples_per_pixel;
 
 	/** should the item respond to events */
@@ -217,7 +224,7 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	bool wide_enough_for_name;
 	bool high_enough_for_name;
 
-	ArdourCanvas::Container*      group;
+	ArdourCanvas::Container* group;
 	ArdourCanvas::Rectangle* frame;
 	ArdourCanvas::Rectangle* selection_frame;
 	ArdourCanvas::Text*      name_text;
@@ -227,7 +234,7 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	ArdourCanvas::Rectangle* frame_handle_start; ///< `frame' (fade) handle for the start of the item, or 0
 	ArdourCanvas::Rectangle* frame_handle_end; ///< `frame' (fade) handle for the end of the item, or 0
 
-        bool frame_handle_crossing (GdkEvent*, ArdourCanvas::Rectangle*);
+	bool frame_handle_crossing (GdkEvent*, ArdourCanvas::Rectangle*);
 
 	double _height;
 	Visibility visibility;
@@ -235,13 +242,13 @@ class TimeAxisViewItem : public Selectable, public PBD::ScopedConnectionList
 	bool _recregion;
 	bool _automation; ///< true if this is an automation region view
 	bool _dragging;
+	double _width;
+
+	void manage_name_text ();
 
 private:
-        double _width;
-
 	void parameter_changed (std::string);
-        void manage_name_highlight ();
-        void manage_name_text ();
+	void manage_name_highlight ();
 
 }; /* class TimeAxisViewItem */
 

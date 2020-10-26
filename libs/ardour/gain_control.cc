@@ -1,99 +1,121 @@
 /*
-    Copyright (C) 2006-2016 Paul Davis
+ * Copyright (C) 2016-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
+#include <cmath>
 
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
+#include "pbd/convert.h"
+#include "pbd/strsplit.h"
 
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+#include "evoral/Curve.h"
 
 #include "ardour/dB.h"
 #include "ardour/gain_control.h"
 #include "ardour/session.h"
+#include "ardour/vca.h"
+#include "ardour/vca_manager.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace std;
 
+static std::string gain_control_name (Evoral::Parameter const& param)
+{
+	switch (param.type()) {
+		case GainAutomation:
+			/* fallthrough */
+		case BusSendLevel:
+			return X_("gaincontrol");
+		case TrimAutomation:
+			return X_("trimcontrol");
+		case MainOutVolume:
+			return X_("mastervolume");
+		default:
+			break;
+	}
+	/* default in AutomationControl c'tor uses
+	 * EventTypeMap::instance().to_symbol(parameter)
+	 */
+	return "";
+}
+
+static boost::shared_ptr<AutomationList> automation_list_new (Evoral::Parameter const& param)
+{
+	switch (param.type()) {
+		case GainAutomation:
+			/* fallthrough */
+		case BusSendLevel:
+			/* fallthrough */
+		case TrimAutomation:
+			return boost::shared_ptr<AutomationList> (new AutomationList (param));
+		case MainOutVolume:
+			/* not automatable */
+			break;
+		default:
+			assert (0);
+			break;
+	}
+	return boost::shared_ptr<AutomationList> ();
+}
+
 GainControl::GainControl (Session& session, const Evoral::Parameter &param, boost::shared_ptr<AutomationList> al)
-	: AutomationControl (session, param, ParameterDescriptor(param),
-	                     al ? al : boost::shared_ptr<AutomationList> (new AutomationList (param)),
-	                     param.type() == GainAutomation ? X_("gaincontrol") : X_("trimcontrol")) {
-
-	alist()->reset_default (1.0);
-
-	lower_db = accurate_coefficient_to_dB (_desc.lower);
-	range_db = accurate_coefficient_to_dB (_desc.upper) - lower_db;
+	: SlavableAutomationControl (session, param, ParameterDescriptor(param),
+	                             al ? al : automation_list_new (param),
+	                             gain_control_name (param),
+	                             Controllable::GainLike)
+{
 }
 
 void
-GainControl::set_value (double val, PBD::Controllable::GroupControlDisposition group_override)
+GainControl::inc_gain (gain_t factor)
 {
-	if (writable()) {
-		_set_value (val, group_override);
-	}
-}
+	/* To be used ONLY when doing group-relative gain adjustment, from
+	 * ControlGroup::set_group_values().
+	 */
 
-void
-GainControl::set_value_unchecked (double val)
-{
-	/* used only automation playback */
-	_set_value (val, Controllable::NoGroup);
-}
+	const float desired_gain = get_value ();
 
-void
-GainControl::_set_value (double val, Controllable::GroupControlDisposition group_override)
-{
-	AutomationControl::set_value (std::max (std::min (val, (double)_desc.upper), (double)_desc.lower), group_override);
-	_session.set_dirty ();
-}
-
-double
-GainControl::internal_to_interface (double v) const
-{
-	if (_desc.type == GainAutomation) {
-		return gain_to_slider_position (v);
+	if (fabsf (desired_gain) < GAIN_COEFF_SMALL) {
+		// really?! what's the idea here?
+		actually_set_value (0.000001f + (0.000001f * factor), Controllable::ForGroup);
 	} else {
-		return (accurate_coefficient_to_dB (v) - lower_db) / range_db;
+		actually_set_value (desired_gain + (desired_gain * factor), Controllable::ForGroup);
 	}
 }
 
-double
-GainControl::interface_to_internal (double v) const
+void
+GainControl::post_add_master (boost::shared_ptr<AutomationControl> m)
 {
-	if (_desc.type == GainAutomation) {
-		return slider_position_to_gain (v);
-	} else {
-		return dB_to_coefficient (lower_db + v * range_db);
+	if (m->get_value() == 0) {
+		/* master is at -inf, which forces this ctrl to -inf on assignment */
+		Changed (false, Controllable::NoGroup); /* EMIT SIGNAL */
 	}
 }
 
-double
-GainControl::internal_to_user (double v) const
+bool
+GainControl::get_masters_curve_locked (samplepos_t start, samplepos_t end, float* vec, samplecnt_t veclen) const
 {
-	return accurate_coefficient_to_dB (v);
+	if (_masters.empty()) {
+		return list()->curve().rt_safe_get_vector (start, end, vec, veclen);
+	}
+	for (samplecnt_t i = 0; i < veclen; ++i) {
+		vec[i] = 1.f;
+	}
+	return SlavableAutomationControl::masters_curve_multiply (start, end, vec, veclen);
 }
-
-double
-GainControl::user_to_internal (double u) const
-{
-	return dB_to_coefficient (u);
-}
-
-std::string
-GainControl::get_user_string () const
-{
-	char theBuf[32]; sprintf( theBuf, _("%3.1f dB"), accurate_coefficient_to_dB (get_value()));
-	return std::string(theBuf);
-}
-

@@ -1,32 +1,36 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2012 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2017-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_export_channel_h__
 #define __ardour_export_channel_h__
 
 #include <set>
+#include <list>
 
 #include <boost/scoped_array.hpp>
 #include <boost/shared_ptr.hpp>
 
 #include "pbd/signals.h"
+#include "pbd/ringbuffer.h"
 
 #include "ardour/buffer_set.h"
 #include "ardour/export_pointers.h"
@@ -46,9 +50,10 @@ class LIBARDOUR_API ExportChannel : public boost::less_than_comparable<ExportCha
 
 	virtual ~ExportChannel () {}
 
-	virtual void set_max_buffer_size(framecnt_t) { }
+	virtual samplecnt_t common_port_playback_latency () const { return 0; }
+	virtual void prepare_export (samplecnt_t max_samples, sampleoffset_t common_latency) { }
 
-	virtual void read (Sample const *& data, framecnt_t frames) const = 0;
+	virtual void read (Sample const *& data, samplecnt_t samples) const = 0;
 	virtual bool empty () const = 0;
 
 	/// Adds state to node passed
@@ -68,9 +73,12 @@ class LIBARDOUR_API PortExportChannel : public ExportChannel
 	typedef std::set<boost::weak_ptr<AudioPort> > PortSet;
 
 	PortExportChannel ();
-	void set_max_buffer_size(framecnt_t frames);
+	~PortExportChannel ();
 
-	void read (Sample const *& data, framecnt_t frames) const;
+	samplecnt_t common_port_playback_latency () const;
+	void prepare_export (samplecnt_t max_samples, sampleoffset_t common_latency);
+
+	void read (Sample const *& data, samplecnt_t samples) const;
 	bool empty () const { return ports.empty(); }
 
 	void get_state (XMLNode * node) const;
@@ -83,8 +91,9 @@ class LIBARDOUR_API PortExportChannel : public ExportChannel
 
   private:
 	PortSet ports;
-	boost::scoped_array<Sample> buffer;
-	framecnt_t buffer_size;
+	samplecnt_t                 _buffer_size;
+	boost::scoped_array<Sample> _buffer;
+	std::list <boost::shared_ptr<PBD::RingBuffer<Sample> > >  _delaylines;
 };
 
 
@@ -96,30 +105,29 @@ class LIBARDOUR_API RegionExportChannelFactory
 		None,
 		Raw,
 		Fades,
-		Processed
 	};
 
 	RegionExportChannelFactory (Session * session, AudioRegion const & region, AudioTrack & track, Type type);
 	~RegionExportChannelFactory ();
 
 	ExportChannelPtr create (uint32_t channel);
-	void read (uint32_t channel, Sample const *& data, framecnt_t frames_to_read);
+	void read (uint32_t channel, Sample const *& data, samplecnt_t samples_to_read);
 
   private:
 
-	int new_cycle_started (framecnt_t) { buffers_up_to_date = false; return 0; }
-	void update_buffers (framecnt_t frames);
+	int new_cycle_started (samplecnt_t) { buffers_up_to_date = false; return 0; }
+	void update_buffers (samplecnt_t samples);
 
 	AudioRegion const & region;
 	AudioTrack & track;
 	Type type;
 
-	framecnt_t frames_per_cycle;
+	samplecnt_t samples_per_cycle;
 	size_t n_channels;
 	BufferSet buffers;
 	bool buffers_up_to_date;
-	framecnt_t region_start;
-	framecnt_t position;
+	samplecnt_t region_start;
+	samplecnt_t position;
 
 	boost::scoped_array<Sample> mixdown_buffer;
 	boost::scoped_array<Sample> gain_buffer;
@@ -133,7 +141,7 @@ class LIBARDOUR_API RegionExportChannel : public ExportChannel
 	friend class RegionExportChannelFactory;
 
   public:
-	void read (Sample const *& data, framecnt_t frames_to_read) const { factory.read (channel, data, frames_to_read); }
+	void read (Sample const *& data, samplecnt_t samples_to_read) const { factory.read (channel, data, samples_to_read); }
 	void get_state (XMLNode * /*node*/) const {};
 	void set_state (XMLNode * /*node*/, Session & /*session*/) {};
 	bool empty () const { return false; }
@@ -164,9 +172,9 @@ class LIBARDOUR_API RouteExportChannel : public ExportChannel
         static void create_from_route(std::list<ExportChannelPtr> & result, boost::shared_ptr<Route> route);
 
   public: // ExportChannel interface
-	void set_max_buffer_size(framecnt_t frames);
+	void prepare_export (samplecnt_t max_samples, sampleoffset_t common_latency);
 
-	void read (Sample const *& data, framecnt_t frames) const;
+	void read (Sample const *& data, samplecnt_t samples) const;
 	bool empty () const { return false; }
 
 	void get_state (XMLNode * node) const;
@@ -178,13 +186,13 @@ class LIBARDOUR_API RouteExportChannel : public ExportChannel
 
 	// Removes the processor from the track when deleted
 	class ProcessorRemover {
-	  public:
-   	         ProcessorRemover (boost::shared_ptr<Route> route, boost::shared_ptr<CapturingProcessor> processor)
-			: route (route), processor (processor) {}
-		~ProcessorRemover();
-	  private:
-                boost::shared_ptr<Route> route;
-		boost::shared_ptr<CapturingProcessor> processor;
+		public:
+			ProcessorRemover (boost::shared_ptr<Route> route, boost::shared_ptr<CapturingProcessor> processor)
+				: route (route), processor (processor) {}
+			~ProcessorRemover();
+		private:
+			boost::shared_ptr<Route> route;
+			boost::shared_ptr<CapturingProcessor> processor;
 	};
 
 	boost::shared_ptr<CapturingProcessor> processor;

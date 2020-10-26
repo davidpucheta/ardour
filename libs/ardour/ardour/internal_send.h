@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2018 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_internal_send_h__
 #define __ardour_internal_send_h__
@@ -27,7 +30,7 @@ namespace ARDOUR {
 
 class LIBARDOUR_API InternalSend : public Send
 {
-  public:
+public:
 	InternalSend (Session&, boost::shared_ptr<Pannable>, boost::shared_ptr<MuteMaster>, boost::shared_ptr<Route> send_from, boost::shared_ptr<Route> send_to, Delivery::Role role = Delivery::Aux, bool ignore_bitslot = false);
 	virtual ~InternalSend ();
 
@@ -35,12 +38,10 @@ class LIBARDOUR_API InternalSend : public Send
 	bool set_name (const std::string&);
 	bool visible() const;
 
-	XMLNode& state(bool full);
-	XMLNode& get_state(void);
 	int set_state(const XMLNode& node, int version);
 
 	void cycle_start (pframes_t);
-	void run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pframes_t nframes, bool);
+	void run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, double speed, pframes_t nframes, bool);
 	bool feeds (boost::shared_ptr<Route> other) const;
 	bool can_support_io_configuration (const ChanCount& in, ChanCount& out);
 	bool configure_io (ChanCount in, ChanCount out);
@@ -54,15 +55,22 @@ class LIBARDOUR_API InternalSend : public Send
 		return mixbufs;
 	}
 
+	bool allow_feedback () const { return _allow_feedback;}
+	void set_allow_feedback (bool yn);
+
 	void set_can_pan (bool yn);
 	uint32_t pan_outs () const;
 
 	static PBD::Signal1<void, pframes_t> CycleStart;
 
-  private:
+protected:
+	XMLNode& state();
+
+private:
 	BufferSet mixbufs;
 	boost::shared_ptr<Route> _send_from;
 	boost::shared_ptr<Route> _send_to;
+	bool _allow_feedback;
 	PBD::ID _send_to_id;
 	PBD::ScopedConnection connect_c;
 	PBD::ScopedConnection source_connection;
@@ -73,8 +81,10 @@ class LIBARDOUR_API InternalSend : public Send
 	void send_to_property_changed (const PBD::PropertyChange&);
 	int  connect_when_legal ();
 	void init_gain ();
-	int  use_target (boost::shared_ptr<Route>);
+	int  use_target (boost::shared_ptr<Route>, bool update_name = true);
 	void target_io_changed ();
+
+	void propagate_solo ();
 };
 
 } // namespace ARDOUR

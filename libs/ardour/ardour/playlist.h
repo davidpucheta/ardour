@@ -1,21 +1,28 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2014-2018 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 André Nusser <andre.nusser@googlemail.com>
+ * Copyright (C) 2016-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2016-2017 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_playlist_h__
 #define __ardour_playlist_h__
@@ -38,7 +45,7 @@
 #include "pbd/sequence_property.h"
 #include "pbd/stacktrace.h"
 
-#include "evoral/Range.hpp"
+#include "evoral/Range.h"
 
 #include "ardour/ardour.h"
 #include "ardour/region.h"
@@ -53,21 +60,21 @@ class Crossfade;
 
 namespace Properties {
 	/* fake the type, since regions are handled by SequenceProperty which doesn't
-	   care about such things.
-	*/
+	 * care about such things.
+	 */
 	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> regions;
 }
 
 class LIBARDOUR_API RegionListProperty : public PBD::SequenceProperty<std::list<boost::shared_ptr<Region> > >
 {
-  public:
+public:
 	RegionListProperty (Playlist&);
 
 	RegionListProperty* clone () const;
 	void get_content_as_xml (boost::shared_ptr<Region>, XMLNode &) const;
 	boost::shared_ptr<Region> get_content_from_xml (XMLNode const &) const;
 
-  private:
+private:
 	RegionListProperty* create () const;
 
 	/* copy construction only by ourselves */
@@ -86,7 +93,7 @@ public:
 	Playlist (Session&, const XMLNode&, DataType type, bool hidden = false);
 	Playlist (Session&, std::string name, DataType type, bool hidden = false);
 	Playlist (boost::shared_ptr<const Playlist>, std::string name, bool hidden = false);
-	Playlist (boost::shared_ptr<const Playlist>, framepos_t start, framecnt_t cnt, std::string name, bool hidden = false);
+	Playlist (boost::shared_ptr<const Playlist>, samplepos_t start, samplecnt_t cnt, std::string name, bool hidden = false);
 
 	virtual ~Playlist ();
 
@@ -115,12 +122,24 @@ public:
 	bool frozen() const { return _frozen; }
 	void set_frozen (bool yn);
 
+	void AddToSoloSelectedList(const Region*);
+	void RemoveFromSoloSelectedList(const Region*);
+	bool SoloSelectedListIncludes(const Region*);
+	bool SoloSelectedActive();
+
 	bool hidden() const { return _hidden; }
 	bool empty() const;
+
+	bool shared () const { return !_shared_with_ids.empty(); }
+	void share_with (const PBD::ID&);
+	void unshare_with (const PBD::ID&);
+	bool shared_with (const PBD::ID&) const;
+	void reset_shares ();
+
 	uint32_t n_regions() const;
 	bool all_regions_empty() const;
-	std::pair<framepos_t, framepos_t> get_extent () const;
-	std::pair<framepos_t, framepos_t> get_extent_with_endspace() const;
+	std::pair<samplepos_t, samplepos_t> get_extent () const;
+	std::pair<samplepos_t, samplepos_t> get_extent_with_endspace() const;
 	layer_t top_layer() const;
 
 	EditMode get_edit_mode() const { return _edit_mode; }
@@ -128,30 +147,29 @@ public:
 
 	/* Editing operations */
 
-	void add_region (boost::shared_ptr<Region>, framepos_t position, float times = 1, bool auto_partition = false);
+	void add_region (boost::shared_ptr<Region>, samplepos_t position, float times = 1, bool auto_partition = false, int32_t sub_num = 0, double quarter_note = 0.0, bool for_music = false);
 	void remove_region (boost::shared_ptr<Region>);
-	void remove_region_by_source (boost::shared_ptr<Source>);
 	void get_equivalent_regions (boost::shared_ptr<Region>, std::vector<boost::shared_ptr<Region> >&);
 	void get_region_list_equivalent_regions (boost::shared_ptr<Region>, std::vector<boost::shared_ptr<Region> >&);
 	void get_source_equivalent_regions (boost::shared_ptr<Region>, std::vector<boost::shared_ptr<Region> >&);
-	void replace_region (boost::shared_ptr<Region> old, boost::shared_ptr<Region> newr, framepos_t pos);
-	void split_region (boost::shared_ptr<Region>, framepos_t position);
-	void split (framepos_t at);
-	void shift (framepos_t at, frameoffset_t distance, bool move_intersected, bool ignore_music_glue);
-	void partition (framepos_t start, framepos_t end, bool cut = false);
-	void duplicate (boost::shared_ptr<Region>, framepos_t position, float times);
-	void duplicate (boost::shared_ptr<Region>, framepos_t position, framecnt_t gap, float times);
-	void duplicate_until (boost::shared_ptr<Region>, framepos_t position, framecnt_t gap, framepos_t end);
+	void replace_region (boost::shared_ptr<Region> old, boost::shared_ptr<Region> newr, samplepos_t pos);
+	void split_region (boost::shared_ptr<Region>, const MusicSample& position);
+	void split (const MusicSample& at);
+	void shift (samplepos_t at, sampleoffset_t distance, bool move_intersected, bool ignore_music_glue);
+	void partition (samplepos_t start, samplepos_t end, bool cut = false);
+	void duplicate (boost::shared_ptr<Region>, samplepos_t position, float times);
+	void duplicate (boost::shared_ptr<Region>, samplepos_t position, samplecnt_t gap, float times);
+	void duplicate_until (boost::shared_ptr<Region>, samplepos_t position, samplecnt_t gap, samplepos_t end);
 	void duplicate_range (AudioRange&, float times);
 	void duplicate_ranges (std::list<AudioRange>&, float times);
-	void nudge_after (framepos_t start, framecnt_t distance, bool forwards);
+	void nudge_after (samplepos_t start, samplecnt_t distance, bool forwards);
 	boost::shared_ptr<Region> combine (const RegionList&);
 	void uncombine (boost::shared_ptr<Region>);
 	void fade_range (std::list<AudioRange>&);
 
 	void shuffle (boost::shared_ptr<Region>, int dir);
-	void ripple (framepos_t at, framecnt_t distance, RegionList *exclude);
-	void ripple (framepos_t at, framecnt_t distance, boost::shared_ptr<Region> exclude) {
+	void ripple (samplepos_t at, samplecnt_t distance, RegionList *exclude);
+	void ripple (samplepos_t at, samplecnt_t distance, boost::shared_ptr<Region> exclude) {
 		 RegionList el;
 		 if (exclude)
 			 el.push_back (exclude);
@@ -162,27 +180,34 @@ public:
 
 	boost::shared_ptr<Playlist> cut  (std::list<AudioRange>&, bool result_is_hidden = true);
 	boost::shared_ptr<Playlist> copy (std::list<AudioRange>&, bool result_is_hidden = true);
-	int                         paste (boost::shared_ptr<Playlist>, framepos_t position, float times);
+	int                         paste (boost::shared_ptr<Playlist>, samplepos_t position, float times, const int32_t sub_num);
 
-	const RegionListProperty& region_list () const { return regions; }
+	const RegionListProperty& region_list_property () const { return regions; }
+	boost::shared_ptr<RegionList> region_list();
 
-	boost::shared_ptr<RegionList> regions_at (framepos_t frame);
-	uint32_t                   count_regions_at (framepos_t) const;
-	boost::shared_ptr<RegionList> regions_touched (framepos_t start, framepos_t end);
-	boost::shared_ptr<RegionList> regions_with_start_within (Evoral::Range<framepos_t>);
-	boost::shared_ptr<RegionList> regions_with_end_within (Evoral::Range<framepos_t>);
+	boost::shared_ptr<RegionList> regions_at (samplepos_t sample);
+	uint32_t                      count_regions_at (samplepos_t) const;
+
+	/** @param start Range start.
+	 *  @param end Range end.
+	 *  @return regions which have some part within this range.
+	 */
+	boost::shared_ptr<RegionList> regions_touched (samplepos_t start, samplepos_t end);
+	boost::shared_ptr<RegionList> regions_with_start_within (Evoral::Range<samplepos_t>);
+	boost::shared_ptr<RegionList> regions_with_end_within (Evoral::Range<samplepos_t>);
 	uint32_t                   region_use_count (boost::shared_ptr<Region>) const;
 	boost::shared_ptr<Region>  find_region (const PBD::ID&) const;
-	boost::shared_ptr<Region>  top_region_at (framepos_t frame);
-	boost::shared_ptr<Region>  top_unmuted_region_at (framepos_t frame);
-	boost::shared_ptr<Region>  find_next_region (framepos_t frame, RegionPoint point, int dir);
-	framepos_t                 find_next_region_boundary (framepos_t frame, int dir);
+	boost::shared_ptr<Region>  top_region_at (samplepos_t sample);
+	boost::shared_ptr<Region>  top_unmuted_region_at (samplepos_t sample);
+	boost::shared_ptr<Region>  find_next_region (samplepos_t sample, RegionPoint point, int dir);
+	samplepos_t                find_next_region_boundary (samplepos_t sample, int dir);
 	bool                       region_is_shuffle_constrained (boost::shared_ptr<Region>);
-	bool                       has_region_at (framepos_t const) const;
+	bool                       has_region_at (samplepos_t const) const;
 
-	bool uses_source (boost::shared_ptr<const Source> src) const;
+	bool uses_source (boost::shared_ptr<const Source> src, bool shallow = false) const;
+	void deep_sources (std::set<boost::shared_ptr<Source> >&) const;
 
-	framepos_t find_next_transient (framepos_t position, int dir);
+	samplepos_t find_next_transient (samplepos_t position, int dir);
 
 	void foreach_region (boost::function<void (boost::shared_ptr<Region>)>);
 
@@ -198,12 +223,12 @@ public:
 	PBD::Signal0<void>      LayeringChanged;
 
 	/** Emitted when regions have moved (not when regions have only been trimmed) */
-	PBD::Signal2<void,std::list< Evoral::RangeMove<framepos_t> > const &, bool> RangesMoved;
+	PBD::Signal2<void,std::list< Evoral::RangeMove<samplepos_t> > const &, bool> RangesMoved;
 
 	/** Emitted when regions are extended; the ranges passed are the new extra time ranges
 	    that these regions now occupy.
 	*/
-	PBD::Signal1<void,std::list< Evoral::Range<framepos_t> > const &> RegionsExtended;
+	PBD::Signal1<void,std::list< Evoral::Range<samplepos_t> > const &> RegionsExtended;
 
 	static std::string bump_name (std::string old_name, Session&);
 
@@ -234,49 +259,50 @@ public:
 		return boost::shared_ptr<Crossfade> ();
 	}
 
-	framepos_t find_next_top_layer_position (framepos_t) const;
+	samplepos_t find_next_top_layer_position (samplepos_t) const;
 	uint32_t combine_ops() const { return _combine_ops; }
 
 	void set_layer (boost::shared_ptr<Region>, double);
 
 	void set_capture_insertion_in_progress (bool yn);
 
-  protected:
+protected:
 	friend class Session;
 
-  protected:
-    class RegionReadLock : public Glib::Threads::RWLock::ReaderLock {
-    public:
-        RegionReadLock (Playlist *pl) : Glib::Threads::RWLock::ReaderLock (pl->region_lock) {}
-        ~RegionReadLock() {}
-    };
+protected:
+	class RegionReadLock : public Glib::Threads::RWLock::ReaderLock {
+		public:
+			RegionReadLock (Playlist *pl) : Glib::Threads::RWLock::ReaderLock (pl->region_lock) {}
+			~RegionReadLock() {}
+	};
 
-    class RegionWriteLock : public Glib::Threads::RWLock::WriterLock {
-    public:
-	    RegionWriteLock (Playlist *pl, bool do_block_notify = true)
-                    : Glib::Threads::RWLock::WriterLock (pl->region_lock)
-                    , playlist (pl)
-                    , block_notify (do_block_notify) {
-                    if (block_notify) {
-                            playlist->delay_notifications();
-                    }
-            }
+	class RegionWriteLock : public Glib::Threads::RWLock::WriterLock {
+		public:
+			RegionWriteLock (Playlist *pl, bool do_block_notify = true)
+				: Glib::Threads::RWLock::WriterLock (pl->region_lock)
+					, playlist (pl)
+					 , block_notify (do_block_notify) {
+						 if (block_notify) {
+							 playlist->delay_notifications();
+						 }
+					 }
 
-        ~RegionWriteLock() {
-                Glib::Threads::RWLock::WriterLock::release ();
-                if (block_notify) {
-                        playlist->release_notifications ();
-                }
-        }
-        Playlist *playlist;
-        bool block_notify;
-    };
+			~RegionWriteLock() {
+				Glib::Threads::RWLock::WriterLock::release ();
+				if (block_notify) {
+					playlist->release_notifications ();
+				}
+			}
+			Playlist *playlist;
+			bool block_notify;
+	};
 
 	RegionListProperty   regions;  /* the current list of regions in the playlist */
 	std::set<boost::shared_ptr<Region> > all_regions; /* all regions ever added to this playlist */
 	PBD::ScopedConnectionList region_state_changed_connections;
+	PBD::ScopedConnectionList region_drop_references_connections;
 	DataType        _type;
-	int             _sort_id;
+	uint32_t        _sort_id;
 	mutable gint    block_notifications;
 	mutable gint    ignore_state_changes;
 	std::set<boost::shared_ptr<Region> > pending_adds;
@@ -285,13 +311,15 @@ public:
 	bool             pending_contents_change;
 	bool             pending_layering;
 
+	std::set<const Region*>   _soloSelectedRegions;
+
 	/** Movements of time ranges caused by region moves; note that
 	 *  region trims are not included in this list; it is used to
 	 *  do automation-follows-regions.
 	 */
-	std::list< Evoral::RangeMove<framepos_t> > pending_range_moves;
+	std::list< Evoral::RangeMove<samplepos_t> > pending_range_moves;
 	/** Extra sections added to regions during trims */
-	std::list< Evoral::Range<framepos_t> >     pending_region_extensions;
+	std::list< Evoral::Range<samplepos_t> >     pending_region_extensions;
 	uint32_t         in_set_state;
 	bool             in_undo;
 	bool             first_set_state;
@@ -309,6 +337,7 @@ public:
 	uint32_t         subcnt;
 	PBD::ID         _orig_track_id;
 	uint32_t        _combine_ops;
+	std::list<PBD::ID> _shared_with_ids;
 
 	void init (bool hide);
 
@@ -324,7 +353,7 @@ public:
 
 	void _set_sort_id ();
 
-	boost::shared_ptr<RegionList> regions_touched_locked (framepos_t start, framepos_t end);
+	boost::shared_ptr<RegionList> regions_touched_locked (samplepos_t start, samplepos_t end);
 
 	void notify_region_removed (boost::shared_ptr<Region>);
 	void notify_region_added (boost::shared_ptr<Region>);
@@ -345,41 +374,42 @@ public:
 
 	void sort_regions ();
 
-	void possibly_splice (framepos_t at, framecnt_t distance, boost::shared_ptr<Region> exclude = boost::shared_ptr<Region>());
-	void possibly_splice_unlocked(framepos_t at, framecnt_t distance, boost::shared_ptr<Region> exclude = boost::shared_ptr<Region>());
+	void possibly_splice (samplepos_t at, samplecnt_t distance, boost::shared_ptr<Region> exclude = boost::shared_ptr<Region>());
+	void possibly_splice_unlocked(samplepos_t at, samplecnt_t distance, boost::shared_ptr<Region> exclude = boost::shared_ptr<Region>());
 
-	void core_splice (framepos_t at, framecnt_t distance, boost::shared_ptr<Region> exclude);
-	void splice_locked (framepos_t at, framecnt_t distance, boost::shared_ptr<Region> exclude);
-	void splice_unlocked (framepos_t at, framecnt_t distance, boost::shared_ptr<Region> exclude);
+	void core_splice (samplepos_t at, samplecnt_t distance, boost::shared_ptr<Region> exclude);
+	void splice_locked (samplepos_t at, samplecnt_t distance, boost::shared_ptr<Region> exclude);
+	void splice_unlocked (samplepos_t at, samplecnt_t distance, boost::shared_ptr<Region> exclude);
 
-	void core_ripple (framepos_t at, framecnt_t distance, RegionList *exclude);
-	void ripple_locked (framepos_t at, framecnt_t distance, RegionList *exclude);
-	void ripple_unlocked (framepos_t at, framecnt_t distance, RegionList *exclude);
+	void core_ripple (samplepos_t at, samplecnt_t distance, RegionList *exclude);
+	void ripple_locked (samplepos_t at, samplecnt_t distance, RegionList *exclude);
+	void ripple_unlocked (samplepos_t at, samplecnt_t distance, RegionList *exclude);
 
 
 	virtual void remove_dependents (boost::shared_ptr<Region> /*region*/) {}
+	virtual void region_going_away (boost::weak_ptr<Region> /*region*/) {}
 
 	virtual XMLNode& state (bool);
 
-	bool add_region_internal (boost::shared_ptr<Region>, framepos_t position);
+	bool add_region_internal (boost::shared_ptr<Region>, samplepos_t position, int32_t sub_num = 0, double quarter_note = 0.0, bool for_music = false);
 
 	int remove_region_internal (boost::shared_ptr<Region>);
 	void copy_regions (RegionList&) const;
-	void partition_internal (framepos_t start, framepos_t end, bool cutting, RegionList& thawlist);
+	void partition_internal (samplepos_t start, samplepos_t end, bool cutting, RegionList& thawlist);
 
-	std::pair<framepos_t, framepos_t> _get_extent() const;
+	std::pair<samplepos_t, samplepos_t> _get_extent() const;
 
-	boost::shared_ptr<Playlist> cut_copy (boost::shared_ptr<Playlist> (Playlist::*pmf)(framepos_t, framecnt_t, bool),
+	boost::shared_ptr<Playlist> cut_copy (boost::shared_ptr<Playlist> (Playlist::*pmf)(samplepos_t, samplecnt_t, bool),
 					      std::list<AudioRange>& ranges, bool result_is_hidden);
-	boost::shared_ptr<Playlist> cut (framepos_t start, framecnt_t cnt, bool result_is_hidden);
-	boost::shared_ptr<Playlist> copy (framepos_t start, framecnt_t cnt, bool result_is_hidden);
+	boost::shared_ptr<Playlist> cut (samplepos_t start, samplecnt_t cnt, bool result_is_hidden);
+	boost::shared_ptr<Playlist> copy (samplepos_t start, samplecnt_t cnt, bool result_is_hidden);
 
 	void relayer ();
 
 	void begin_undo ();
 	void end_undo ();
 
-	void _split_region (boost::shared_ptr<Region>, framepos_t position);
+	virtual void _split_region (boost::shared_ptr<Region>, const MusicSample& position);
 
 	typedef std::pair<boost::shared_ptr<Region>, boost::shared_ptr<Region> > TwoRegions;
 
@@ -392,21 +422,20 @@ public:
 	*/
 	virtual void pre_uncombine (std::vector<boost::shared_ptr<Region> >&, boost::shared_ptr<Region>) {}
 
-  private:
+private:
 	friend class RegionReadLock;
 	friend class RegionWriteLock;
 	mutable Glib::Threads::RWLock region_lock;
 
-  private:
+private:
 	void setup_layering_indices (RegionList const &);
-	void coalesce_and_check_crossfades (std::list<Evoral::Range<framepos_t> >);
-	boost::shared_ptr<RegionList> find_regions_at (framepos_t);
+	void coalesce_and_check_crossfades (std::list<Evoral::Range<samplepos_t> >);
+	boost::shared_ptr<RegionList> find_regions_at (samplepos_t);
 
-	framepos_t _end_space;  //this is used when we are pasting a range with extra space at the end
+	samplepos_t _end_space;  //this is used when we are pasting a range with extra space at the end
+	bool _playlist_shift_active;
 };
 
 } /* namespace ARDOUR */
 
-#endif	/* __ardour_playlist_h__ */
-
-
+#endif /* __ardour_playlist_h__ */

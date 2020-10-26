@@ -1,22 +1,23 @@
 /*
-    Copyright (C) 2011 Tim Mayberry
-    Copyright (C) 2013 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014-2018 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2016 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <glib.h>
 #include <glibmm.h>
@@ -38,6 +39,7 @@ namespace {
 	const char * const backend_env_variable_name = "ARDOUR_BACKEND_PATH";
 	const char * const surfaces_env_variable_name = "ARDOUR_SURFACES_PATH";
 	const char * const export_env_variable_name = "ARDOUR_EXPORT_FORMATS_PATH";
+	const char * const theme_env_variable_name = "ARDOUR_THEMES_PATH";
 	const char * const ladspa_env_variable_name = "LADSPA_PATH";
 	const char * const midi_patch_env_variable_name = "ARDOUR_MIDI_PATCH_PATH";
 	const char * const panner_env_variable_name = "ARDOUR_PANNER_PATH";
@@ -66,6 +68,16 @@ control_protocol_search_path ()
 	spath.add_subdirectory_to_paths (surfaces_dir_name);
 
 	spath += Searchpath(Glib::getenv(surfaces_env_variable_name));
+	return spath;
+}
+
+Searchpath
+theme_search_path ()
+{
+	Searchpath spath (ardour_data_search_path ());
+	spath.add_subdirectory_to_paths (theme_dir_name);
+
+	spath += Searchpath(Glib::getenv(theme_env_variable_name));
 	return spath;
 }
 
@@ -152,6 +164,14 @@ template_search_path ()
 {
 	Searchpath spath (ardour_data_search_path());
 	spath.add_subdirectory_to_paths(templates_dir_name);
+	return spath;
+}
+
+Searchpath
+plugin_metadata_search_path ()
+{
+	Searchpath spath (ardour_data_search_path());
+	spath.add_subdirectory_to_paths(plugin_metadata_dir_name);
 	return spath;
 }
 

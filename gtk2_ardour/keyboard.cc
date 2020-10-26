@@ -1,21 +1,27 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2008-2010 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2014-2018 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/convert.h"
 #include "pbd/error.h"
@@ -23,6 +29,7 @@
 #include "pbd/basename.h"
 
 #include "ardour/filesystem_paths.h"
+#include "ardour/revision.h"
 
 #include "ardour_ui.h"
 #include "public_editor.h"
@@ -30,7 +37,7 @@
 #include "opts.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -41,14 +48,31 @@ using Gtkmm2ext::Keyboard;
 #ifdef __APPLE__
 guint ArdourKeyboard::constraint_mod = Keyboard::PrimaryModifier;
 #else
-guint ArdourKeyboard::constraint_mod = Keyboard::SecondaryModifier;
+guint ArdourKeyboard::constraint_mod = Keyboard::TertiaryModifier;
 #endif
+
+/* TrimDrag::start_grab() */
 guint ArdourKeyboard::trim_contents_mod = Keyboard::PrimaryModifier;
+
+/* TrimDrag::motion() */
 guint ArdourKeyboard::trim_overlap_mod = Keyboard::TertiaryModifier;
-guint ArdourKeyboard::trim_anchored_mod = Keyboard::TertiaryModifier;
-guint ArdourKeyboard::fine_adjust_mod = Keyboard::SecondaryModifier;
-guint ArdourKeyboard::push_points_mod = Keyboard::PrimaryModifier;
-guint ArdourKeyboard::note_size_relative_mod = Keyboard::PrimaryModifier;
+
+/* TrimDrag::start_grab() */
+guint ArdourKeyboard::trim_anchored_mod = Keyboard::PrimaryModifier|Keyboard::TertiaryModifier;
+
+/* ControlPointDrag::motion() && LineDrag::motion()*/
+guint ArdourKeyboard::fine_adjust_mod = Keyboard::PrimaryModifier|Keyboard::SecondaryModifier; // XXX better just 2ndary
+
+/* ControlPointDrag::start_grab() && MarkerDrag::motion() */
+guint ArdourKeyboard::push_points_mod = Keyboard::PrimaryModifier|Keyboard::Level4Modifier;
+
+/* NoteResizeDrag::start_grab() */
+guint ArdourKeyboard::note_size_relative_mod = Keyboard::TertiaryModifier; // XXX better: 2ndary
+
+ArdourKeyboard::ArdourKeyboard (ARDOUR_UI& ardour_ui) : ui (ardour_ui)
+{
+	Keyboard::RelevantModifierKeysChanged.connect (sigc::mem_fun (*this, &ArdourKeyboard::reset_relevant_modifier_key_mask));
+}
 
 void
 ArdourKeyboard::find_bindings_files (map<string,string>& files)
@@ -56,7 +80,7 @@ ArdourKeyboard::find_bindings_files (map<string,string>& files)
 	vector<std::string> found;
 	Searchpath spath = ardour_config_search_path();
 
-	find_files_matching_pattern (found, spath, string_compose ("*.%1", Keyboard::binding_filename_suffix));
+	find_files_matching_pattern (found, spath, string_compose ("*%1", Keyboard::binding_filename_suffix));
 
 	if (found.empty()) {
 		return;
@@ -74,7 +98,7 @@ ArdourKeyboard::find_bindings_files (map<string,string>& files)
 void
 ArdourKeyboard::setup_keybindings ()
 {
-	using namespace ARDOUR_COMMAND_LINE;
+	string keybindings_path = ARDOUR_COMMAND_LINE::keybindings_path;
 	string default_bindings = string_compose ("%1%2", UIConfiguration::instance().get_default_bindings(), Keyboard::binding_filename_suffix);
 	vector<string> strs;
 
@@ -85,6 +109,14 @@ ArdourKeyboard::setup_keybindings ()
 	/* set up the per-user bindings path */
 
 	string lowercase_program_name = downcase (string(PROGRAM_NAME));
+
+	/* extract and append minor vesion */
+	std::string rev (revision);
+	std::size_t pos = rev.find_first_of("-");
+	if (pos != string::npos && pos > 0) {
+		lowercase_program_name += "-";
+		lowercase_program_name += rev.substr (0, pos);
+	}
 
 	user_keybindings_path = Glib::build_filename (user_config_directory(), lowercase_program_name + binding_filename_suffix);
 
@@ -142,8 +174,6 @@ ArdourKeyboard::setup_keybindings ()
 		keybindings_path = default_bindings;
 	}
 
-	cerr << "KP is " << keybindings_path << endl;
-
 	while (true) {
 
 		if (!Glib::path_is_absolute (keybindings_path)) {
@@ -190,8 +220,6 @@ ArdourKeyboard::setup_keybindings ()
 		}
 	}
 
-	info << string_compose (_("Loading keybindings from %1"), keybindings_path) << endmsg;
-
 	load_keybindings (keybindings_path);
 
 	/* catch changes made via some GTK mechanism */
@@ -204,22 +232,14 @@ XMLNode&
 ArdourKeyboard::get_state (void)
 {
 	XMLNode* node = &Keyboard::get_state ();
-	char buf[32];
 
-	snprintf (buf, sizeof (buf), "%d", constraint_mod);
-	node->add_property ("constraint-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", trim_contents_mod);
-	node->add_property ("trim-contents-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", trim_overlap_mod);
-	node->add_property ("trim-overlap-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", trim_anchored_mod);
-	node->add_property ("trim-anchored-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", fine_adjust_mod);
-	node->add_property ("fine-adjust-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", push_points_mod);
-	node->add_property ("push-points-modifier", buf);
-	snprintf (buf, sizeof (buf), "%d", note_size_relative_mod);
-	node->add_property ("note-size-relative-modifier", buf);
+	node->set_property ("constraint-modifier", constraint_mod);
+	node->set_property ("trim-contents-modifier", trim_contents_mod);
+	node->set_property ("trim-overlap-modifier", trim_overlap_mod);
+	node->set_property ("trim-anchored-modifier", trim_anchored_mod);
+	node->set_property ("fine-adjust-modifier", fine_adjust_mod);
+	node->set_property ("push-points-modifier", push_points_mod);
+	node->set_property ("note-size-relative-modifier", note_size_relative_mod);
 
 	return *node;
 }
@@ -227,37 +247,27 @@ ArdourKeyboard::get_state (void)
 int
 ArdourKeyboard::set_state (const XMLNode& node, int version)
 {
-	const XMLProperty* prop;
-
-	if ((prop = node.property ("constraint-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &constraint_mod);
-	}
-
-	if ((prop = node.property ("trim-contents-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &trim_contents_mod);
-	}
-
-	if ((prop = node.property ("trim-overlap-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &trim_overlap_mod);
-	}
-
-	if ((prop = node.property ("trim-anchored-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &trim_anchored_mod);
-	}
-
-	if ((prop = node.property ("fine-adjust-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &fine_adjust_mod);
-	}
-
-	if ((prop = node.property ("push-points-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &push_points_mod);
-	}
-
-	if ((prop = node.property ("note-size-relative-modifier")) != 0) {
-		sscanf (prop->value().c_str(), "%d", &note_size_relative_mod);
-	}
+	node.get_property ("constraint-modifier", constraint_mod);
+	node.get_property ("trim-contents-modifier", trim_contents_mod);
+	node.get_property ("trim-overlap-modifier", trim_overlap_mod);
+	node.get_property ("trim-anchored-modifier", trim_anchored_mod);
+	node.get_property ("fine-adjust-modifier", fine_adjust_mod);
+	node.get_property ("push-points-modifier", push_points_mod);
+	node.get_property ("note-size-relative-modifier", note_size_relative_mod);
 
 	return Keyboard::set_state (node, version);
+}
+
+void
+ArdourKeyboard::reset_relevant_modifier_key_mask ()
+{
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | constraint_mod);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | trim_contents_mod);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | trim_overlap_mod);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | trim_anchored_mod);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | fine_adjust_mod);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | push_points_mod);
+	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | note_size_relative_mod);
 }
 
 /* Snap and snap delta modifiers may contain each other, so we use the
@@ -283,60 +293,72 @@ ArdourKeyboard::indicates_snap_delta (guint state)
 	return (contains_d && ((contains_s && d_contains_s) || !contains_s));
 }
 
+/* Constraint and copy modifiers are both in effect at the beginning of some drags, and may be set ambiguously */
+bool
+ArdourKeyboard::indicates_copy (guint state)
+{
+	const bool contains_c = Keyboard::modifier_state_contains (state, Keyboard::CopyModifier);
+	const bool equals_cs = Keyboard::modifier_state_equals (state, constraint_modifier ());
+
+	return  contains_c && !equals_cs;
+}
+
+bool
+ArdourKeyboard::indicates_constraint (guint state)
+{
+	const bool contains_cs = Keyboard::modifier_state_contains (state, constraint_modifier ());
+	const bool equals_c = Keyboard::modifier_state_equals (state, Keyboard::CopyModifier);
+
+	return contains_cs && !equals_c;
+}
+
 void
 ArdourKeyboard::set_constraint_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~constraint_mod);
 	constraint_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | constraint_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 void
 ArdourKeyboard::set_trim_contents_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~trim_contents_mod);
 	trim_contents_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | trim_contents_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 void
 ArdourKeyboard::set_trim_overlap_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~trim_overlap_mod);
 	trim_overlap_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | trim_overlap_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 void
 ArdourKeyboard::set_trim_anchored_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~trim_anchored_mod);
 	trim_anchored_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | trim_anchored_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 void
 ArdourKeyboard::set_fine_adjust_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~fine_adjust_mod);
 	fine_adjust_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | fine_adjust_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 void
 ArdourKeyboard::set_push_points_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~push_points_mod);
 	push_points_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | push_points_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 void
 ArdourKeyboard::set_note_size_relative_modifier (guint mod)
 {
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask & ~note_size_relative_mod);
 	note_size_relative_mod = mod;
-	RelevantModifierKeyMask = GdkModifierType (RelevantModifierKeyMask | note_size_relative_mod);
+	the_keyboard().reset_relevant_modifier_key_mask();
 }
 
 Selection::Operation

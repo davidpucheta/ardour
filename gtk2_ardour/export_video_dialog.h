@@ -1,28 +1,32 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #ifndef __gtk_ardour_export_video_dialog_h__
 #define __gtk_ardour_export_video_dialog_h__
 
 #include <string>
 
-#include <gtkmm.h>
+#include <gtkmm/box.h>
+#include <gtkmm/button.h>
+#include <gtkmm/comboboxtext.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/label.h>
+#include <gtkmm/progressbar.h>
 
 #include "ardour/types.h"
 #include "ardour/template_utils.h"
@@ -40,7 +44,7 @@
  */
 class ExportVideoDialog : public ArdourDialog , public PBD::ScopedConnectionList
 {
-  public:
+public:
 	ExportVideoDialog ();
 	~ExportVideoDialog ();
 
@@ -51,7 +55,11 @@ class ExportVideoDialog : public ArdourDialog , public PBD::ScopedConnectionList
 	XMLNode& get_state ();
 	void set_state (const XMLNode &);
 
-  private:
+	void on_response (int response_id) {
+		Gtk::Dialog::on_response (response_id);
+	}
+
+private:
 	TimeSelection export_range;
 
 	void on_show ();
@@ -78,7 +86,7 @@ class ExportVideoDialog : public ArdourDialog , public PBD::ScopedConnectionList
 	bool _normalize;
 
 	void finished ();
-	void update_progress (ARDOUR::framecnt_t, ARDOUR::framecnt_t);
+	void update_progress (ARDOUR::samplecnt_t, ARDOUR::samplecnt_t);
 
 	boost::shared_ptr<ARDOUR::ExportStatus> status;
 	sigc::connection audio_progress_connection;

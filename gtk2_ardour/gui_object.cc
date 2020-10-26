@@ -1,27 +1,28 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 #include <sstream>
 
 #include "gui_object.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using std::string;
 
@@ -46,7 +47,7 @@ GUIObjectState::get_or_add_node (XMLNode* parent, const string& id)
 	XMLNode* child = get_node (parent, id);
 	if (!child) {
 		child = new XMLNode (X_("Object"));
-		child->add_property (X_("id"), id);
+		child->set_property (X_("id"), id);
 		parent->add_child_nocopy (*child);
 	}
 	return child;
@@ -67,9 +68,9 @@ GUIObjectState::get_or_add_node (const string& id)
 	if (i != object_map.end()) {
 		return i->second;
 	}
-	//assert (get_node (&_state, id) == 0); // XXX
+	//assert (get_node (&_state, id) == 0); // XXX performance penalty due to get_node()
 	XMLNode* child = new XMLNode (X_("Object"));
-	child->add_property (X_("id"), id);
+	child->set_property (X_("id"), id);
 	_state.add_child_nocopy (*child);
 	object_map[id] = child;
 	return child;
@@ -87,14 +88,15 @@ GUIObjectState::get_string (const string& id, const string& prop_name, bool* emp
 {
 	std::map <std::string, XMLNode*>::const_iterator i = object_map.find (id);
 	if (i == object_map.end()) {
-		//assert (get_node (&_state, id) == 0); // XXX
+		//assert (get_node (&_state, id) == 0); // XXX performance penalty due to get_node()
 		if (empty) {
 			*empty = true;
 		}
 		return string ();
 	}
+	//assert (get_node (&_state, id) == i->second); // XXX performance penalty due to get_node()
 
-	const XMLProperty* p (i->second->property (prop_name));
+	XMLProperty const * p (i->second->property (prop_name));
 	if (!p) {
 		if (empty) {
 			*empty = true;
@@ -130,7 +132,7 @@ GUIObjectState::set_state (const XMLNode& node)
 		if ((*i)->name() != X_("Object")) {
 			continue;
 		}
-		const XMLProperty* prop = (*i)->property (X_("id"));
+		XMLProperty const * prop = (*i)->property (X_("id"));
 		if (!prop) {
 			continue;
 		}
@@ -154,4 +156,14 @@ GUIObjectState::all_ids () const
 		ids.push_back (i->first);
 	}
 	return ids;
+}
+
+void
+GUIObjectState::remove_property (const string & id, const string & prop_name)
+{
+	std::map <std::string, XMLNode*>::iterator i = object_map.find (id);
+	if (i == object_map.end()) {
+		return;
+	}
+	i->second->remove_property (prop_name);
 }

@@ -19,7 +19,7 @@
 			OutputDirectory="$(ProjectDir)\$(ConfigurationName)\bin"
 			IntermediateDirectory="$(ProjectDir)\$(ConfigurationName)\obj\$(ProjectName)"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus3.vsprops"
+			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus5.vsprops"
 			CharacterSet="2"
 			>
 			<Tool
@@ -41,8 +41,8 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions="/FI$(TargetSxsFolder)\targetsxs.h"
 				Optimization="0"
-				AdditionalIncludeDirectories="..;..\..\pbd;&quot;$(GenericIncludeFolder)&quot;;&quot;$(GenericLibraryFolder)\glib-2.0\include&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;"
-				PreprocessorDefinitions="PLATFORM_WINDOWS;COMPILER_MSVC;UINTSDEFINED=1;BUILDING_EVORAL;LIBEVORAL_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;WIN32;_WIN32;_DEBUG;DEBUG=&quot;Debug&quot;;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libevoral\&quot;&quot;;PROGRAM_NAME=&quot;\&quot;Mixbus3\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TIMECODE=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;;CURRENT_SESSION_FILE_VERSION=3001"
+				AdditionalIncludeDirectories="..;..\..\pbd;..\..\temporal;&quot;$(GenericIncludeFolder)&quot;;&quot;$(GenericLibraryFolder)\glib-2.0\include&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;"
+				PreprocessorDefinitions="PLATFORM_WINDOWS;COMPILER_MSVC;UINTSDEFINED=1;BUILDING_EVORAL;LIBEVORAL_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;BOOST_ATOMIC_NO_LIB;WIN32;_WIN32;_DEBUG;DEBUG=&quot;Debug&quot;;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libevoral\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TEMPORAL=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;"
 				MinimalRebuild="true"
 				RuntimeLibrary="3"
 				WarningLevel="3"
@@ -96,7 +96,7 @@
 			OutputDirectory="$(ProjectDir)\$(ConfigurationName)\bin"
 			IntermediateDirectory="$(ProjectDir)\$(ConfigurationName)\obj\$(ProjectName)"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus3.vsprops"
+			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus5.vsprops"
 			CharacterSet="2"
 			WholeProgramOptimization="1"
 			>
@@ -120,8 +120,8 @@
 				AdditionalOptions="/FI$(TargetSxsFolder)\targetsxs.h"
 				Optimization="2"
 				InlineFunctionExpansion="1"
-				AdditionalIncludeDirectories="..;..\..\pbd;&quot;$(GenericIncludeFolder)&quot;;&quot;$(GenericLibraryFolder)\glib-2.0\include&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;"
-				PreprocessorDefinitions="PLATFORM_WINDOWS;COMPILER_MSVC;UINTSDEFINED=1;_SECURE_SCL=0;BUILDING_EVORAL;LIBEVORAL_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;WIN32;_WIN32;NDEBUG;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libevoral\&quot;&quot;;PROGRAM_NAME=&quot;\&quot;Mixbus3\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TIMECODE=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;;CURRENT_SESSION_FILE_VERSION=3001"
+				AdditionalIncludeDirectories="..;..\..\pbd;..\..\temporal;&quot;$(GenericIncludeFolder)&quot;;&quot;$(GenericLibraryFolder)\glib-2.0\include&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;"
+				PreprocessorDefinitions="PLATFORM_WINDOWS;COMPILER_MSVC;UINTSDEFINED=1;_SECURE_SCL=0;BUILDING_EVORAL;LIBEVORAL_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;BOOST_ATOMIC_NO_LIB;WIN32;_WIN32;NDEBUG;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libevoral\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TEMPORAL=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;"
 				StringPooling="false"
 				RuntimeLibrary="2"
 				EnableEnhancedInstructionSet="1"
@@ -175,13 +175,13 @@
 			OutputDirectory="$(ProjectDir)\$(ConfigurationName)\bin"
 			IntermediateDirectory="$(ProjectDir)\$(ConfigurationName)\obj\$(ProjectName)"
 			ConfigurationType="2"
-			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus3.vsprops"
+			InheritedPropertySheets="..\..\..\MSVCMixbus3\MSVCMixbus5.vsprops"
 			CharacterSet="2"
 			WholeProgramOptimization="0"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
-				CommandLine="copy /Y &quot;..\src\Note.cpp&quot; &quot;..\src\Note.impl&quot;&#x0D;&#x0A;"
+				CommandLine="copy /Y &quot;..\Note.cc&quot; &quot;..\src\Note.impl&quot;&#x0D;&#x0A;"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
@@ -199,8 +199,8 @@
 				Name="VCCLCompilerTool"
 				AdditionalOptions="/FI$(TargetSxsFolder)\targetsxs.h"
 				Optimization="0"
-				AdditionalIncludeDirectories="..;..\..\pbd;&quot;$(GenericIncludeFolder)&quot;;&quot;$(GenericLibraryFolder)\glib-2.0\include&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;"
-				PreprocessorDefinitions="PLATFORM_WINDOWS;COMPILER_MSVC;UINTSDEFINED=1;_SECURE_SCL=0;BUILDING_EVORAL;LIBEVORAL_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;WIN32;_WIN32;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libevoral\&quot;&quot;;PROGRAM_NAME=&quot;\&quot;Mixbus3\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TIMECODE=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;;CURRENT_SESSION_FILE_VERSION=3001"
+				AdditionalIncludeDirectories="..;..\..\pbd;..\..\temporal;&quot;$(GenericIncludeFolder)&quot;;&quot;$(GenericLibraryFolder)\glib-2.0\include&quot;;&quot;$(GenericIncludeFolder)\ardourext&quot;"
+				PreprocessorDefinitions="PLATFORM_WINDOWS;COMPILER_MSVC;UINTSDEFINED=1;_SECURE_SCL=0;BUILDING_EVORAL;LIBEVORAL_DLL_EXPORTS;INCLUDE_ARDOUR_MISCELLANEOUS=1;BOOST_REGEX_DYN_LINK;BOOST_REGEX_NO_LIB;BOOST_CHRONO_NO_LIB;BOOST_SYSTEM_NO_LIB;BOOST_THREAD_NO_LIB;BOOST_DATE_TIME_NO_LIB;BOOST_ATOMIC_NO_LIB;WIN32;_WIN32;ARCH_X86;USE_XMMINTRIN;BUILD_SSE_OPTIMIZATIONS;ENABLE_NLS;PACKAGE=&quot;\&quot;libevoral\&quot;&quot;;_REENTRANT;_USE_MATH_DEFINES;_LARGEFILE_SOURCE;_LARGEFILE64_SOURCE;LIBC_DISABLE_DEPRECATED;BOOST_SYSTEM_NO_DEPRECATED;__STDC_LIMIT_MACROS;__STDC_FORMAT_MACROS;INTERNAL_SHARED_LIBS=1;JACK_SESSION=1;HAVE_GLIB=1;HAVE_GTHREAD=1;HAVE_SNDFILE=1;HAVE_GIOMM=1;HAVE_CURL=1;HAVE_LO=1;HAVE_MODE_T=1;PHONE_HOME=1;FREESOUND=1;WINDOWS_KEY=\&quot;Mod4&gt;&lt;Super\&quot;;IS_OSX=0;HAVE_XML=1;HAVE_UUID=1;HAVE_LIBS_PBD=1;HAVE_JACK=1;HAVE_LIBS_MIDIPP2=1;HAVE_LIBS_EVORAL=1;HAVE_FFTW3=1;HAVE_FFTW3F=1;HAVE_AUBIO=1;HAVE_LIBS_VAMP_SDK=1;HAVE_LIBS_VAMP_PLUGINS=1;HAVE_LIBS_TAGLIB=1;HAVE_LIBS_LIBLTC=1;HAVE_LIBS_RUBBERBAND=1;HAVE_CONTROL_PROTOCOL=1;HAVE_FRONTIER=1;HAVE_GENERIC_MIDI=1;HAVE_MACKIE=1;HAVE_OSC=1;HAVE_TRANZPORT=1;HAVE_WIIMOTE=1;HAVE_LIBS_SURFACES=1;HAVE_2IN2OUT=1;HAVE_1IN2OUT=1;HAVE_VBAP=1;HAVE_LIBS_PANNERS=1;HAVE_LIBS_TEMPORAL=1;HAVE_LRDF=1;HAVE_SAMPLERATE=1;HAVE_SERD=1;HAVE_SORD=1;HAVE_SRATOM=1;HAVE_LILV=1;HAVE_LILV_0_16_0=1;HAVE_OGG=1;HAVE_FLAC=1;HAVE_RUBBERBAND=1;USE_RUBBERBAND=1;HAVE_JACK_SESSION=1;HAVE_UNISTD=1;HAVE_JACK_ON_INFO_SHUTDOWN=1;HAVE_JACK_VIDEO_SUPPORT=1;HAVE_BOOST_SCOPED_PTR_HPP=1;HAVE_BOOST_PTR_CONTAINER_PTR_LIST_HPP=1;HAVE_LIBS_ARDOUR=1;HAVE_GTKMM=1;HAVE_GTK=1;HAVE_LIBS_GTKMM2EXT=1;HAVE_LIBS_CLEARLOOKS_NEWER=1;HAVE_BOOST_FORMAT_HPP=1;HAVE_LIBS_AUDIOGRAPHER=1;HAVE_GNOMECANVAS=0;HAVE_GNOMECANVASMM=0;HAVE_X11=0;HAVE_FONTCONFIG=1;HAVE_BOOST_SHARED_PTR_HPP=1;HAVE_BOOST_WEAK_PTR_HPP=1;HAVE_GTK2_ARDOUR=1;HAVE_EXPORT=1;HAVE_MIDI_MAPS=1;HAVE_MCP=1;HAVE_PATCHFILES=1;HAVE_TOOLS_SANITY_CHECK=1;SMF_VERSION=\&quot;1.2\&quot;"
 				StringPooling="false"
 				RuntimeLibrary="2"
 				EnableEnhancedInstructionSet="1"
@@ -260,58 +260,46 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
-				RelativePath="..\src\Control.cpp"
+				RelativePath="..\Control.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\ControlList.cpp"
+				RelativePath="..\ControlList.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\ControlSet.cpp"
+				RelativePath="..\ControlSet.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\Curve.cpp"
+				RelativePath="..\Curve.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\debug.cpp"
+				RelativePath="..\debug.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\Event.cpp"
+				RelativePath="..\Event.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\midi_util.cpp"
+				RelativePath="..\Sequence.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\MIDIEvent.cpp"
+				RelativePath="..\SMF.cc"
 				>
 			</File>
 			<File
-				RelativePath="..\src\Sequence.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\src\SMF.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\src\TimeConverter.cpp"
-				>
-			</File>
-			<File
-				RelativePath="..\src\types.cpp"
+				RelativePath="..\TimeConverter.cc"
 				>
 			</File>
 			<Filter
 				Name="libsmf"
 				>
 				<File
-					RelativePath="..\src\libsmf\smf.c"
+					RelativePath="..\libsmf\smf.c"
 					>
 					<FileConfiguration
 						Name="Debug 32|Win32"
@@ -345,7 +333,7 @@
 					</FileConfiguration>
 				</File>
 				<File
-					RelativePath="..\src\libsmf\smf_decode.c"
+					RelativePath="..\libsmf\smf_decode.c"
 					>
 					<FileConfiguration
 						Name="Debug 32|Win32"
@@ -373,7 +361,7 @@
 					</FileConfiguration>
 				</File>
 				<File
-					RelativePath="..\src\libsmf\smf_load.c"
+					RelativePath="..\libsmf\smf_load.c"
 					>
 					<FileConfiguration
 						Name="Debug 32|Win32"
@@ -401,7 +389,7 @@
 					</FileConfiguration>
 				</File>
 				<File
-					RelativePath="..\src\libsmf\smf_save.c"
+					RelativePath="..\libsmf\smf_save.c"
 					>
 					<FileConfiguration
 						Name="Debug 32|Win32"
@@ -429,7 +417,7 @@
 					</FileConfiguration>
 				</File>
 				<File
-					RelativePath="..\src\libsmf\smf_tempo.c"
+					RelativePath="..\libsmf\smf_tempo.c"
 					>
 					<FileConfiguration
 						Name="Debug 32|Win32"
@@ -464,31 +452,27 @@
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
 			<File
-				RelativePath="..\evoral\Beats.hpp"
+				RelativePath="..\evoral\ControlList.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\ControlList.hpp"
+				RelativePath="..\evoral\ControlSet.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\ControlSet.hpp"
+				RelativePath="..\evoral\Curve.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\Curve.hpp"
+				RelativePath="..\evoral\Event.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\Event.hpp"
+				RelativePath="..\evoral\EventList.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\EventList.hpp"
-				>
-			</File>
-			<File
-				RelativePath="..\evoral\EventSink.hpp"
+				RelativePath="..\evoral\EventSink.h"
 				>
 			</File>
 			<File
@@ -500,63 +484,59 @@
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\MIDIEvent.hpp"
+				RelativePath="..\evoral\MIDIXML.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\Note.hpp"
+				RelativePath="..\evoral\Note.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\OldSMF.hpp"
+				RelativePath="..\evoral\Parameter.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\Parameter.hpp"
+				RelativePath="..\evoral\ParameterDescriptor.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\ParameterDescriptor.hpp"
+				RelativePath="..\evoral\PatchChange.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\PatchChange.hpp"
+				RelativePath="..\evoral\Range.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\Range.hpp"
+				RelativePath="..\evoral\Sequence.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\Sequence.hpp"
+				RelativePath="..\libsmf\smf.h"
 				>
 			</File>
 			<File
-				RelativePath="..\src\libsmf\smf.h"
+				RelativePath="..\evoral\SMF.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\SMF.hpp"
+				RelativePath="..\libsmf\smf_private.h"
 				>
 			</File>
 			<File
-				RelativePath="..\src\libsmf\smf_private.h"
+				RelativePath="..\evoral\SMFReader.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\SMFReader.hpp"
+				RelativePath="..\evoral\TimeConverter.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\TimeConverter.hpp"
+				RelativePath="..\evoral\TypeMap.h"
 				>
 			</File>
 			<File
-				RelativePath="..\evoral\TypeMap.hpp"
-				>
-			</File>
-			<File
-				RelativePath="..\evoral\types.hpp"
+				RelativePath="..\evoral\types.h"
 				>
 			</File>
 			<File
@@ -570,7 +550,7 @@
 			UniqueIdentifier="{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}"
 			>
 			<File
-				RelativePath="..\..\..\icons\win32\msvc_resources.rc"
+				RelativePath="..\..\..\gtk2_ardour\win32\msvc_resources.rc"
 				>
 			</File>
 		</Filter>

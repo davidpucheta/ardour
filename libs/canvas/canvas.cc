@@ -1,26 +1,26 @@
 /*
-    Copyright (C) 2011 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
-#if !defined USE_CAIRO_IMAGE_SURFACE && !defined NDEBUG
-#define OPTIONAL_CAIRO_IMAGE_SURFACE
-#endif
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2015 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2014-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /** @file  canvas/canvas.cc
  *  @brief Implementation of the main canvas classes.
@@ -38,11 +38,15 @@
 #include "pbd/stacktrace.h"
 
 #include "canvas/canvas.h"
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 #include "canvas/debug.h"
 #include "canvas/line.h"
 #include "canvas/scroll_group.h"
-#include "canvas/utils.h"
+
+#ifdef __APPLE__
+#include <gdk/gdk.h>
+#include "gtkmm2ext/nsglview.h"
+#endif
 
 using namespace std;
 using namespace ArdourCanvas;
@@ -52,9 +56,25 @@ uint32_t Canvas::tooltip_timeout_msecs = 750;
 /** Construct a new Canvas */
 Canvas::Canvas ()
 	: _root (this)
-        , _bg_color (rgba_to_color (0, 1.0, 0.0, 1.0))
+	, _bg_color (Gtkmm2ext::rgba_to_color (0, 1.0, 0.0, 1.0))
+	, _last_render_start_timestamp(0)
+	, _use_intermediate_surface (false)
 {
+#ifdef __APPLE__
+	_use_intermediate_surface = true;
+#else
+	_use_intermediate_surface = NULL != g_getenv("ARDOUR_INTERMEDIATE_SURFACE");
+#endif
 	set_epoch ();
+}
+
+void
+Canvas::use_intermediate_surface (bool yn)
+{
+	if (_use_intermediate_surface == yn) {
+		return;
+	}
+	_use_intermediate_surface = yn;
 }
 
 void
@@ -96,6 +116,10 @@ Canvas::zoomed ()
 void
 Canvas::render (Rect const & area, Cairo::RefPtr<Cairo::Context> const & context) const
 {
+	PreRender (); // emit signal
+
+	_last_render_start_timestamp = g_get_monotonic_time();
+
 #ifdef CANVAS_DEBUG
 	if (DEBUG_ENABLED(PBD::DEBUG::CanvasRender)) {
 		cerr << this << " RENDER: " << area << endl;
@@ -107,20 +131,20 @@ Canvas::render (Rect const & area, Cairo::RefPtr<Cairo::Context> const & context
 
 	render_count = 0;
 
-	boost::optional<Rect> root_bbox = _root.bounding_box();
+	Rect root_bbox = _root.bounding_box();
 	if (!root_bbox) {
 		/* the root has no bounding box, so there's nothing to render */
 		return;
 	}
 
-	boost::optional<Rect> draw = root_bbox->intersection (area);
+	Rect draw = root_bbox.intersection (area);
 	if (draw) {
 
 		/* there's a common area between the root and the requested
 		   area, so render it.
 		*/
 
-		_root.render (*draw, context);
+		_root.render (draw, context);
 
 #if defined CANVAS_DEBUG && !PLATFORM_WINDOWS
 		if (getenv ("CANVAS_HARLEQUIN_DEBUGGING")) {
@@ -128,13 +152,41 @@ Canvas::render (Rect const & area, Cairo::RefPtr<Cairo::Context> const & context
 			double r = (random() % 65536) /65536.0;
 			double g = (random() % 65536) /65536.0;
 			double b = (random() % 65536) /65536.0;
-			context->rectangle (draw->x0, draw->y0, draw->x1 - draw->x0, draw->y1 - draw->y0);
+			context->rectangle (draw.x0, draw.y0, draw.x1 - draw.x0, draw.y1 - draw.y0);
 			context->set_source_rgba (r, g, b, 0.25);
 			context->fill ();
 		}
 #endif
 	}
 
+}
+
+void
+Canvas::prepare_for_render (Rect const & area) const
+{
+	Rect root_bbox = _root.bounding_box();
+	if (!root_bbox) {
+		/* the root has no bounding box, so there's nothing to render */
+		return;
+	}
+
+	Rect draw = root_bbox.intersection (area);
+
+	if (draw) {
+		_root.prepare_for_render (draw);
+	}
+}
+
+gint64
+Canvas::get_microseconds_since_render_start () const
+{
+	gint64 timestamp = g_get_monotonic_time();
+
+	if (_last_render_start_timestamp == 0 || timestamp <= _last_render_start_timestamp) {
+		return 0;
+	}
+
+	return timestamp - _last_render_start_timestamp;
 }
 
 ostream&
@@ -181,10 +233,10 @@ Canvas::dump (ostream& o) const
 void
 Canvas::item_shown_or_hidden (Item* item)
 {
-	boost::optional<Rect> bbox = item->bounding_box ();
+	Rect bbox = item->bounding_box ();
 	if (bbox) {
-		if (item->item_to_window (*bbox).intersection (visible_area ())) {
-			queue_draw_item_area (item, bbox.get ());
+		if (item->item_to_window (bbox).intersection (visible_area ())) {
+			queue_draw_item_area (item, bbox);
 		}
 	}
 }
@@ -196,10 +248,10 @@ Canvas::item_shown_or_hidden (Item* item)
 void
 Canvas::item_visual_property_changed (Item* item)
 {
-	boost::optional<Rect> bbox = item->bounding_box ();
+	Rect bbox = item->bounding_box ();
 	if (bbox) {
-		if (item->item_to_window (*bbox).intersection (visible_area ())) {
-			queue_draw_item_area (item, bbox.get ());
+		if (item->item_to_window (bbox).intersection (visible_area ())) {
+			queue_draw_item_area (item, bbox);
 		}
 	}
 }
@@ -210,25 +262,31 @@ Canvas::item_visual_property_changed (Item* item)
  *  in the item's coordinates.
  */
 void
-Canvas::item_changed (Item* item, boost::optional<Rect> pre_change_bounding_box)
+Canvas::item_changed (Item* item, Rect pre_change_bounding_box)
 {
-
 	Rect window_bbox = visible_area ();
 
 	if (pre_change_bounding_box) {
-
-		if (item->item_to_window (*pre_change_bounding_box).intersection (window_bbox)) {
+		if (item->item_to_window (pre_change_bounding_box).intersection (window_bbox)) {
 			/* request a redraw of the item's old bounding box */
-			queue_draw_item_area (item, pre_change_bounding_box.get ());
+			queue_draw_item_area (item, pre_change_bounding_box);
 		}
 	}
 
-	boost::optional<Rect> post_change_bounding_box = item->bounding_box ();
-	if (post_change_bounding_box) {
+	Rect post_change_bounding_box = item->bounding_box ();
 
-		if (item->item_to_window (*post_change_bounding_box).intersection (window_bbox)) {
+	if (post_change_bounding_box) {
+		Rect const window_intersection =
+		    item->item_to_window (post_change_bounding_box).intersection (window_bbox);
+
+		if (window_intersection) {
 			/* request a redraw of the item's new bounding box */
-			queue_draw_item_area (item, post_change_bounding_box.get ());
+			queue_draw_item_area (item, post_change_bounding_box);
+
+			// Allow item to do any work necessary to prepare for being rendered.
+			item->prepare_for_render (window_intersection);
+		} else {
+			// No intersection with visible window area
 		}
 	}
 }
@@ -324,7 +382,7 @@ Canvas::canvas_to_window (Duple const & d, bool rounded) const
  *  the move, in its parent's coordinates.
  */
 void
-Canvas::item_moved (Item* item, boost::optional<Rect> pre_change_parent_bounding_box)
+Canvas::item_moved (Item* item, Rect pre_change_parent_bounding_box)
 {
 	if (pre_change_parent_bounding_box) {
 		/* request a redraw of where the item used to be. The box has
@@ -336,13 +394,13 @@ Canvas::item_moved (Item* item, boost::optional<Rect> pre_change_parent_bounding
 		 * invalidation area. If we use the parent (which has not
 		 * moved, then this will work.
 		 */
-		queue_draw_item_area (item->parent(), pre_change_parent_bounding_box.get ());
+		queue_draw_item_area (item->parent(), pre_change_parent_bounding_box);
 	}
 
-	boost::optional<Rect> post_change_bounding_box = item->bounding_box ();
+	Rect post_change_bounding_box = item->bounding_box ();
 	if (post_change_bounding_box) {
 		/* request a redraw of where the item now is */
-		queue_draw_item_area (item, post_change_bounding_box.get ());
+		queue_draw_item_area (item, post_change_bounding_box);
 	}
 }
 
@@ -363,15 +421,15 @@ Canvas::set_tooltip_timeout (uint32_t msecs)
 }
 
 void
-Canvas::set_background_color (Color c)
+Canvas::set_background_color (Gtkmm2ext::Color c)
 {
-        _bg_color = c;
+	_bg_color = c;
 
-        boost::optional<Rect> r = _root.bounding_box();
+	Rect r = _root.bounding_box();
 
-        if (r) {
-                request_redraw (_root.item_to_window (r.get()));
-        }
+	if (r) {
+		request_redraw (_root.item_to_window (r));
+	}
 }
 
 void
@@ -388,15 +446,33 @@ GtkCanvas::GtkCanvas ()
 	, _new_current_item (0)
 	, _grabbed_item (0)
 	, _focused_item (0)
-	, _single_exposure (1)
+	, _single_exposure (true)
+	, _use_image_surface (false)
 	, current_tooltip_item (0)
 	, tooltip_window (0)
 	, _in_dtor (false)
+	, _nsglview (0)
 {
+#ifdef USE_CAIRO_IMAGE_SURFACE /* usually Windows builds */
+	_use_image_surface = true;
+#else
+	_use_image_surface = NULL != g_getenv("ARDOUR_IMAGE_SURFACE");
+#endif
+
 	/* these are the events we want to know about */
 	add_events (Gdk::BUTTON_PRESS_MASK | Gdk::BUTTON_RELEASE_MASK | Gdk::POINTER_MOTION_MASK |
 		    Gdk::SCROLL_MASK | Gdk::ENTER_NOTIFY_MASK | Gdk::LEAVE_NOTIFY_MASK |
 		    Gdk::KEY_PRESS_MASK | Gdk::KEY_RELEASE_MASK);
+}
+
+void
+GtkCanvas::use_nsglview ()
+{
+	assert (!_nsglview);
+	assert (!is_realized());
+#ifdef ARDOUR_CANVAS_NSVIEW_TAG // patched gdkquartz.h
+	_nsglview = Gtkmm2ext::nsglview_create (this);
+#endif
 }
 
 void
@@ -715,15 +791,24 @@ GtkCanvas::deliver_event (GdkEvent* event)
 	return false;
 }
 
+void
+GtkCanvas::item_shown_or_hidden (Item* item)
+{
+	if (item == current_tooltip_item) {
+		stop_tooltip_timeout ();
+	}
+	Canvas::item_shown_or_hidden (item);
+}
+
 /** Called when an item is being destroyed.
  *  @param item Item being destroyed.
  *  @param bounding_box Last known bounding box of the item.
  */
 void
-GtkCanvas::item_going_away (Item* item, boost::optional<Rect> bounding_box)
+GtkCanvas::item_going_away (Item* item, Rect bounding_box)
 {
 	if (bounding_box) {
-		queue_draw_item_area (item, bounding_box.get ());
+		queue_draw_item_area (item, bounding_box);
 	}
 
 	if (_new_current_item == item) {
@@ -758,21 +843,37 @@ GtkCanvas::item_going_away (Item* item, boost::optional<Rect> bounding_box)
 }
 
 void
+GtkCanvas::on_realize ()
+{
+	Gtk::EventBox::on_realize();
+#ifdef __APPLE__
+	if (_nsglview) {
+		Gtkmm2ext::nsglview_overlay (_nsglview, get_window()->gobj());
+	}
+#endif
+}
+
+void
 GtkCanvas::on_size_allocate (Gtk::Allocation& a)
 {
 	EventBox::on_size_allocate (a);
-#ifdef OPTIONAL_CAIRO_IMAGE_SURFACE
-	if (getenv("ARDOUR_IMAGE_SURFACE")) {
-#endif
-#if defined USE_CAIRO_IMAGE_SURFACE || defined OPTIONAL_CAIRO_IMAGE_SURFACE
-	/* allocate an image surface as large as the canvas itself */
 
-	canvas_image.clear ();
-	canvas_image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, a.get_width(), a.get_height());
-#endif
-#ifdef OPTIONAL_CAIRO_IMAGE_SURFACE
+	if (_use_image_surface) {
+		_canvas_image.clear ();
+		_canvas_image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, a.get_width(), a.get_height());
+	}
+
+#ifdef __APPLE__
+	if (_nsglview) {
+		gint xx, yy;
+		gtk_widget_translate_coordinates(
+				GTK_WIDGET(gobj()),
+				GTK_WIDGET(get_toplevel()->gobj()),
+				0, 0, &xx, &yy);
+		Gtkmm2ext::nsglview_resize (_nsglview, xx, yy, a.get_width(), a.get_height());
 	}
 #endif
+
 }
 
 /** Handler for GDK expose events.
@@ -785,70 +886,99 @@ GtkCanvas::on_expose_event (GdkEventExpose* ev)
 	if (_in_dtor) {
 		return true;
 	}
+#ifdef __APPLE__
+	if (_nsglview) {
+		return true;
+	}
+#endif
 
-#ifdef OPTIONAL_CAIRO_IMAGE_SURFACE
+#ifdef CANVAS_PROFILE
+	const int64_t start = g_get_monotonic_time ();
+#endif
+
 	Cairo::RefPtr<Cairo::Context> draw_context;
-	Cairo::RefPtr<Cairo::Context> window_context;
-	if (getenv("ARDOUR_IMAGE_SURFACE")) {
-		if (!canvas_image) {
-			canvas_image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, get_width(), get_height());
+	if (_use_image_surface) {
+		if (!_canvas_image) {
+			_canvas_image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, get_width(), get_height());
 		}
-		draw_context = Cairo::Context::create (canvas_image);
-		window_context = get_window()->create_cairo_context ();
+		draw_context = Cairo::Context::create (_canvas_image);
 	} else {
 		draw_context = get_window()->create_cairo_context ();
 	}
-#elif defined USE_CAIRO_IMAGE_SURFACE
-	if (!canvas_image) {
-		canvas_image = Cairo::ImageSurface::create (Cairo::FORMAT_ARGB32, get_width(), get_height());
+
+	draw_context->rectangle (ev->area.x, ev->area.y, ev->area.width, ev->area.height);
+	draw_context->clip();
+
+	/* (this comment applies to macOS, but is other platforms
+	 * also benefit from using CPU-rendering on a image-surface
+	 * with a final bitblt).
+	 *
+	 * group calls cairo_quartz_surface_create() which
+	 * effectively uses a CGBitmapContext + image-surface
+	 *
+	 * This avoids expensive argb32_image_mark_image() during drawing.
+	 * Although the final paint() operation still takes the slow path
+	 * through image_mark_image instead of ColorMaskCopyARGB888_sse :(
+	 *
+	 * profiling indicates a speed up of factor 2. (~ 5-10ms render time,
+	 * instead of 10-20ms, which is still slow compared to XCB and win32 surfaces (~0.2 ms)
+	 *
+	 * Fixing this for good likely involves changes to GdkQuartzWindow, GdkQuartzView
+	 */
+	if (_use_intermediate_surface && !_use_image_surface) {
+		draw_context->push_group ();
 	}
-        Cairo::RefPtr<Cairo::Context> draw_context = Cairo::Context::create (canvas_image);
-	Cairo::RefPtr<Cairo::Context> window_context = get_window()->create_cairo_context ();
-#else
-	Cairo::RefPtr<Cairo::Context> draw_context = get_window()->create_cairo_context ();
-#endif
 
-        /* draw background color */
+	/* draw background color */
+	draw_context->rectangle (ev->area.x, ev->area.y, ev->area.width, ev->area.height);
+	Gtkmm2ext::set_source_rgba (draw_context, _bg_color);
+	draw_context->fill ();
 
-        draw_context->rectangle (ev->area.x, ev->area.y, ev->area.width, ev->area.height);
-        draw_context->clip_preserve ();
-        set_source_rgba (draw_context, _bg_color);
-        draw_context->fill ();
+	/* render canvas */
+	if (_single_exposure) {
 
-        /* render canvas */
-		if ( _single_exposure ) {
+		Canvas::render (Rect (ev->area.x, ev->area.y, ev->area.x + ev->area.width, ev->area.y + ev->area.height), draw_context);
 
-			render (Rect (ev->area.x, ev->area.y, ev->area.x + ev->area.width, ev->area.y + ev->area.height), draw_context);
+	} else {
+		GdkRectangle* rects;
+		gint nrects;
 
-		} else {
-			GdkRectangle* rects;
-			gint nrects;
-
-			gdk_region_get_rectangles (ev->region, &rects, &nrects);
-			for (gint n = 0; n < nrects; ++n) {
-				draw_context->set_identity_matrix();  //reset the cairo matrix, just in case someone left it transformed after drawing ( cough )
-				render (Rect (rects[n].x, rects[n].y, rects[n].x + rects[n].width, rects[n].y + rects[n].height), draw_context);
-			}
-			g_free (rects);
+		gdk_region_get_rectangles (ev->region, &rects, &nrects);
+		for (gint n = 0; n < nrects; ++n) {
+			draw_context->set_identity_matrix();  //reset the cairo matrix, just in case someone left it transformed after drawing ( cough )
+			Canvas::render (Rect (rects[n].x, rects[n].y, rects[n].x + rects[n].width, rects[n].y + rects[n].height), draw_context);
 		}
-
-#ifdef OPTIONAL_CAIRO_IMAGE_SURFACE
-	if (getenv("ARDOUR_IMAGE_SURFACE")) {
-#endif
-#if defined USE_CAIRO_IMAGE_SURFACE || defined OPTIONAL_CAIRO_IMAGE_SURFACE
-	/* now blit our private surface back to the GDK one */
-
-	window_context->rectangle (ev->area.x, ev->area.y, ev->area.width, ev->area.height);
-	window_context->clip ();
-	window_context->set_source (canvas_image, 0, 0);
-	window_context->set_operator (Cairo::OPERATOR_SOURCE);
-	window_context->paint ();
-#endif
-#ifdef OPTIONAL_CAIRO_IMAGE_SURFACE
+		g_free (rects);
 	}
+
+	if (_use_image_surface) {
+		_canvas_image->flush ();
+		Cairo::RefPtr<Cairo::Context> window_context = get_window()->create_cairo_context ();
+		window_context->rectangle (ev->area.x, ev->area.y, ev->area.width, ev->area.height);
+		window_context->clip ();
+		window_context->set_source (_canvas_image, 0, 0);
+		window_context->set_operator (Cairo::OPERATOR_SOURCE);
+		window_context->paint ();
+	} else if (_use_intermediate_surface) {
+		draw_context->pop_group_to_source ();
+		draw_context->paint ();
+	}
+
+
+#ifdef CANVAS_PROFILE
+	const int64_t end = g_get_monotonic_time ();
+	const int64_t elapsed = end - start;
+	printf ("GtkCanvas::on_expose_event %f ms\n", elapsed / 1000.f);
 #endif
 
 	return true;
+}
+
+void
+GtkCanvas::prepare_for_render () const
+{
+	Rect window_bbox = visible_area ();
+	Canvas::prepare_for_render (window_bbox);
 }
 
 /** Handler for GDK scroll events.
@@ -1040,6 +1170,60 @@ GtkCanvas::on_leave_notify_event (GdkEventCrossing* ev)
 	return true;
 }
 
+void
+GtkCanvas::on_map ()
+{
+	Gtk::EventBox::on_map();
+#ifdef __APPLE__
+	if (_nsglview) {
+		Gtkmm2ext::nsglview_set_visible (_nsglview, true);
+		Gtk::Allocation a = get_allocation();
+		gint xx, yy;
+		gtk_widget_translate_coordinates(
+				GTK_WIDGET(gobj()),
+				GTK_WIDGET(get_toplevel()->gobj()),
+				0, 0, &xx, &yy);
+		Gtkmm2ext::nsglview_resize (_nsglview, xx, yy, a.get_width(), a.get_height());
+	}
+#endif
+}
+
+void
+GtkCanvas::on_unmap ()
+{
+	stop_tooltip_timeout ();
+	Gtk::EventBox::on_unmap();
+#ifdef __APPLE__
+	if (_nsglview) {
+		Gtkmm2ext::nsglview_set_visible (_nsglview, false);
+	}
+#endif
+}
+
+void
+GtkCanvas::queue_draw()
+{
+#ifdef __APPLE__
+	if (_nsglview) {
+		Gtkmm2ext::nsglview_queue_draw (_nsglview, 0, 0, get_width (), get_height ());
+		return;
+	}
+#endif
+	Gtk::Widget::queue_draw ();
+}
+
+void
+GtkCanvas::queue_draw_area (int x, int y, int width, int height)
+{
+#ifdef __APPLE__
+	if (_nsglview) {
+		Gtkmm2ext::nsglview_queue_draw (_nsglview, x, y, width, height);
+		return;
+	}
+#endif
+	Gtk::Widget::queue_draw_area (x, y, width, height);
+}
+
 /** Called to request a redraw of our canvas.
  *  @param area Area to redraw, in window coordinates.
  */
@@ -1050,19 +1234,19 @@ GtkCanvas::request_redraw (Rect const & request)
 		return;
 	}
 
-	Rect real_area;
-
-	Coord const w = width ();
-	Coord const h = height ();
-
 	/* clamp area requested to actual visible window */
 
-	real_area.x0 = max (0.0, min (w, request.x0));
-	real_area.x1 = max (0.0, min (w, request.x1));
-	real_area.y0 = max (0.0, min (h, request.y0));
-	real_area.y1 = max (0.0, min (h, request.y1));
+	Rect real_area = request.intersection (visible_area());
 
-	queue_draw_area (real_area.x0, real_area.y0, real_area.width(), real_area.height());
+	if (real_area) {
+		if (real_area.width () && real_area.height ()) {
+			// Item intersects with visible canvas area
+			queue_draw_area (real_area.x0, real_area.y0, real_area.width(), real_area.height());
+		}
+
+	} else {
+		// Item does not intersect with visible canvas area
+	}
 }
 
 /** Called to request that we try to get a particular size for ourselves.
@@ -1124,7 +1308,7 @@ GtkCanvas::unfocus (Item* item)
 }
 
 /** @return The visible area of the canvas, in window coordinates */
-Rect
+ArdourCanvas::Rect
 GtkCanvas::visible_area () const
 {
 	return Rect (0, 0, get_allocation().get_width (), get_allocation().get_height ());
@@ -1259,6 +1443,12 @@ GtkCanvas::hide_tooltip ()
 	}
 }
 
+Glib::RefPtr<Pango::Context>
+GtkCanvas::get_pango_context ()
+{
+	return Glib::wrap (gdk_pango_context_get());
+}
+
 /** Create a GtkCanvaSViewport.
  *  @param hadj Adjustment to use for horizontal scrolling.
  *  @param vadj Adjustment to use for vertica scrolling.
@@ -1293,4 +1483,3 @@ GtkCanvasViewport::on_size_request (Gtk::Requisition* req)
 	req->width = 16;
 	req->height = 16;
 }
-

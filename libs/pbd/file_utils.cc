@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2007-2014 Tim Mayberry
-    Copyright (C) 1998-2014 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1998-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2008-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2015 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2014-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 #include <vector>
@@ -26,6 +28,7 @@
 
 #ifdef COMPILER_MINGW
 #include <io.h> // For W_OK
+#include <windows.h>
 #endif
 
 #include <glibmm/fileutils.h>
@@ -57,13 +60,13 @@
 #include "pbd/scoped_file_descriptor.h"
 #include "pbd/stl_delete.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 
 namespace PBD {
 
-void
+static void
 run_functor_for_paths (vector<string>& result,
                        const Searchpath& paths,
                        bool (*functor)(const string &, void *),
@@ -127,7 +130,7 @@ run_functor_for_paths (vector<string>& result,
 				}
 			}
 		}
-		catch (Glib::FileError& err)
+		catch (Glib::FileError const& err)
 		{
 			warning << err.what() << endmsg;
 		}
@@ -354,11 +357,87 @@ touch_file (const std::string& path)
 	return false;
 }
 
+bool
+hard_link (const std::string& existing_file, const std::string& new_path)
+{
+#ifdef PLATFORM_WINDOWS
+# if defined (COMPILER_MINGW) && defined(__GNUC__) && __GNUC__ == 8
+	/* For some reason mingx 8.3.0 does not support CreateHardLinkA()
+	 * (mingw/gcc-4.9 does) */
+	return false;
+# else
+	/* see also ntfs_link -- msvc only pbd extension */
+	return CreateHardLinkA (new_path.c_str(), existing_file.c_str(), NULL);
+# endif
+#else
+	return 0 == link (existing_file.c_str(), new_path.c_str());
+#endif
+}
+
 std::string
 get_absolute_path (const std::string & p)
 {
 	if (Glib::path_is_absolute(p)) return p;
 	return Glib::build_filename (Glib::get_current_dir(), p);
+}
+
+string
+canonical_path (const std::string& path)
+{
+#ifdef PLATFORM_WINDOWS
+	wchar_t resolved_wpath[_MAX_PATH];
+
+	// sizeof(wchar_t) is 2 bytes using gcc/mingw and VC++ but 4 bytes using gcc/linux
+	assert (sizeof(wchar_t) == 2);
+
+	wchar_t* wfilepath = (wchar_t*)g_utf8_to_utf16 (path.c_str(), -1, NULL, NULL, NULL);
+
+	if (wfilepath == NULL) {
+		DEBUG_TRACE (
+		    DEBUG::FileUtils,
+		    string_compose ("PBD::canonical_path: Unable to convert path from utf8 to utf16 : %1\n",
+		                    path));
+		return path;
+	}
+
+	if (_wfullpath (resolved_wpath, wfilepath, _MAX_PATH) == NULL) {
+		DEBUG_TRACE (DEBUG::FileUtils,
+		             string_compose ("PBD::canonical_path: Unable to resolve %1\n", wfilepath));
+		return path;
+	}
+
+	gchar* resolved_utf8_path =
+	    g_utf16_to_utf8 (reinterpret_cast<const gunichar2*>(resolved_wpath), -1, NULL, NULL, NULL);
+
+	if (resolved_utf8_path == NULL) {
+		DEBUG_TRACE (
+		    DEBUG::FileUtils,
+		    string_compose ("PBD::canonical_path: Unable to convert path from utf16 to utf8 : %1\n",
+		                    resolved_wpath));
+		return path;
+	}
+
+	const string retval(resolved_utf8_path);
+
+	g_free (wfilepath);
+	g_free (resolved_utf8_path);
+
+	return retval;
+
+#else
+	char buf[PATH_MAX+1];
+
+	if (realpath (path.c_str(), buf) == NULL) {
+		DEBUG_TRACE (DEBUG::FileUtils,
+		             string_compose ("PBD::canonical_path: Unable to resolve %1: %2\n", path,
+		                             g_strerror (errno)));
+		return path;
+	}
+	DEBUG_TRACE (DEBUG::FileUtils,
+	             string_compose ("PBD::canonical_path %1 resolved to: %2\n", path, string (buf)));
+
+	return string (buf);
+#endif
 }
 
 std::string

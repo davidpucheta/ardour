@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2013 Paul Davis
-    Author: Robin Gareus
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/drawingarea.h>
 
@@ -24,13 +25,14 @@
 #include <gtkmm2ext/utils.h>
 #include <gtkmm2ext/rgb_macros.h>
 
+#include "ardour/logmeter.h"
 #include <ardour/rc_configuration.h>
+
 #include "utils.h"
-#include "logmeter.h"
 #include "meter_patterns.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace ARDOUR_UI_UTILS;
@@ -247,18 +249,18 @@ static void set_bg_color (Gtk::Widget& w, cairo_t* cr, MeterType type) {
 	double r,g,b,a;
 	switch(type) {
 		case MeterVU:
-			ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("meterstrip vu bg"), r, g, b, a);
+			Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("meterstrip vu bg"), r, g, b, a);
 			break;
 		case MeterIEC1DIN:
 		case MeterIEC1NOR:
 		case MeterIEC2BBC:
 		case MeterIEC2EBU:
-			ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("meterstrip ppm bg"), r, g, b, a);
+			Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("meterstrip ppm bg"), r, g, b, a);
 			break;
 		case MeterK12:
 		case MeterK14:
 		case MeterK20:
-			ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("meterstrip dpm bg"), r, g, b, a);
+			Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("meterstrip dpm bg"), r, g, b, a);
 			break;
 		default:
 			{
@@ -276,16 +278,16 @@ static void set_fg_color(Gtk::Widget&, MeterType type, Gdk::Color * c) {
 	double r,g,b,a;
 	switch(type) {
 		case MeterVU:
-			ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("meterstrip vu fg"), r, g, b, a);
+			Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("meterstrip vu fg"), r, g, b, a);
 			break;
 		case MeterIEC1DIN:
 		case MeterIEC1NOR:
 		case MeterIEC2BBC:
 		case MeterIEC2EBU:
-			ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("meterstrip ppm fg"), r, g, b, a);
+			Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("meterstrip ppm fg"), r, g, b, a);
 			break;
 		default:
-			ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("meterstrip dpm fg"), r, g, b, a);
+			Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("meterstrip dpm fg"), r, g, b, a);
 			break;
 	}
 	c->set_rgb_p (r, g, b);
@@ -514,7 +516,7 @@ meter_render_ticks (Gtk::Widget& w, MeterType type, vector<ARDOUR::DataType> typ
 					points.insert (std::pair<float,float>(  3, 1.0));
 					points.insert (std::pair<float,float>(  4, 0.5));
 					points.insert (std::pair<float,float>(  5, 0.5));
-					// no break
+					/* fallthrough */
 				case MeterPeak0dB:
 					points.insert (std::pair<float,float>(-60, 0.5));
 					points.insert (std::pair<float,float>(-50, 1.0));
@@ -749,11 +751,13 @@ meter_render_metrics (Gtk::Widget& w, MeterType type, vector<DataType> types)
 					points.insert (std::pair<float,string>( -5.0f, "+15"));
 					points.insert (std::pair<float,string>(  0.0f, "+20"));
 					break;
-				default:
 				case MeterPeak:
+					/* fallthrough */
 				case MeterKrms:
+					/* fallthrough */
+				default:
 					points.insert (std::pair<float,string>(  3.0f, "+3"));
-					// no break
+					/* fallthrough */
 				case MeterPeak0dB:
 					points.insert (std::pair<float,string>(-50.0f, "-50"));
 					points.insert (std::pair<float,string>(-40.0f, "-40"));
@@ -889,6 +893,7 @@ meter_render_metrics (Gtk::Widget& w, MeterType type, vector<DataType> types)
 						points.insert (std::pair<float,string>( 72, "72"));
 						points.insert (std::pair<float,string>(112, "112"));
 						points.insert (std::pair<float,string>(127, "127"));
+						break;
 					case 4:
 						/* labels that don't overlay with 0dBFS*/
 						points.insert (std::pair<float,string>(  0, "0"));
@@ -1151,5 +1156,5 @@ ArdourMeter::meter_clear_pattern_cache(int which) {
 			++j;
 		}
 	}
-	RedrawMetrics();
+	RedrawMetrics(); /* EMIT SIGNAL */
 }

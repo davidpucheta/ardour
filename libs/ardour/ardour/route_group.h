@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2000-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2018 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_route_group_h__
 #define __ardour_route_group_h__
@@ -29,24 +33,27 @@
 #include "pbd/signals.h"
 #include "pbd/stateful.h"
 
-#include "ardour/libardour_visibility.h"
+#include "ardour/control_group.h"
 #include "ardour/types.h"
 #include "ardour/session_object.h"
+
+#include "ardour/libardour_visibility.h"
 
 namespace ARDOUR {
 
 namespace Properties {
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> relative;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_relative;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_gain;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_mute;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_solo;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_recenable;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_select;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_route_active;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_color;
+	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> group_monitoring;
 	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> active;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> gain;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> mute;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> solo;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> recenable;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> select;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> route_active;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> color;
-	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> monitoring;
-	/* we use this, but its declared in region.cc */
+	LIBARDOUR_API extern PBD::PropertyDescriptor<int32_t> group_master_number;
+	/* we use these declared in region.cc */
 	LIBARDOUR_API extern PBD::PropertyDescriptor<bool> hidden;
 };
 
@@ -64,7 +71,7 @@ class Session;
  */
 class LIBARDOUR_API RouteGroup : public SessionObject
 {
-  public:
+public:
 	static void make_property_quarks();
 
 	RouteGroup (Session& s, const std::string &n);
@@ -81,6 +88,8 @@ class LIBARDOUR_API RouteGroup : public SessionObject
 	bool is_route_active () const { return _route_active.val(); }
 	bool is_color () const { return _color.val(); }
 	bool is_monitoring() const { return _monitoring.val(); }
+	int32_t group_master_number() const { return _group_master_number.val(); }
+	boost::weak_ptr<Route> subgroup_bus() const { return _subgroup_bus; }
 
 	bool empty() const {return routes->empty();}
 	size_t size() const { return routes->size();}
@@ -126,7 +135,7 @@ class LIBARDOUR_API RouteGroup : public SessionObject
 		changed();
 	}
 
-        bool has_subgroup() const;
+	bool has_subgroup() const;
 	void make_subgroup (bool, Placement);
 	void destroy_subgroup ();
 
@@ -141,9 +150,24 @@ class LIBARDOUR_API RouteGroup : public SessionObject
 
 	int set_state (const XMLNode&, int version);
 
-  private:
+	void assign_master (boost::shared_ptr<VCA>);
+	void unassign_master (boost::shared_ptr<VCA>);
+	bool has_control_master() const;
+	bool slaved () const;
+
+	uint32_t rgba () const { return _rgba; }
+
+	/** set route-group color and notify UI about change */
+	void set_rgba (uint32_t);
+
+	/* directly set color only, used to convert old 5.x gui-object-state
+	 * to libardour color */
+	void migrate_rgba (uint32_t color) { _rgba = color; }
+
+private:
 	boost::shared_ptr<RouteList> routes;
-	boost::shared_ptr<Route> subgroup_bus;
+	boost::shared_ptr<Route> _subgroup_bus;
+	boost::weak_ptr<VCA> group_master;
 
 	PBD::Property<bool> _relative;
 	PBD::Property<bool> _active;
@@ -156,9 +180,22 @@ class LIBARDOUR_API RouteGroup : public SessionObject
 	PBD::Property<bool> _route_active;
 	PBD::Property<bool> _color;
 	PBD::Property<bool> _monitoring;
+	PBD::Property<int32_t> _group_master_number;
+
+	boost::shared_ptr<ControlGroup> _solo_group;
+	boost::shared_ptr<ControlGroup> _mute_group;
+	boost::shared_ptr<ControlGroup> _rec_enable_group;
+	boost::shared_ptr<ControlGroup> _gain_group;
+	boost::shared_ptr<ControlGroup> _monitoring_group;
 
 	void remove_when_going_away (boost::weak_ptr<Route>);
 	int set_state_2X (const XMLNode&, int);
+
+	void post_set (PBD::PropertyChange const &);
+	void push_to_groups ();
+
+	uint32_t _rgba;
+	bool _used_to_share_gain;
 };
 
 } /* namespace */

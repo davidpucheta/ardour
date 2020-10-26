@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2011-2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk2_ardour_region_layering_order_editor_h__
 #define __gtk2_ardour_region_layering_order_editor_h__
@@ -39,22 +40,22 @@ namespace ARDOUR {
 
 class RegionLayeringOrderEditor : public ArdourWindow
 {
-  public:
+public:
 	RegionLayeringOrderEditor (PublicEditor&);
 	virtual ~RegionLayeringOrderEditor ();
 
-	void set_context (const std::string &, ARDOUR::Session *, TimeAxisView *, boost::shared_ptr<ARDOUR::Playlist>, ARDOUR::framepos_t);
+	void set_context (const std::string &, ARDOUR::Session *, TimeAxisView *, boost::shared_ptr<ARDOUR::Playlist>, ARDOUR::samplepos_t);
 	void maybe_present ();
 
-  protected:
+protected:
 	virtual bool on_key_press_event (GdkEventKey* event);
 
-  private:
-	framepos_t position;
+private:
+	samplepos_t position;
 	bool in_row_change;
 	uint32_t regions_at_position;
 
-        PBD::ScopedConnection playlist_modified_connection;
+	PBD::ScopedConnection playlist_modified_connection;
 
 	struct LayeringOrderColumns : public Gtk::TreeModel::ColumnRecord {
 		LayeringOrderColumns () {
@@ -75,7 +76,7 @@ class RegionLayeringOrderEditor : public ArdourWindow
 	PublicEditor& editor;
 	TimeAxisView* _time_axis_view;
 
-        void row_selected ();
+	void row_selected ();
 	void refill ();
 	void playlist_modified ();
 };

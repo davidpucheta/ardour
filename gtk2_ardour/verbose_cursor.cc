@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2000-2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <string>
 #include <gtkmm/enums.h>
@@ -34,7 +37,7 @@
 #include "ardour_ui.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -93,7 +96,7 @@ VerboseCursor::set_offset (ArdourCanvas::Duple const & d)
 }
 
 void
-VerboseCursor::set_time (framepos_t frame)
+VerboseCursor::set_time (samplepos_t sample)
 {
 	char buf[128];
 	Timecode::Time timecode;
@@ -109,21 +112,25 @@ VerboseCursor::set_time (framepos_t frame)
 
 	switch (m) {
 	case AudioClock::BBT:
-		_editor->_session->bbt_time (frame, bbt);
+		_editor->_session->bbt_time (sample, bbt);
 		snprintf (buf, sizeof (buf), "%02" PRIu32 "|%02" PRIu32 "|%02" PRIu32, bbt.bars, bbt.beats, bbt.ticks);
 		break;
 
 	case AudioClock::Timecode:
-		_editor->_session->timecode_time (frame, timecode);
+		_editor->_session->timecode_time (sample, timecode);
 		snprintf (buf, sizeof (buf), "%s", Timecode::timecode_format_time (timecode).c_str());
 		break;
 
 	case AudioClock::MinSec:
-		AudioClock::print_minsec (frame, buf, sizeof (buf), _editor->_session->frame_rate());
+		AudioClock::print_minsec (sample, buf, sizeof (buf), _editor->_session->sample_rate());
+		break;
+
+	case AudioClock::Seconds:
+		snprintf (buf, sizeof(buf), "%.1f", sample / (float)_editor->_session->sample_rate());
 		break;
 
 	default:
-		snprintf (buf, sizeof(buf), "%" PRIi64, frame);
+		snprintf (buf, sizeof(buf), "%" PRIi64, sample);
 		break;
 	}
 
@@ -131,13 +138,13 @@ VerboseCursor::set_time (framepos_t frame)
 }
 
 void
-VerboseCursor::set_duration (framepos_t start, framepos_t end)
+VerboseCursor::set_duration (samplepos_t start, samplepos_t end)
 {
 	char buf[128];
 	Timecode::Time timecode;
 	Timecode::BBT_Time sbbt;
 	Timecode::BBT_Time ebbt;
-	Meter meter_at_start (_editor->_session->tempo_map().meter_at(start));
+	Meter meter_at_start (_editor->_session->tempo_map().meter_at_sample (start));
 
 	if (_editor->_session == 0) {
 		return;
@@ -188,7 +195,11 @@ VerboseCursor::set_duration (framepos_t start, framepos_t end)
 		break;
 
 	case AudioClock::MinSec:
-		AudioClock::print_minsec (end - start, buf, sizeof (buf), _editor->_session->frame_rate());
+		AudioClock::print_minsec (end - start, buf, sizeof (buf), _editor->_session->sample_rate());
+		break;
+
+	case AudioClock::Seconds:
+		snprintf (buf, sizeof(buf), "%.1f", (end - start) / (float)_editor->_session->sample_rate());
 		break;
 
 	default:

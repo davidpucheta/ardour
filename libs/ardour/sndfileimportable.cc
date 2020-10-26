@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2000,2015 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-
-*/
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <sndfile.h>
 #include <iostream>
@@ -47,7 +49,7 @@ SndFileImportableSource::get_timecode_info (SNDFILE* sf, SF_BROADCAST_INFO* binf
 	 * 0xffffffff 0xfffc5680
 	 * seems to be a bug in Presonus Capture (which generated the file)
 	 *
-	 * still since framepos_t is a signed int, ignore files that could
+	 * still since samplepos_t is a signed int, ignore files that could
 	 * lead to negative timestamps for now.
 	 */
 
@@ -97,10 +99,10 @@ SndFileImportableSource::~SndFileImportableSource ()
 {
 }
 
-framecnt_t
-SndFileImportableSource::read (Sample* buffer, framecnt_t nframes)
+samplecnt_t
+SndFileImportableSource::read (Sample* buffer, samplecnt_t nframes)
 {
-	framecnt_t per_channel = nframes / sf_info.channels;
+	samplecnt_t per_channel = nframes / sf_info.channels;
 	per_channel = sf_readf_float (in.get(), buffer, per_channel);
 	return per_channel * sf_info.channels;
 }
@@ -111,28 +113,28 @@ SndFileImportableSource::channels () const
 	return sf_info.channels;
 }
 
-framecnt_t
+samplecnt_t
 SndFileImportableSource::length () const
 {
-	return (framecnt_t) sf_info.frames;
+	return (samplecnt_t) sf_info.frames;
 }
 
-framecnt_t
+samplecnt_t
 SndFileImportableSource::samplerate () const
 {
 	return sf_info.samplerate;
 }
 
 void
-SndFileImportableSource::seek (framepos_t /*pos*/)
+SndFileImportableSource::seek (samplepos_t /*pos*/)
 {
 	sf_seek (in.get(), 0, SEEK_SET);
 }
 
-framepos_t
+samplepos_t
 SndFileImportableSource::natural_position () const
 {
-	return (framepos_t) timecode;
+	return (samplepos_t) timecode;
 }
 
 bool

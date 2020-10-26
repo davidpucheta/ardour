@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <glibmm/fileutils.h>
 #include <glibmm/miscutils.h>
@@ -25,7 +26,7 @@
 #include "ardour/session.h"
 #include "ardour/lxvst_plugin.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -40,9 +41,10 @@ LXVSTPlugin::LXVSTPlugin (AudioEngine& e, Session& session, VSTHandle* h, int un
 	if ((_state = vstfx_instantiate (_handle, Session::vst_callback, this)) == 0) {
 		throw failed_constructor();
 	}
+	open_plugin ();
 	Session::vst_current_loading_id = 0;
 
-	set_plugin (_state->plugin);
+	init_plugin ();
 }
 
 LXVSTPlugin::LXVSTPlugin (const LXVSTPlugin &other)
@@ -54,11 +56,15 @@ LXVSTPlugin::LXVSTPlugin (const LXVSTPlugin &other)
 	if ((_state = vstfx_instantiate (_handle, Session::vst_callback, this)) == 0) {
 		throw failed_constructor();
 	}
+	open_plugin ();
 	Session::vst_current_loading_id = 0;
 
-	_plugin = _state->plugin;
+	XMLNode* root = new XMLNode (other.state_node_name ());
+	other.add_state (root);
+	set_state (*root, Stateful::loading_state_version);
+	delete root;
 
-	// Plugin::setup_controls ();
+	init_plugin ();
 }
 
 LXVSTPlugin::~LXVSTPlugin ()
@@ -102,7 +108,7 @@ std::vector<Plugin::PresetRecord>
 LXVSTPluginInfo::get_presets (bool user_only) const
 {
 	std::vector<Plugin::PresetRecord> p;
-#ifndef NO_PLUGIN_STATE
+
 	if (!Config->get_use_lxvst()) {
 		return p;
 	}
@@ -114,16 +120,17 @@ LXVSTPluginInfo::get_presets (bool user_only) const
 		Session::vst_current_loading_id = atoi (unique_id);
 		AEffect* plugin = handle->main_entry (Session::vst_callback);
 		Session::vst_current_loading_id = 0;
+		plugin->ptr1 = NULL;
 
 		plugin->dispatcher (plugin, effOpen, 0, 0, 0, 0); // :(
 		int const vst_version = plugin->dispatcher (plugin, effGetVstVersion, 0, 0, NULL, 0);
 
 		for (int i = 0; i < plugin->numPrograms; ++i) {
-			Plugin::PresetRecord r (string_compose (X_("VST:%1:%2"), unique_id, i), "", false);
+			Plugin::PresetRecord r (string_compose (X_("VST:%1:%2"), unique_id, std::setw(4), std::setfill('0'), i), "", false);
 			if (vst_version >= 2) {
 				char buf[256];
 				if (plugin->dispatcher (plugin, 29, i, 0, buf, 0) == 1) {
-					r.label = buf;
+					r.label = string_compose (_("%1 - %2"), i, buf);
 				} else {
 					r.label = string_compose (_("Preset %1"), i);
 				}
@@ -150,20 +157,19 @@ LXVSTPluginInfo::get_presets (bool user_only) const
 		if (t->read ()) { // TODO read names only. skip parsing the actual data
 			XMLNode* root = t->root ();
 			for (XMLNodeList::const_iterator i = root->children().begin(); i != root->children().end(); ++i) {
-				XMLProperty* uri = (*i)->property (X_("uri"));
-				XMLProperty* label = (*i)->property (X_("label"));
+				XMLProperty const * uri = (*i)->property (X_("uri"));
+				XMLProperty const * label = (*i)->property (X_("label"));
 				p.push_back (Plugin::PresetRecord (uri->value(), label->value(), true));
 			}
 		}
 	}
-	delete t;
-#endif
 
+	delete t;
 	return p;
 }
 
-LXVSTPluginInfo::LXVSTPluginInfo()
+LXVSTPluginInfo::LXVSTPluginInfo (_VSTInfo* nfo) : VSTPluginInfo (nfo)
 {
-       type = ARDOUR::LXVST;
+	type = ARDOUR::LXVST;
 }
 

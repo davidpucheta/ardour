@@ -1,28 +1,28 @@
 /*
-    Copyright (C) 2015 Robin Gareus
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2015 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <cstring>
 
 #include "ardour/ebur128_analysis.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Vamp;
 using namespace ARDOUR;
@@ -46,8 +46,8 @@ EBUr128Analysis::run (Readable* src)
 {
 	int ret = -1;
 	bool done = false;
-	framecnt_t len = src->readable_length();
-	framepos_t pos = 0;
+	samplecnt_t len = src->readable_length();
+	samplepos_t pos = 0;
 	uint32_t n_channels = src->n_channels();
 	Plugin::FeatureSet features;
 
@@ -62,8 +62,8 @@ EBUr128Analysis::run (Readable* src)
 	}
 
 	while (!done) {
-		framecnt_t to_read;
-		to_read = min ((len - pos), (framecnt_t) bufsize);
+		samplecnt_t to_read;
+		to_read = min ((len - pos), (samplecnt_t) bufsize);
 
 		for (uint32_t c = 0; c < n_channels; ++c) {
 			if (src->read (bufs[c], pos, to_read, c) != to_read) {

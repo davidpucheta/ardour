@@ -1,21 +1,27 @@
 /*
-    Copyright (C) 2003 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2006 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2007-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2008-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 #include <unistd.h>
@@ -36,7 +42,7 @@
 #include "configinfo.h"
 #include "rgb_macros.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-version.h"
@@ -124,6 +130,7 @@ static const gchar * paypal_xpm[] = {
 #endif
 
 static const char* authors[] = {
+	N_("Fons Adriaensen"),
 	N_("Brian Ahr"),
 	N_("John Anderson"),
 	N_("Marcus Andersson"),
@@ -132,6 +139,7 @@ static const char* authors[] = {
 	N_("Ben Bell"),
 	N_("Sakari Bergen"),
 	N_("Christian Borss"),
+	N_("Thomas Brand"),
 	N_("Chris Cannam"),
 	N_("Jeremy Carter"),
 	N_("Jesse Chappell"),
@@ -139,6 +147,7 @@ static const char* authors[] = {
 	N_("Sam Chessman"),
 	N_("André Colomb"),
 	N_("Paul Davis"),
+	N_("Simon Dixon"),
 	N_("Gerard van Dongen"),
 	N_("John Emmas"),
 	N_("Colin Fletcher"),
@@ -165,26 +174,35 @@ static const char* authors[] = {
 	N_("Nick Lanham"),
 	N_("Colin Law"),
 	N_("Joshua Leach"),
+	N_("Jan Lentfer"),
 	N_("Ben Loftis"),
+	N_("Matthias Mauch"),
 	N_("Nick Mainsbridge"),
 	N_("Tim Mayberry"),
 	N_("Doug Mclain"),
+	N_("Johannes Mueller"),
+	N_("Edward Tomasz Napierała"),
 	N_("Todd Naugle"),
 	N_("André Nusser"),
 	N_("Bent Bisballe Nyeng"),
 	N_("Jack O'Quin"),
+	N_("Len Ovens"),
 	N_("Pavel Potocek"),
 	N_("Nimal Ratnayake"),
+	N_("Julien Rivaud"),
 	N_("David Robillard"),
 	N_("Julien Roger"),
 	N_("Taybin Rutkin"),
 	N_("Andreas Ruge"),
 	N_("Sampo Savolainen"),
 	N_("Rodrigo Severo"),
+	N_("Ayan Shafqat"),
+	N_("Daniel Sheeler"),
 	N_("Per Sigmond"),
 	N_("Lincoln Spiteri"),
 	N_("Mike Start"),
 	N_("Mark Stewart"),
+	N_("Nathan Stewart"),
 	N_("Roland Stigge"),
 	N_("Petter Sundlöf"),
 	N_("Mike Täht"),
@@ -196,7 +214,7 @@ static const char* authors[] = {
 };
 
 static const char* translators[] = {
-	N_("French:\n\tAlain Fréhel <alain.frehel@free.fr>\n\tChristophe Combelles <ccomb@free.fr>\n\tMartin Blanchard\n\tRomain Arnaud <roming22@gmail.com>\n"),
+	N_("French:\n\tAlain Fréhel <alain.frehel@free.fr>\n\tChristophe Combelles <ccomb@free.fr>\n\tMartin Blanchard\n\tRomain Arnaud <roming22@gmail.com>\n\tOlivier Humbert <trebmuh@tuxfamily.org>\n\tFrédéric Rech <fred_rech@laposte.net>\n"),
 	N_("German:\n\tKarsten Petersen <kapet@kapet.de>\
 \n\tSebastian Arnold <mail@sebastian-arnold.net>\
 \n\tRobert Schwede <schwede@ironshark.com>\
@@ -204,7 +222,7 @@ static const char* translators[] = {
 \n\tEdgar Aichinger <edogawa@aon.at>\
 \n\tRichard Oax <richard@pagliacciempire.de>\
 \n\tRobin Gloster <robin@loc-com.de>\n"),
-	N_("Italian:\n\tFilippo Pappalardo <filippo@email.it>\n\tRaffaele Morelli <raffaele.morelli@gmail.com>\n"),
+	N_("Italian:\n\tVincenzo Reale <smart2128@baslug.org>\n\tFilippo Pappalardo <filippo@email.it>\n\tRaffaele Morelli <raffaele.morelli@gmail.com>\n"),
 	N_("Portuguese:\n\tRui Nuno Capela <rncbc@rncbc.org>\n"),
 	N_("Brazilian Portuguese:\n\tAlexander da Franca Fernandes <alexander@nautae.eti.br>\
 \n\tChris Ross <chris@tebibyte.org>\n"),
@@ -217,6 +235,7 @@ static const char* translators[] = {
 	N_("Czech:\n\t Pavel Fric <pavelfric@seznam.cz>\n"),
 	N_("Norwegian:\n\t Eivind Ødegård\n"),
 	N_("Chinese:\n\t Rui-huai Zhang <zrhzrh@mail.ustc.edu.cn>\n"),
+	N_("Japanese:\n\t Hiroki Inagaki <hiroki.ingk@gmail.com>\n"),
 	0
 };
 
@@ -281,7 +300,7 @@ patent must be licensed for everyone's free use or not licensed at all.\n\
 \n\
   The precise terms and conditions for copying, distribution and\n\
 modification follow.\n\
-\n\
+\n\
 ""		    GNU GENERAL PUBLIC LICENSE\n\
    TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION\n\
 \n\
@@ -336,7 +355,7 @@ above, provided that you also meet all of these conditions:\n\
     License.  (Exception: if the Program itself is interactive but\n\
     does not normally print such an announcement, your work based on\n\
     the Program is not required to print an announcement.)\n\
-\n\
+\n\
 These requirements apply to the modified work as a whole.  If\n\
 identifiable sections of that work are not derived from the Program,\n\
 and can be reasonably considered independent and separate works in\n\
@@ -394,7 +413,7 @@ access to copy from a designated place, then offering equivalent\n\
 access to copy the source code from the same place counts as\n\
 distribution of the source code, even though third parties are not\n\
 compelled to copy the source along with the object code.\n\
-\n\
+\n\
   4. You may not copy, modify, sublicense, or distribute the Program\n\
 except as expressly provided under this License.  Any attempt\n\
 otherwise to copy, modify, sublicense or distribute the Program is\n\
@@ -451,7 +470,7 @@ impose that choice.\n\
 \n\
 This section is intended to make thoroughly clear what is believed to\n\
 be a consequence of the rest of this License.\n\
-\n\
+\n\
   8. If the distribution and/or use of the Program is restricted in\n\
 certain countries either by patents or by copyrighted interfaces, the\n\
 original copyright holder who places the Program under this License\n\
@@ -504,66 +523,6 @@ PROGRAMS), EVEN IF SUCH HOLDER OR OTHER PARTY HAS BEEN ADVISED OF THE\n\
 POSSIBILITY OF SUCH DAMAGES.\n\
 \n\
 		     END OF TERMS AND CONDITIONS\n\
-\n\
-	    How to Apply These Terms to Your New Programs\n\
-\n\
-  If you develop a new program, and you want it to be of the greatest\n\
-possible use to the public, the best way to achieve this is to make it\n\
-free software which everyone can redistribute and change under these terms.\n\
-\n\
-  To do so, attach the following notices to the program.  It is safest\n\
-to attach them to the start of each source file to most effectively\n\
-convey the exclusion of warranty; and each file should have at least\n\
-the \"copyright\" line and a pointer to where the full notice is found.\n\
-\n\
-    <one line to give the program's name and a brief idea of what it does.>\n\
-    Copyright (C) <year>  <name of author>\n\
-\n\
-    This program is free software; you can redistribute it and/or modify\n\
-    it under the terms of the GNU General Public License as published by\n\
-    the Free Software Foundation; either version 2 of the License, or\n\
-    (at your option) any later version.\n\
-\n\
-    This program is distributed in the hope that it will be useful,\n\
-    but WITHOUT ANY WARRANTY; without even the implied warranty of\n\
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n\
-    GNU General Public License for more details.\n\
-\n\
-    You should have received a copy of the GNU General Public License\n\
-    along with this program; if not, write to the Free Software\n\
-    Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA\n\
-\n\
-\n\
-Also add information on how to contact you by electronic and paper mail.\n\
-\n\
-If the program is interactive, make it output a short notice like this\n\
-when it starts in an interactive mode:\n\
-\n\
-    Gnomovision version 69, Copyright (C) year  name of author\n\
-    Gnomovision comes with ABSOLUTELY NO WARRANTY; for details type `show w'.\n\
-    This is free software, and you are welcome to redistribute it\n\
-    under certain conditions; type `show c' for details.\n\
-\n\
-The hypothetical commands `show w' and `show c' should show the appropriate\n\
-parts of the General Public License.  Of course, the commands you use may\n\
-be called something other than `show w' and `show c'; they could even be\n\
-mouse-clicks or menu items--whatever suits your program.\n\
-\n\
-You should also get your employer (if you work as a programmer) or your\n\
-school, if any, to sign a \"copyright disclaimer\" for the program, if\n\
-necessary.  Here is a sample; alter the names:\n\
-\n\
-  Yoyodyne, Inc., hereby disclaims all copyright interest in the program\n\
-  `Gnomovision' (which makes passes at compilers) written by James Hacker.\n\
-\n\
-  <signature of Ty Coon>, 1 April 1989\n\
-  Ty Coon, President of Vice\n\
-\n\
-This General Public License does not permit incorporating your program into\n\
-proprietary programs.  If your program is a subroutine library, you may\n\
-consider it more useful to permit linking proprietary applications with the\n\
-library.  If this is what you want to do, use the GNU Library General\n\
-Public License instead of this License.\n\
 "); /* Note that at the start of (approximately) line 265, the above license
        text has been split into two concatenated tokens (to satisfy compilation
        under MSVC). Hopefully this won't affect gcc */
@@ -581,8 +540,9 @@ About::About ()
 	std::string splash_file;
 
 	Searchpath spath(ardour_data_search_path());
+	spath.add_subdirectory_to_paths ("resources");
 
-	if (find_file (spath, "splash.png", splash_file)) {
+	if (find_file (spath, PROGRAM_NAME "-splash.png", splash_file)) {
 		set_logo (Gdk::Pixbuf::create_from_file (splash_file));
 	} else {
 		error << "Could not find splash file" << endmsg;
@@ -603,13 +563,19 @@ About::About ()
 	const std::string cpu_arch = _("PowerPC 64-bit");
 #elif defined __ppc__
 	const std::string cpu_arch = _("PowerPC 32-bit");
+#elif defined  __aarch64__
+	const std::string cpu_arch = _("ARM 64-bit (aarch64)");
+#elif defined  __arm__ && defined __ARM_NEON
+	const std::string cpu_arch = _("ARM 32-bit (armhf)");
+#elif defined  __arm__
+	const std::string cpu_arch = _("ARM 32-bit");
 #elif defined  __LP64__
 	const std::string cpu_arch = _("64-bit");
 #else
-	const std::string cpu_arch = _("32-bit"); // ARM, ALPHA,..
+	const std::string cpu_arch = _("32-bit");
 #endif
 	std::string codename = CODENAME;
-	if (ARDOUR::Profile->get_mixbus() || ARDOUR::Profile->get_trx()) {
+	if (ARDOUR::Profile->get_mixbus()) {
 		codename = "";
 	}
 
@@ -620,7 +586,7 @@ About::About ()
 #endif
 
 	set_translator_credits (t);
-	set_copyright (_("Copyright (C) 1999-2015 Paul Davis\n"));
+	set_copyright (_("Copyright (C) 1999-2020 Paul Davis\n"));
 	set_license (gpl);
 	set_name (X_("Ardour"));
 	set_website (X_("http://ardour.org/"));

@@ -1,21 +1,27 @@
 /*
-    Copyright (C) 2001-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2018 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <algorithm>
@@ -25,15 +31,16 @@
 #include <gtkmm2ext/gtk_ui.h>
 
 #include "ardour/playlist.h"
+#include "ardour/profile.h"
 #include "ardour/session.h"
+
+#include "gtkmm2ext/colors.h"
 
 #include "canvas/polygon.h"
 #include "canvas/debug.h"
 #include "canvas/pixbuf.h"
 #include "canvas/text.h"
 #include "canvas/line.h"
-#include "canvas/utils.h"
-#include "canvas/colors.h"
 
 #include "streamview.h"
 #include "region_view.h"
@@ -48,7 +55,7 @@
 #include "rgb_macros.h"
 #include "gui_thread.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -70,7 +77,7 @@ RegionView::RegionView (ArdourCanvas::Container*          parent,
                         bool                              automation)
 	: TimeAxisViewItem (r->name(), *parent, tv, spu, basic_color, r->position(), r->length(), false, automation,
 			    (automation ? TimeAxisViewItem::ShowFrame :
-			     TimeAxisViewItem::Visibility (TimeAxisViewItem::ShowNameText|
+			     TimeAxisViewItem::Visibility ((UIConfiguration::instance().get_show_region_name() ? TimeAxisViewItem::ShowNameText : 0) |
 							   TimeAxisViewItem::ShowNameHighlight| TimeAxisViewItem::ShowFrame)))
 	, _region (r)
 	, sync_mark(0)
@@ -178,12 +185,13 @@ RegionView::init (bool wfd)
 		_enable_display = true;
 	}
 
-	set_height (trackview.current_height());
+	/* derived class calls set_height () including RegionView::set_height() in ::init() */
+	//set_height (trackview.current_height());
 
 	_region->PropertyChanged.connect (*this, invalidator (*this), boost::bind (&RegionView::region_changed, this, _1), gui_context());
 
-	set_colors ();
-
+	/* derived class calls set_colors () including RegionView::set_colors() in ::init() */
+	//set_colors ();
 	UIConfiguration::instance().ColorsChanged.connect (sigc::mem_fun (*this, &RegionView::color_handler));
 
 	/* XXX sync mark drag? */
@@ -197,11 +205,11 @@ RegionView::~RegionView ()
 		delete *g;
 	}
 
-	for (list<ArdourCanvas::Rectangle*>::iterator i = _coverage_frames.begin (); i != _coverage_frames.end (); ++i) {
+	for (list<ArdourCanvas::Rectangle*>::iterator i = _coverage_frame.begin (); i != _coverage_frame.end (); ++i) {
 		delete *i;
 	}
 
-        drop_silent_frames ();
+	drop_silent_frames ();
 
 	delete editor;
 }
@@ -218,16 +226,16 @@ RegionView::canvas_group_event (GdkEvent* event)
 void
 RegionView::set_silent_frames (const AudioIntervalResult& silences, double /*threshold*/)
 {
-        framecnt_t shortest = max_framecnt;
+	samplecnt_t shortest = max_samplecnt;
 
 	/* remove old silent frames */
-        drop_silent_frames ();
+	drop_silent_frames ();
 
-        if (silences.empty()) {
-                return;
-        }
+	if (silences.empty()) {
+		return;
+	}
 
-        uint32_t const color = UIConfiguration::instance().color_mod ("silence", "silence");
+	uint32_t const color = UIConfiguration::instance().color_mod ("silence", "silence");
 
 	for (AudioIntervalResult::const_iterator i = silences.begin(); i != silences.end(); ++i) {
 
@@ -248,11 +256,11 @@ RegionView::set_silent_frames (const AudioIntervalResult& silences, double /*thr
 	}
 
 	/* Find shortest audible segment */
-        framecnt_t shortest_audible = max_framecnt;
+	samplecnt_t shortest_audible = max_samplecnt;
 
-	framecnt_t s = _region->start();
+	samplecnt_t s = _region->start();
 	for (AudioIntervalResult::const_iterator i = silences.begin(); i != silences.end(); ++i) {
-		framecnt_t const dur = i->first - s;
+		samplecnt_t const dur = i->first - s;
 		if (dur > 0) {
 			shortest_audible = min (shortest_audible, dur);
 		}
@@ -260,55 +268,55 @@ RegionView::set_silent_frames (const AudioIntervalResult& silences, double /*thr
 		s = i->second;
 	}
 
-	framecnt_t const dur = _region->start() + _region->length() - 1 - s;
+	samplecnt_t const dur = _region->start() + _region->length() - 1 - s;
 	if (dur > 0) {
 		shortest_audible = min (shortest_audible, dur);
 	}
 
-        _silence_text = new ArdourCanvas::Text (group);
+	_silence_text = new ArdourCanvas::Text (group);
 	_silence_text->set_ignore_events (true);
-        _silence_text->set_font_description (get_font_for_style (N_("SilenceText")));
-        _silence_text->set_color (UIConfiguration::instance().color ("silence text"));
+	_silence_text->set_font_description (get_font_for_style (N_("SilenceText")));
+	_silence_text->set_color (UIConfiguration::instance().color ("silence text"));
 
-        /* both positions are relative to the region start offset in source */
+	/* both positions are relative to the region start offset in source */
 
-        _silence_text->set_x_position (trackview.editor().sample_to_pixel (silences.front().first - _region->start()) + 10.0);
-        _silence_text->set_y_position (20.0);
+	_silence_text->set_x_position (trackview.editor().sample_to_pixel (silences.front().first - _region->start()) + 10.0);
+	_silence_text->set_y_position (20.0);
 
-        double ms = (float) shortest/_region->session().frame_rate();
+	double ms = (float) shortest/_region->session().sample_rate();
 
-        /* ms are now in seconds */
+	/* ms are now in seconds */
 
-        char const * sunits;
+	char const * sunits;
 
-        if (ms >= 60.0) {
-                sunits = _("minutes");
-                ms /= 60.0;
-        } else if (ms < 1.0) {
-                sunits = _("msecs");
-                ms *= 1000.0;
-        } else {
-                sunits = _("secs");
-        }
+	if (ms >= 60.0) {
+		sunits = _("minutes");
+		ms /= 60.0;
+	} else if (ms < 1.0) {
+		sunits = _("msecs");
+		ms *= 1000.0;
+	} else {
+		sunits = _("secs");
+	}
 
 	string text = string_compose (ngettext ("%1 silent segment", "%1 silent segments", silences.size()), silences.size())
 		+ ", "
 		+ string_compose (_("shortest = %1 %2"), ms, sunits);
 
-        if (shortest_audible != max_framepos) {
-                /* ms are now in seconds */
-                double ma = (float) shortest_audible / _region->session().frame_rate();
-                char const * aunits;
+	if (shortest_audible != max_samplepos) {
+		/* ms are now in seconds */
+		double ma = (float) shortest_audible / _region->session().sample_rate();
+		char const * aunits;
 
-                if (ma >= 60.0) {
-                        aunits = _("minutes");
-                        ma /= 60.0;
-                } else if (ma < 1.0) {
-                        aunits = _("msecs");
-                        ma *= 1000.0;
-                } else {
-                        aunits = _("secs");
-                }
+		if (ma >= 60.0) {
+			aunits = _("minutes");
+			ma /= 60.0;
+		} else if (ma < 1.0) {
+			aunits = _("msecs");
+			ma *= 1000.0;
+		} else {
+			aunits = _("secs");
+		}
 
 		text += string_compose (_("\n  (shortest audible segment = %1 %2)"), ma, aunits);
 	}
@@ -320,9 +328,9 @@ void
 RegionView::hide_silent_frames ()
 {
 	for (list<ArdourCanvas::Rectangle*>::iterator i = _silent_frames.begin (); i != _silent_frames.end (); ++i) {
-                (*i)->hide ();
+		(*i)->hide ();
 	}
-        _silence_text->hide();
+	_silence_text->hide();
 }
 
 void
@@ -331,10 +339,10 @@ RegionView::drop_silent_frames ()
 	for (list<ArdourCanvas::Rectangle*>::iterator i = _silent_frames.begin (); i != _silent_frames.end (); ++i) {
 		delete *i;
 	}
-        _silent_frames.clear ();
+	_silent_frames.clear ();
 
-        delete _silence_text;
-        _silence_text = 0;
+	delete _silence_text;
+	_silence_text = 0;
 }
 
 gint
@@ -375,15 +383,14 @@ RegionView::region_changed (const PropertyChange& what_changed)
 	if (what_changed.contains (ARDOUR::Properties::name)) {
 		region_renamed ();
 	}
+	if (what_changed.contains (ARDOUR::Properties::position_lock_style)) {
+		region_renamed ();
+	}
 	if (what_changed.contains (ARDOUR::Properties::sync_position)) {
 		region_sync_changed ();
 	}
 	if (what_changed.contains (ARDOUR::Properties::locked)) {
 		region_locked ();
-	}
-	if (what_changed.contains (ARDOUR::Properties::locked)) {
-		/* name will show locked status */
-		region_renamed ();
 	}
 }
 
@@ -413,11 +420,11 @@ RegionView::region_resized (const PropertyChange& what_changed)
 
 		unit_length = _region->length() / samples_per_pixel;
 
- 		for (vector<GhostRegion*>::iterator i = ghosts.begin(); i != ghosts.end(); ++i) {
+		for (vector<GhostRegion*>::iterator i = ghosts.begin(); i != ghosts.end(); ++i) {
 
- 			(*i)->set_duration (unit_length);
+			(*i)->set_duration (unit_length);
 
- 		}
+		}
 	}
 }
 
@@ -454,7 +461,7 @@ RegionView::lower_to_bottom ()
 }
 
 bool
-RegionView::set_position (framepos_t pos, void* /*src*/, double* ignored)
+RegionView::set_position (samplepos_t pos, void* /*src*/, double* ignored)
 {
 	double delta;
 	bool ret;
@@ -490,9 +497,9 @@ RegionView::set_samples_per_pixel (double fpp)
 }
 
 bool
-RegionView::set_duration (framecnt_t frames, void *src)
+RegionView::set_duration (samplecnt_t samples, void *src)
 {
-	if (!TimeAxisViewItem::set_duration (frames, src)) {
+	if (!TimeAxisViewItem::set_duration (samples, src)) {
 		return false;
 	}
 
@@ -514,7 +521,7 @@ void
 RegionView::set_sync_mark_color ()
 {
 	if (sync_mark) {
-		ArdourCanvas::Color c = UIConfiguration::instance().color ("sync mark");
+		Gtkmm2ext::Color c = UIConfiguration::instance().color ("sync mark");
 		sync_mark->set_fill_color (c);
 		sync_mark->set_outline_color (c);
 		sync_line->set_outline_color (c);
@@ -524,16 +531,16 @@ RegionView::set_sync_mark_color ()
 uint32_t
 RegionView::get_fill_color () const
 {
-	ArdourCanvas::Color f = TimeAxisViewItem::get_fill_color();
+	Gtkmm2ext::Color f = TimeAxisViewItem::get_fill_color();
 	char const *modname;
 
-	if (_region->opaque()) {
+	if (_region->opaque() && ( !_dragging && !_region->muted () )) {
 		modname = "opaque region base";
 	} else {
 		modname = "transparent region base";
 	}
 
-	return HSV(f).mod (UIConfiguration::instance().modifier (modname)).color ();
+	return Gtkmm2ext::HSV(f).mod (UIConfiguration::instance().modifier (modname)).color ();
 }
 
 void
@@ -561,21 +568,22 @@ RegionView::make_name () const
 	std::string str;
 
 	// XXX nice to have some good icons for this
+	if (_region->position_lock_style() == MusicTime) {
+		str += "\u266B"; // BEAMED EIGHTH NOTES
+	}
 
 	if (_region->locked()) {
-		str += '>';
+		str += "\u2629"; // CROSS OF JERUSALEM
 		str += _region->name();
-		str += '<';
 	} else if (_region->position_locked()) {
-		str += '{';
+		str += "\u21B9"; // LEFTWARDS ARROW TO BAR OVER RIGHTWARDS ARROW TO BAR
 		str += _region->name();
-		str += '}';
 	} else if (_region->video_locked()) {
 		str += '[';
 		str += _region->name();
 		str += ']';
 	} else {
-		str = _region->name();
+		str += _region->name();
 	}
 
 	if (_region->muted()) {
@@ -592,14 +600,13 @@ RegionView::region_renamed ()
 
 	set_item_name (str, this);
 	set_name_text (str);
-	reset_width_dependent_items (_pixel_width);
 }
 
 void
 RegionView::region_sync_changed ()
 {
 	int sync_dir;
-	framecnt_t sync_offset;
+	samplecnt_t sync_offset;
 
 	sync_offset = _region->sync_offset (sync_dir);
 
@@ -727,7 +734,7 @@ RegionView::set_height (double h)
 	if (sync_line) {
 		Points points;
 		int sync_dir;
-		framecnt_t sync_offset;
+		samplecnt_t sync_offset;
 		sync_offset = _region->sync_offset (sync_dir);
 		double offset = sync_offset / samples_per_pixel;
 
@@ -737,7 +744,7 @@ RegionView::set_height (double h)
 			);
 	}
 
-	for (list<ArdourCanvas::Rectangle*>::iterator i = _coverage_frames.begin(); i != _coverage_frames.end(); ++i) {
+	for (list<ArdourCanvas::Rectangle*>::iterator i = _coverage_frame.begin(); i != _coverage_frame.end(); ++i) {
 		(*i)->set_y1 (h + 1);
 	}
 
@@ -747,20 +754,20 @@ RegionView::set_height (double h)
 
 }
 
-/** Remove old coverage frames and make new ones, if we're in a LayerDisplay mode
+/** Remove old coverage frame and make new ones, if we're in a LayerDisplay mode
  *  which uses them. */
 void
-RegionView::update_coverage_frames (LayerDisplay d)
+RegionView::update_coverage_frame (LayerDisplay d)
 {
-	/* remove old coverage frames */
-	for (list<ArdourCanvas::Rectangle*>::iterator i = _coverage_frames.begin (); i != _coverage_frames.end (); ++i) {
+	/* remove old coverage frame */
+	for (list<ArdourCanvas::Rectangle*>::iterator i = _coverage_frame.begin (); i != _coverage_frame.end (); ++i) {
 		delete *i;
 	}
 
-	_coverage_frames.clear ();
+	_coverage_frame.clear ();
 
 	if (d != Stacked) {
-		/* don't do coverage frames unless we're in stacked mode */
+		/* don't do coverage frame unless we're in stacked mode */
 		return;
 	}
 
@@ -769,9 +776,9 @@ RegionView::update_coverage_frames (LayerDisplay d)
 		return;
 	}
 
-	framepos_t const position = _region->first_frame ();
-	framepos_t t = position;
-	framepos_t const end = _region->last_frame ();
+	samplepos_t const position = _region->first_sample ();
+	samplepos_t t = position;
+	samplepos_t const end = _region->last_sample ();
 
 	ArdourCanvas::Rectangle* cr = 0;
 	bool me = false;
@@ -779,13 +786,13 @@ RegionView::update_coverage_frames (LayerDisplay d)
 	/* the color that will be used to show parts of regions that will not be heard */
 	uint32_t const non_playing_color = UIConfiguration::instance().color_mod ("covered region", "covered region base");
 
+
 	while (t < end) {
 
 		t++;
 
 		/* is this region is on top at time t? */
 		bool const new_me = (pl->top_unmuted_region_at (t) == _region);
-
 		/* finish off any old rect, if required */
 		if (cr && me != new_me) {
 			cr->set_x1 (trackview.editor().sample_to_pixel (t - position));
@@ -794,7 +801,7 @@ RegionView::update_coverage_frames (LayerDisplay d)
 		/* start off any new rect, if required */
 		if (cr == 0 || me != new_me) {
 			cr = new ArdourCanvas::Rectangle (group);
-			_coverage_frames.push_back (cr);
+			_coverage_frame.push_back (cr);
 			cr->set_x0 (trackview.editor().sample_to_pixel (t - position));
 			cr->set_y0 (1);
 			cr->set_y1 (_height + 1);
@@ -806,10 +813,14 @@ RegionView::update_coverage_frames (LayerDisplay d)
 				cr->set_fill_color (non_playing_color);
 			}
 		}
-
 		t = pl->find_next_region_boundary (t, 1);
+		if (t < 0) {
+			break;
+		}
 		me = new_me;
 	}
+
+	t = pl->find_next_region_boundary (t, 1);
 
 	if (cr) {
 		/* finish off the last rectangle */
@@ -834,69 +845,67 @@ RegionView::update_coverage_frames (LayerDisplay d)
 }
 
 bool
-RegionView::trim_front (framepos_t new_bound, bool no_overlap)
+RegionView::trim_front (samplepos_t new_bound, bool no_overlap, const int32_t sub_num)
 {
 	if (_region->locked()) {
 		return false;
 	}
 
-	RouteTimeAxisView& rtv = dynamic_cast<RouteTimeAxisView&> (trackview);
-	double const speed = rtv.track()->speed ();
+	samplepos_t const pre_trim_first_sample = _region->first_sample();
 
-	framepos_t const pre_trim_first_frame = _region->first_frame();
+	if (_region->position() == new_bound) {
+		return false;
+	}
 
-	_region->trim_front ((framepos_t) (new_bound * speed));
+	_region->trim_front (new_bound, sub_num);
 
 	if (no_overlap) {
-		// Get the next region on the left of this region and shrink/expand it.
+		/* Get the next region on the left of this region and shrink/expand it. */
 		boost::shared_ptr<Playlist> playlist (_region->playlist());
-		boost::shared_ptr<Region> region_left = playlist->find_next_region (pre_trim_first_frame, End, 0);
+		boost::shared_ptr<Region> region_left = playlist->find_next_region (pre_trim_first_sample, End, 0);
 
 		bool regions_touching = false;
 
-		if (region_left != 0 && (pre_trim_first_frame == region_left->last_frame() + 1)) {
+		if (region_left != 0 && (pre_trim_first_sample == region_left->last_sample() + 1)) {
 			regions_touching = true;
 		}
 
-		// Only trim region on the left if the first frame has gone beyond the left region's last frame.
-		if (region_left != 0 &&	(region_left->last_frame() > _region->first_frame() || regions_touching)) {
-			region_left->trim_end (_region->first_frame() - 1);
+		/* Only trim region on the left if the first sample has gone beyond the left region's last sample. */
+		if (region_left != 0 && (region_left->last_sample() > _region->first_sample() || regions_touching)) {
+			region_left->trim_end (_region->first_sample() - 1);
 		}
 	}
 
 	region_changed (ARDOUR::bounds_change);
 
-	return (pre_trim_first_frame != _region->first_frame());  //return true if we actually changed something
+	return (pre_trim_first_sample != _region->first_sample()); // return true if we actually changed something
 }
 
 bool
-RegionView::trim_end (framepos_t new_bound, bool no_overlap)
+RegionView::trim_end (samplepos_t new_bound, bool no_overlap, const int32_t sub_num)
 {
 	if (_region->locked()) {
 		return false;
 	}
 
-	RouteTimeAxisView& rtv = dynamic_cast<RouteTimeAxisView&> (trackview);
-	double const speed = rtv.track()->speed ();
+	samplepos_t const pre_trim_last_sample = _region->last_sample();
 
-	framepos_t const pre_trim_last_frame = _region->last_frame();
-
-	_region->trim_end ((framepos_t) (new_bound * speed));
+	_region->trim_end (new_bound, sub_num);
 
 	if (no_overlap) {
-		// Get the next region on the right of this region and shrink/expand it.
+		/* Get the next region on the right of this region and shrink/expand it. */
 		boost::shared_ptr<Playlist> playlist (_region->playlist());
-		boost::shared_ptr<Region> region_right = playlist->find_next_region (pre_trim_last_frame, Start, 1);
+		boost::shared_ptr<Region> region_right = playlist->find_next_region (pre_trim_last_sample, Start, 1);
 
 		bool regions_touching = false;
 
-		if (region_right != 0 && (pre_trim_last_frame == region_right->first_frame() - 1)) {
+		if (region_right != 0 && (pre_trim_last_sample == region_right->first_sample() - 1)) {
 			regions_touching = true;
 		}
 
-		// Only trim region on the right if the last frame has gone beyond the right region's first frame.
-		if (region_right != 0 && (region_right->first_frame() < _region->last_frame() || regions_touching)) {
-			region_right->trim_front (_region->last_frame() + 1);
+		/* Only trim region on the right if the last sample has gone beyond the right region's first sample. */
+		if (region_right != 0 && (region_right->first_sample() < _region->last_sample() || regions_touching)) {
+			region_right->trim_front (_region->last_sample() + 1, sub_num);
 		}
 
 		region_changed (ARDOUR::bounds_change);
@@ -905,7 +914,7 @@ RegionView::trim_end (framepos_t new_bound, bool no_overlap)
 		region_changed (PropertyChange (ARDOUR::Properties::length));
 	}
 
-	return (pre_trim_last_frame != _region->last_frame());  //return true if we actually changed something
+	return (pre_trim_last_sample != _region->last_sample()); // return true if we actually changed something
 }
 
 
@@ -921,7 +930,7 @@ RegionView::thaw_after_trim ()
 
 
 void
-RegionView::move_contents (frameoffset_t distance)
+RegionView::move_contents (sampleoffset_t distance)
 {
 	if (_region->locked()) {
 		return;
@@ -930,30 +939,50 @@ RegionView::move_contents (frameoffset_t distance)
 	region_changed (PropertyChange (ARDOUR::Properties::start));
 }
 
-/** Snap a frame offset within our region using the current snap settings.
+/** Snap a sample offset within our region using the current snap settings.
  *  @param x Frame offset from this region's position.
  *  @param ensure_snap whether to ignore snap_mode (in the case of SnapOff) and magnetic snap.
  *  Used when inverting snap mode logic with key modifiers, or snap distance calculation.
- *  @return Snapped frame offset from this region's position.
+ *  @return Snapped sample offset from this region's position.
  */
-frameoffset_t
-RegionView::snap_frame_to_frame (frameoffset_t x, bool ensure_snap) const
+MusicSample
+RegionView::snap_sample_to_sample (sampleoffset_t x, bool ensure_snap) const
 {
 	PublicEditor& editor = trackview.editor();
-
-	/* x is region relative, convert it to global absolute frames */
-	framepos_t const session_frame = x + _region->position();
+	/* x is region relative, convert it to global absolute samples */
+	samplepos_t const session_sample = x + _region->position();
 
 	/* try a snap in either direction */
-	framepos_t frame = session_frame;
-	editor.snap_to (frame, RoundNearest, false, ensure_snap);
+	MusicSample sample (session_sample, 0);
+	editor.snap_to (sample, RoundNearest, SnapToAny_Visual, ensure_snap);
 
 	/* if we went off the beginning of the region, snap forwards */
-	if (frame < _region->position ()) {
-		frame = session_frame;
-		editor.snap_to (frame, RoundUpAlways, false, ensure_snap);
+	if (sample.sample < _region->position ()) {
+		sample.sample = session_sample;
+		editor.snap_to (sample, RoundUpAlways, SnapToAny_Visual, ensure_snap);
 	}
 
-	/* back to region relative */
-	return frame - _region->position();
+	/* back to region relative, keeping the relevant divisor */
+	return MusicSample (sample.sample - _region->position(), sample.division);
+}
+
+void
+RegionView::update_visibility ()
+{
+	/* currently only the name visibility can be changed dynamically */
+
+	if (UIConfiguration::instance().get_show_region_name()) {
+		visibility = Visibility (visibility | ShowNameText);
+	} else {
+		visibility = Visibility (visibility & ~ShowNameText);
+	}
+
+	manage_name_text ();
+}
+
+void
+RegionView::set_selected (bool yn)
+{
+	_region->set_selected_for_solo(yn);
+	TimeAxisViewItem::set_selected(yn);
 }

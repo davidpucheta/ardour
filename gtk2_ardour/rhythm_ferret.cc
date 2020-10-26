@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/stock.h>
 #include <gtkmm2ext/utils.h>
@@ -33,7 +36,7 @@
 #include "editor.h"
 #include "time_axis_view.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -83,12 +86,12 @@ RhythmFerret::RhythmFerret (Editor& e)
 	, analyze_button (_("Analyze"))
 	, peak_picker_threshold_adjustment (0.3, 0.0, 1.0, 0.01, 0.1)
 	, peak_picker_threshold_scale (peak_picker_threshold_adjustment)
+	, silence_threshold_adjustment (-90.0, -120.0, 0.0, 1, 10)
+	, silence_threshold_scale (silence_threshold_adjustment)
 #ifdef HAVE_AUBIO4
 	, minioi_adjustment (4, 0, 40, 1, 5)
 	, minioi_scale (minioi_adjustment)
 #endif
-	, silence_threshold_adjustment (-90.0, -120.0, 0.0, 1, 10)
-	, silence_threshold_scale (silence_threshold_adjustment)
 	, trigger_gap_adjustment (3, 0, 100, 1, 10)
 	, trigger_gap_spinner (trigger_gap_adjustment)
 	, action_button (Stock::APPLY)
@@ -173,6 +176,12 @@ RhythmFerret::RhythmFerret (Editor& e)
 }
 
 void
+RhythmFerret::on_response (int response_id)
+{
+	Gtk::Dialog::on_response (response_id);
+}
+
+void
 RhythmFerret::analysis_mode_changed ()
 {
 	bool const perc = get_analysis_mode() == PercussionOnset;
@@ -251,30 +260,36 @@ RhythmFerret::run_analysis ()
 }
 
 int
-RhythmFerret::run_percussion_onset_analysis (boost::shared_ptr<Readable> readable, frameoffset_t /*offset*/, AnalysisFeatureList& results)
+RhythmFerret::run_percussion_onset_analysis (boost::shared_ptr<Readable> readable, sampleoffset_t /*offset*/, AnalysisFeatureList& results)
 {
-	TransientDetector t (_session->frame_rate());
+	try {
+		TransientDetector t (_session->sample_rate());
 
-	for (uint32_t i = 0; i < readable->n_channels(); ++i) {
+		for (uint32_t i = 0; i < readable->n_channels(); ++i) {
 
-		AnalysisFeatureList these_results;
+			AnalysisFeatureList these_results;
 
-		t.reset ();
-		float dB = detection_threshold_adjustment.get_value();
-		float coeff = dB > -80.0f ? pow (10.0f, dB * 0.05f) : 0.0f;
-		t.set_threshold (coeff);
-		t.set_sensitivity (sensitivity_adjustment.get_value());
+			t.reset ();
+			float dB = detection_threshold_adjustment.get_value();
+			float coeff = dB > -80.0f ? pow (10.0f, dB * 0.05f) : 0.0f;
+			t.set_threshold (coeff);
+			t.set_sensitivity (4, sensitivity_adjustment.get_value());
 
-		if (t.run ("", readable.get(), i, these_results)) {
-			continue;
+			if (t.run ("", readable.get(), i, these_results)) {
+				continue;
+			}
+
+			/* merge */
+
+			results.insert (results.end(), these_results.begin(), these_results.end());
+			these_results.clear ();
+
+			t.update_positions (readable.get(), i, results);
 		}
 
-		/* merge */
-
-		results.insert (results.end(), these_results.begin(), these_results.end());
-		these_results.clear ();
-
-		t.update_positions (readable.get(), i, results);
+	} catch (failed_constructor& err) {
+		error << "Could not load percussion onset detection plugin" << endmsg;
+		return -1;
 	}
 
 	return 0;
@@ -300,10 +315,10 @@ RhythmFerret::get_note_onset_function ()
 }
 
 int
-RhythmFerret::run_note_onset_analysis (boost::shared_ptr<Readable> readable, frameoffset_t /*offset*/, AnalysisFeatureList& results)
+RhythmFerret::run_note_onset_analysis (boost::shared_ptr<Readable> readable, sampleoffset_t /*offset*/, AnalysisFeatureList& results)
 {
 	try {
-		OnsetDetector t (_session->frame_rate());
+		OnsetDetector t (_session->sample_rate());
 
 		for (uint32_t i = 0; i < readable->n_channels(); ++i) {
 
@@ -335,7 +350,7 @@ RhythmFerret::run_note_onset_analysis (boost::shared_ptr<Readable> readable, fra
 	}
 
 	if (!results.empty()) {
-		OnsetDetector::cleanup_onsets (results, _session->frame_rate(), trigger_gap_adjustment.get_value());
+		OnsetDetector::cleanup_onsets (results, _session->sample_rate(), trigger_gap_adjustment.get_value());
 	}
 
 	return 0;

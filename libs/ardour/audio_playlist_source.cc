@@ -1,20 +1,23 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2011-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2014-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "libardour-config.h"
@@ -35,21 +38,21 @@
 #include "ardour/session.h"
 #include "ardour/session_directory.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
 using namespace PBD;
 
 AudioPlaylistSource::AudioPlaylistSource (Session& s, const ID& orig, const std::string& name, boost::shared_ptr<AudioPlaylist> p,
-					  uint32_t chn, frameoffset_t begin, framecnt_t len, Source::Flag flags)
+					  uint32_t chn, sampleoffset_t begin, samplecnt_t len, Source::Flag flags)
 	: Source (s, DataType::AUDIO, name)
 	, PlaylistSource (s, orig, name, p, DataType::AUDIO, begin, len, flags)
 	, AudioSource (s, name)
 	, _playlist_channel (chn)
 {
 	AudioSource::_length = len;
-	ensure_buffers_for_level (_level, _session.frame_rate());
+	ensure_buffers_for_level (_level, _session.sample_rate());
 }
 
 AudioPlaylistSource::AudioPlaylistSource (Session& s, const XMLNode& node)
@@ -57,8 +60,8 @@ AudioPlaylistSource::AudioPlaylistSource (Session& s, const XMLNode& node)
 	, PlaylistSource (s, node)
 	, AudioSource (s, node)
 {
-	/* PlaylistSources are never writable, renameable, removable or destructive */
-	_flags = Flag (_flags & ~(Writable|CanRename|Removable|RemovableIfEmpty|RemoveAtDestroy|Destructive));
+	/* PlaylistSources are never writable, renameable or removable */
+	_flags = Flag (_flags & ~(Writable|CanRename|Removable|RemovableIfEmpty|RemoveAtDestroy));
 
 	/* ancestors have already called ::set_state() in their XML-based
 	   constructors.
@@ -79,14 +82,12 @@ XMLNode&
 AudioPlaylistSource::get_state ()
 {
 	XMLNode& node (AudioSource::get_state ());
-	char buf[64];
 
 	/* merge PlaylistSource state */
 
 	PlaylistSource::add_state (node);
 
-	snprintf (buf, sizeof (buf), "%" PRIu32, _playlist_channel);
-	node.add_property ("channel", buf);
+	node.set_property ("channel", _playlist_channel);
 
 	return node;
 }
@@ -108,29 +109,26 @@ AudioPlaylistSource::set_state (const XMLNode& node, int version, bool with_desc
 		}
 	}
 
-	const XMLProperty* prop;
-	pair<framepos_t,framepos_t> extent = _playlist->get_extent();
+	pair<samplepos_t,samplepos_t> extent = _playlist->get_extent();
 
 	AudioSource::_length = extent.second - extent.first;
 
-	if ((prop = node.property (X_("channel"))) == 0) {
+	if (!node.get_property (X_("channel"), _playlist_channel)) {
 		throw failed_constructor ();
 	}
 
-	sscanf (prop->value().c_str(), "%" PRIu32, &_playlist_channel);
-
-	ensure_buffers_for_level (_level, _session.frame_rate());
+	ensure_buffers_for_level (_level, _session.sample_rate());
 
 	return 0;
 }
 
-framecnt_t
-AudioPlaylistSource::read_unlocked (Sample* dst, framepos_t start, framecnt_t cnt) const
+samplecnt_t
+AudioPlaylistSource::read_unlocked (Sample* dst, samplepos_t start, samplecnt_t cnt) const
 {
 	boost::shared_array<Sample> sbuf;
 	boost::shared_array<gain_t> gbuf;
-	framecnt_t to_read;
-	framecnt_t to_zero;
+	samplecnt_t to_read;
+	samplecnt_t to_zero;
 
 	/* we must be careful not to read beyond the end of our "section" of
 	 * the playlist, because otherwise we may read data that exists, but
@@ -165,8 +163,8 @@ AudioPlaylistSource::read_unlocked (Sample* dst, framepos_t start, framecnt_t cn
 	return cnt;
 }
 
-framecnt_t
-AudioPlaylistSource::write_unlocked (Sample *, framecnt_t)
+samplecnt_t
+AudioPlaylistSource::write_unlocked (Sample *, samplecnt_t)
 {
 	fatal << string_compose (_("programming error: %1"), "AudioPlaylistSource::write() called - should be impossible") << endmsg;
 	abort(); /*NOTREACHED*/
@@ -188,7 +186,7 @@ AudioPlaylistSource::n_channels () const
 		return 1;
 	}
 
-	boost::shared_ptr<Region> r = _playlist->region_list().front ();
+	boost::shared_ptr<Region> r = _playlist->region_list_property().front ();
 	boost::shared_ptr<AudioRegion> ar = boost::dynamic_pointer_cast<AudioRegion> (r);
 
 	return ar->audio_source()->n_channels ();
@@ -200,10 +198,10 @@ AudioPlaylistSource::sample_rate () const
 	/* use just the first region to decide */
 
 	if (empty()) {
-		_session.frame_rate ();
+		_session.sample_rate ();
 	}
 
-	boost::shared_ptr<Region> r = _playlist->region_list().front ();
+	boost::shared_ptr<Region> r = _playlist->region_list_property().front ();
 	boost::shared_ptr<AudioRegion> ar = boost::dynamic_pointer_cast<AudioRegion> (r);
 
 	return ar->audio_source()->sample_rate ();

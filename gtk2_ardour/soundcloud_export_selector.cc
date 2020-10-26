@@ -1,25 +1,24 @@
-/* soundcloud_export_selector.cpp ***************************************************
+/*
+ * Copyright (C) 2013-2014 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+#include <gtkmm/frame.h>
 
-	Adapted for Ardour by Ben Loftis, March 2012
-
-	Licence GPL:
-
-	This program is free software; you can redistribute it and/or
-	modify it under the terms of the GNU General Public License
-	as published by the Free Software Foundation; either version 2
-	of the License, or (at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-
-
-*************************************************************************************/
 #include "ardour/debug.h"
 #include "ardour/soundcloud_upload.h"
 #include "soundcloud_export_selector.h"
@@ -32,7 +31,7 @@
 #include <iostream>
 #include "pbd/gstdio_compat.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 
@@ -89,7 +88,7 @@ SoundcloudExportSelector::SoundcloudExportSelector () :
 int
 SoundcloudExportSelector::do_progress_callback (double ultotal, double ulnow, const std::string &filename)
 {
-	DEBUG_TRACE (DEBUG::Soundcloud, string_compose ("SoundcloudExportSelector::do_progress_callback(%1, %2, %3)", ultotal, ulnow, filename));
+	DEBUG_TRACE (DEBUG::Soundcloud, string_compose ("SoundcloudExportSelector::do_progress_callback(%1, %2, %3)\n", ultotal, ulnow, filename));
 	if (soundcloud_cancel) {
 		progress_bar.set_fraction (0);
 		// cancel_button.set_label ("");
@@ -110,4 +109,3 @@ SoundcloudExportSelector::do_progress_callback (double ultotal, double ulnow, co
 
 	return 0;
 }
-

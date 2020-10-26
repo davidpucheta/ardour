@@ -1,23 +1,23 @@
 /*
-    Copyright (C) 2014 Paul Davis
+ * Copyright (C) 2014-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2014-2017 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
-#include "evoral/MIDIEvent.hpp"
+#include "evoral/Event.h"
 #include "midi++/channel.h"
 #include "midi++/parser.h"
 #include "midi++/port.h"
@@ -30,7 +30,7 @@
 #include "ardour/midi_scene_changer.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -94,7 +94,7 @@ MIDISceneChanger::gather (const Locations::LocationList& locations)
 }
 
 void
-MIDISceneChanger::rt_deliver (MidiBuffer& mbuf, framepos_t when, boost::shared_ptr<MIDISceneChange> msc)
+MIDISceneChanger::rt_deliver (MidiBuffer& mbuf, samplepos_t when, boost::shared_ptr<MIDISceneChange> msc)
 {
         if (!msc->active()) {
                 return;
@@ -106,17 +106,17 @@ MIDISceneChanger::rt_deliver (MidiBuffer& mbuf, framepos_t when, boost::shared_p
 	MIDIOutputActivity (); /* EMIT SIGNAL */
 
 	if ((cnt = msc->get_bank_msb_message (buf, sizeof (buf))) > 0) {
-		mbuf.push_back (when, cnt, buf);
+		mbuf.push_back (when, Evoral::MIDI_EVENT, cnt, buf);
 
 		if ((cnt = msc->get_bank_lsb_message (buf, sizeof (buf))) > 0) {
-			mbuf.push_back (when, cnt, buf);
+			mbuf.push_back (when, Evoral::MIDI_EVENT, cnt, buf);
 		}
 
 		last_delivered_bank = msc->bank();
 	}
 
 	if ((cnt = msc->get_program_message (buf, sizeof (buf))) > 0) {
-		mbuf.push_back (when, cnt, buf);
+		mbuf.push_back (when, Evoral::MIDI_EVENT, cnt, buf);
 
 		last_delivered_program = msc->program();
 	}
@@ -157,7 +157,7 @@ MIDISceneChanger::non_rt_deliver (boost::shared_ptr<MIDISceneChange> msc)
 }
 
 void
-MIDISceneChanger::run (framepos_t start, framepos_t end)
+MIDISceneChanger::run (samplepos_t start, samplepos_t end)
 {
 	if (!output_port || recording() || !_session.transport_rolling()) {
 		return;
@@ -187,7 +187,7 @@ MIDISceneChanger::run (framepos_t start, framepos_t end)
 }
 
 void
-MIDISceneChanger::locate (framepos_t pos)
+MIDISceneChanger::locate (samplepos_t pos)
 {
 	boost::shared_ptr<MIDISceneChange> msc;
 
@@ -279,7 +279,7 @@ void
 void
 MIDISceneChanger::program_change_input (MIDI::Parser& parser, MIDI::byte program, int channel)
 {
-	framecnt_t time = parser.get_timestamp ();
+	samplecnt_t time = parser.get_timestamp ();
 
 	last_program_message_time = time;
 
@@ -302,7 +302,7 @@ MIDISceneChanger::program_change_input (MIDI::Parser& parser, MIDI::byte program
 
 	/* check for marker at current location */
 
-	loc = locations->mark_at (time, Config->get_inter_scene_gap_frames());
+	loc = locations->mark_at (time, Config->get_inter_scene_gap_samples());
 
 	if (!loc) {
 		/* create a new marker at the desired position */
@@ -314,7 +314,7 @@ MIDISceneChanger::program_change_input (MIDI::Parser& parser, MIDI::byte program
 			return;
 		}
 
-		loc = new Location (_session, time, time, new_name, Location::IsMark);
+		loc = new Location (_session, time, time, new_name, Location::IsMark, 0);
 		new_mark = true;
 	}
 
@@ -356,7 +356,7 @@ MIDISceneChanger::jump_to (int bank, int program)
 {
 	const Locations::LocationList& locations (_session.locations()->list());
 	boost::shared_ptr<SceneChange> sc;
-	framepos_t where = max_framepos;
+	samplepos_t where = max_samplepos;
 
 	for (Locations::LocationList::const_iterator l = locations.begin(); l != locations.end(); ++l) {
 
@@ -370,7 +370,7 @@ MIDISceneChanger::jump_to (int bank, int program)
 		}
 	}
 
-	if (where != max_framepos) {
+	if (where != max_samplepos) {
 		_session.request_locate (where);
 	}
 }

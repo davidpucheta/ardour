@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000-2002 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2000-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2018 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015-2018 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_route_h__
 #define __ardour_route_h__
@@ -29,8 +33,6 @@
 
 #include <boost/shared_ptr.hpp>
 #include <boost/weak_ptr.hpp>
-#include <boost/dynamic_bitset.hpp>
-#include <boost/enable_shared_from_this.hpp>
 
 #include <glibmm/threads.h>
 #include "pbd/fastlog.h"
@@ -47,46 +49,73 @@
 #include "ardour/io_vector.h"
 #include "ardour/libardour_visibility.h"
 #include "ardour/types.h"
+#include "ardour/monitorable.h"
+#include "ardour/muteable.h"
 #include "ardour/mute_master.h"
+#include "ardour/mute_control.h"
 #include "ardour/route_group_member.h"
+#include "ardour/stripable.h"
 #include "ardour/graphnode.h"
 #include "ardour/automatable.h"
 #include "ardour/unknown_processor.h"
+#include "ardour/soloable.h"
+#include "ardour/solo_control.h"
+#include "ardour/solo_safe_control.h"
+#include "ardour/slavable.h"
+
+class RoutePinWindowProxy;
+class PatchChangeGridDialog;
 
 namespace ARDOUR {
 
 class Amp;
 class DelayLine;
 class Delivery;
+class DiskReader;
+class DiskWriter;
 class IOProcessor;
 class Panner;
 class PannerShell;
+class PolarityProcessor;
 class PortSet;
 class Processor;
+class PluginInsert;
 class RouteGroup;
 class Send;
 class InternalReturn;
+class Location;
+class MonitorControl;
 class MonitorProcessor;
 class Pannable;
 class CapturingProcessor;
 class InternalSend;
+class VCA;
+class SoloIsolateControl;
+class PhaseControl;
+class MonitorControl;
 
-class LIBARDOUR_API Route : public SessionObject, public Automatable, public RouteGroupMember, public GraphNode, public boost::enable_shared_from_this<Route>
+class LIBARDOUR_API Route : public Stripable,
+                            public GraphNode,
+                            public Soloable,
+                            public Muteable,
+                            public Monitorable,
+                            public RouteGroupMember
 {
-  public:
+public:
 
 	typedef std::list<boost::shared_ptr<Processor> > ProcessorList;
 
-	enum Flag {
-		Auditioner = 0x1,
-		MasterOut = 0x2,
-		MonitorOut = 0x4
-	};
-
-	Route (Session&, std::string name, Flag flags = Flag(0), DataType default_type = DataType::AUDIO);
+	Route (Session&, std::string name, PresentationInfo::Flag flags = PresentationInfo::Flag(0), DataType default_type = DataType::AUDIO);
 	virtual ~Route();
 
 	virtual int init ();
+
+	DataType data_type () const {
+		/* XXX ultimately nice to do away with this concept, but it is
+		   quite useful for coders and for users too.
+		*/
+		return _default_type;
+	}
 
 	boost::shared_ptr<IO> input() const { return _input; }
 	boost::shared_ptr<IO> output() const { return _output; }
@@ -99,111 +128,85 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	bool active() const { return _active; }
 	void set_active (bool yn, void *);
 
-	static std::string ensure_track_or_route_name(std::string, Session &);
+	std::string ensure_track_or_route_name (std::string) const;
 
 	std::string comment() { return _comment; }
 	void set_comment (std::string str, void *src);
 
 	bool set_name (const std::string& str);
-	static void set_name_in_state (XMLNode &, const std::string &, bool rename_playlist = true);
+	static void set_name_in_state (XMLNode &, const std::string &);
 
-        uint32_t order_key () const;
-        bool has_order_key () const;
-	void set_order_key (uint32_t);
+	boost::shared_ptr<MonitorControl> monitoring_control() const { return _monitoring_control; }
 
-	bool is_auditioner() const { return _flags & Auditioner; }
-	bool is_master() const { return _flags & MasterOut; }
-	bool is_monitor() const { return _flags & MonitorOut; }
-
-	virtual MonitorState monitoring_state () const;
-	virtual MeterState metering_state () const;
+	MonitorState monitoring_state () const;
+	virtual MonitorState get_input_monitoring_state (bool recording, bool talkback) const { return MonitoringSilence; }
 
 	/* these are the core of the API of a Route. see the protected sections as well */
 
-	virtual int roll (pframes_t nframes, framepos_t start_frame, framepos_t end_frame,
-	                  int declick, bool& need_butler);
+	virtual void filter_input (BufferSet &) {}
 
-	virtual int no_roll (pframes_t nframes, framepos_t start_frame, framepos_t end_frame,
-	                     bool state_changing);
+	int roll (pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool& need_butler);
 
-	virtual int silent_roll (pframes_t nframes, framepos_t start_frame, framepos_t end_frame,
-	                         bool& need_butler);
+	int no_roll (pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool state_changing);
 
+	int silent_roll (pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool& need_butler);
+
+	virtual bool declick_in_progress () const { return false; }
 	virtual bool can_record() { return false; }
 
-	virtual void set_record_enabled (bool /*yn*/, PBD::Controllable::GroupControlDisposition) {}
-	virtual bool record_enabled() const { return false; }
-	virtual void set_record_safe (bool /*yn*/, PBD::Controllable::GroupControlDisposition) {}
-	virtual bool record_safe () const {return false; }
-	virtual void nonrealtime_handle_transport_stopped (bool abort, bool did_locate, bool flush_processors);
-	virtual void realtime_handle_transport_stopped () {}
-	virtual void realtime_locate () {}
-        virtual void non_realtime_locate (framepos_t);
-	virtual void set_pending_declick (int);
+	void non_realtime_transport_stop (samplepos_t now, bool flush);
+	virtual void realtime_handle_transport_stopped ();
+
+	virtual void realtime_locate (bool) {}
+	virtual void non_realtime_locate (samplepos_t);
+	void set_loop (ARDOUR::Location *);
 
 	/* end of vfunc-based API */
 
-	void shift (framepos_t, framecnt_t);
+	void shift (samplepos_t, samplecnt_t);
 
-	void set_gain (gain_t val, PBD::Controllable::GroupControlDisposition);
-	void inc_gain (gain_t delta);
+	/* controls use set_solo() to modify this route's solo state */
 
-	void set_trim (gain_t val, PBD::Controllable::GroupControlDisposition);
-
-	void set_mute_points (MuteMaster::MutePoint);
-	MuteMaster::MutePoint mute_points () const;
-
-	bool muted () const;
-	void set_mute (bool yn, PBD::Controllable::GroupControlDisposition);
-
-	bool muted_by_others() const;
-
-	/* controls use set_solo() to modify this route's solo state
-	 */
-
-	void set_solo (bool yn, PBD::Controllable::GroupControlDisposition group_override = PBD::Controllable::UseGroup);
-	bool soloed () const { return self_soloed () || soloed_by_others (); }
 	void clear_all_solo_state ();
 
-	bool soloed_by_others () const { return _soloed_by_others_upstream||_soloed_by_others_downstream; }
-	bool soloed_by_others_upstream () const { return _soloed_by_others_upstream; }
-	bool soloed_by_others_downstream () const { return _soloed_by_others_downstream; }
-	bool self_soloed () const { return _self_solo; }
+	bool soloed_by_others () const { return _solo_control->soloed_by_others(); }
+	bool soloed_by_others_upstream () const { return _solo_control->soloed_by_others_upstream(); }
+	bool soloed_by_others_downstream () const { return _solo_control->soloed_by_others_downstream(); }
+	bool self_soloed () const { return _solo_control->self_soloed(); }
+	bool soloed () const { return self_soloed () || soloed_by_others (); }
 
-	void set_solo_isolated (bool yn, PBD::Controllable::GroupControlDisposition group_override = PBD::Controllable::UseGroup);
-	bool solo_isolated() const;
-
-	void set_solo_safe (bool yn, PBD::Controllable::GroupControlDisposition group_override = PBD::Controllable::UseGroup);
-	bool solo_safe() const;
-
-	void set_listen (bool yn, PBD::Controllable::GroupControlDisposition group_override = PBD::Controllable::UseGroup);
-	bool listening_via_monitor () const;
+	void push_solo_upstream (int32_t delta);
+	void push_solo_isolate_upstream (int32_t delta);
+	bool can_solo () const {
+		return !(is_master() || is_monitor() || is_auditioner() || is_foldbackbus());
+	}
+	bool is_safe () const {
+		return _solo_safe_control->get_value();
+	}
 	void enable_monitor_send ();
-
-	void set_phase_invert (uint32_t, bool yn);
-	void set_phase_invert (boost::dynamic_bitset<>);
-	bool phase_invert (uint32_t) const;
-	boost::dynamic_bitset<> phase_invert () const;
 
 	void set_denormal_protection (bool yn);
 	bool denormal_protection() const;
 
-	void         set_meter_point (MeterPoint, bool force = false);
+	void         set_meter_point (MeterPoint);
 	bool         apply_processor_changes_rt ();
 	void         emit_pending_signals ();
 	MeterPoint   meter_point() const { return _pending_meter_point; }
 
-	void         set_meter_type (MeterType t) { _meter_type = t; }
-	MeterType    meter_type() const { return _meter_type; }
+	void         set_meter_type (MeterType t);
+	MeterType    meter_type () const;
+
+	void set_disk_io_point (DiskIOPoint);
+	DiskIOPoint disk_io_point() const { return _disk_io_point; }
 
 	/* Processors */
 
 	boost::shared_ptr<Amp> amp() const  { return _amp; }
 	boost::shared_ptr<Amp> trim() const { return _trim; }
-	PeakMeter&       peak_meter()       { return *_meter.get(); }
-	const PeakMeter& peak_meter() const { return *_meter.get(); }
+	boost::shared_ptr<PolarityProcessor> polarity() const { return _polarity; }
+	boost::shared_ptr<PeakMeter>       peak_meter()       { return _meter; }
+	boost::shared_ptr<const PeakMeter> peak_meter() const { return _meter; }
 	boost::shared_ptr<PeakMeter> shared_peak_meter() const { return _meter; }
-	boost::shared_ptr<DelayLine> delay_line() const  { return _delayline; }
 
 	void flush_processors ();
 
@@ -234,6 +237,14 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	ChanCount max_processor_streams () const { return processor_max_streams; }
 
 	std::list<std::string> unknown_processors () const;
+
+	RoutePinWindowProxy * pinmgr_proxy () const { return _pinmgr_proxy; }
+	void set_pingmgr_proxy (RoutePinWindowProxy* wp) { _pinmgr_proxy = wp ; }
+
+	PatchChangeGridDialog* patch_selector_dialog () const { return _patch_selector_dialog; }
+	void set_patch_selector_dialog  (PatchChangeGridDialog* d) { _patch_selector_dialog = d; }
+
+	boost::shared_ptr<AutomationControl> automation_control_recurse (PBD::ID const & id) const;
 
 	/* special processors */
 
@@ -291,6 +302,7 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	void ab_plugins (bool forward);
 	void clear_processors (Placement);
 	void all_visible_processors_active (bool);
+	void move_instrument_down (bool postfader = false);
 
 	bool strict_io () const { return _strict_io; }
 	bool set_strict_io (bool);
@@ -332,26 +344,22 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	 */
 	bool remove_sidechain (boost::shared_ptr<Processor> proc) { return add_remove_sidechain (proc, false); }
 
-	framecnt_t set_private_port_latencies (bool playback) const;
-	void       set_public_port_latencies (framecnt_t, bool playback) const;
+	samplecnt_t  update_signal_latency (bool apply_to_delayline = false, bool* delayline_update_needed = NULL);
+	virtual void apply_latency_compensation ();
 
-	framecnt_t   update_signal_latency();
-	virtual void set_latency_compensation (framecnt_t);
+	samplecnt_t  set_private_port_latencies (bool playback) const;
+	void         set_public_port_latencies (samplecnt_t, bool playback) const;
 
-	void set_user_latency (framecnt_t);
-	framecnt_t initial_delay() const { return _initial_delay; }
-	framecnt_t signal_latency() const { return _signal_latency; }
+	samplecnt_t signal_latency() const { return _signal_latency; }
+	samplecnt_t playback_latency (bool incl_downstream = false) const;
 
-	PBD::Signal0<void>       active_changed;
-	PBD::Signal0<void>       phase_invert_changed;
-	PBD::Signal0<void>       denormal_protection_changed;
-	PBD::Signal1<void,PBD::Controllable::GroupControlDisposition>  listen_changed;
-	PBD::Signal2<void,bool,PBD::Controllable::GroupControlDisposition>  solo_changed;
-	PBD::Signal0<void>       solo_safe_changed;
-	PBD::Signal0<void>       solo_isolated_changed;
-	PBD::Signal0<void>       comment_changed;
-	PBD::Signal0<void>       mute_changed;
-	PBD::Signal0<void>       mute_points_changed;
+	virtual samplecnt_t output_latency () const { return _output_latency; }
+
+	PBD::Signal0<void> active_changed;
+	PBD::Signal0<void> denormal_protection_changed;
+	PBD::Signal0<void> comment_changed;
+
+	bool is_track();
 
 	/** track numbers - assigned by session
 	 * nubers > 0 indicate tracks (audio+midi)
@@ -368,35 +376,48 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 		PropertyChanged (ARDOUR::Properties::name);
 	}
 
+	enum PluginSetupOptions {
+		None = 0x0,
+		CanReplace = 0x1,
+		MultiOut = 0x2,
+	};
+
+	/** ask GUI about port-count, fan-out when adding instrument */
+	static PBD::Signal3<int, boost::shared_ptr<Route>, boost::shared_ptr<PluginInsert>, PluginSetupOptions > PluginSetup;
+
+	/** used to signal the GUI to fan-out (track-creation) */
+	static PBD::Signal1<void, boost::weak_ptr<Route> > FanOut;
+
 	/** the processors have changed; the parameter indicates what changed */
 	PBD::Signal1<void,RouteProcessorChange> processors_changed;
 	PBD::Signal1<void,void*> record_enable_changed;
+	/** a processor's latency has changed
+	 * (emitted from PluginInsert::latency_changed)
+	 */
+	PBD::Signal0<void> processor_latency_changed;
 	/** the metering point has changed */
-	PBD::Signal0<void>       meter_change;
-	PBD::Signal0<void>       signal_latency_changed;
-	PBD::Signal0<void>       initial_delay_changed;
+	PBD::Signal0<void> meter_change;
 
 	/** Emitted with the process lock held */
 	PBD::Signal0<void>       io_changed;
 
-	/* gui's call this for their own purposes. */
-
-	PBD::Signal2<void,std::string,void*> gui_changed;
-
 	/* stateful */
-
 	XMLNode& get_state();
+	XMLNode& get_template();
 	virtual int set_state (const XMLNode&, int version);
-	virtual XMLNode& get_template();
 
 	XMLNode& get_processor_state ();
-	virtual void set_processor_state (const XMLNode&);
+	void set_processor_state (const XMLNode&, int version);
+	virtual bool set_processor_state (XMLNode const & node, int version, XMLProperty const* prop, ProcessorList& new_order, bool& must_configure);
 
-	int save_as_template (const std::string& path, const std::string& name);
+	boost::weak_ptr<Route> weakroute ();
+
+	int save_as_template (const std::string& path, const std::string& name, const std::string& description );
 
 	PBD::Signal1<void,void*> SelectedChanged;
 
 	int add_aux_send (boost::shared_ptr<Route>, boost::shared_ptr<Processor>);
+	int add_foldback_send (boost::shared_ptr<Route>, bool post_fader);
 	void remove_aux_or_listen (boost::shared_ptr<Route>);
 
 	/**
@@ -446,131 +467,26 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	boost::shared_ptr<AutomationControl> get_control (const Evoral::Parameter& param);
 
-	class RouteAutomationControl : public AutomationControl {
-	public:
-		RouteAutomationControl (const std::string& name,
-		                        AutomationType atype,
-		                        boost::shared_ptr<AutomationList> alist,
-		                        boost::shared_ptr<Route> route);
-	protected:
-		friend class Route;
-
-		void route_set_value (double val) {
-			AutomationControl::set_value (val, Controllable::NoGroup);
-		}
-
-		boost::weak_ptr<Route> _route;
-	};
-
-	class GainControllable : public GainControl  {
-	public:
-		GainControllable (Session& session,
-		                  AutomationType type,
-		                  boost::shared_ptr<Route> route);
-
-		void set_value (double val, PBD::Controllable::GroupControlDisposition group_override) {
-			boost::shared_ptr<Route> r = _route.lock();
-			if (r) {
-				/* Route must mediate group control */
-				r->set_control ((AutomationType) parameter().type(), val, group_override);
-			}
-		}
-
-	protected:
-		friend class Route;
-
-		void route_set_value (double val) {
-			GainControl::set_value (val, Controllable::NoGroup);
-		}
-
-		boost::weak_ptr<Route> _route;
-	};
-
-	class SoloControllable : public RouteAutomationControl {
-	public:
-		SoloControllable (std::string name, boost::shared_ptr<Route>);
-		void set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-		void set_value_unchecked (double);
-		double get_value () const;
-	private:
-		void _set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-	};
-
-	struct MuteControllable : public RouteAutomationControl {
-	public:
-		MuteControllable (std::string name, boost::shared_ptr<Route>);
-		void set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-		void set_value_unchecked (double);
-		double get_value () const;
-
-		/* Pretend to change value, but do not affect actual route mute. */
-		void set_superficial_value(bool muted);
-
-	private:
-		boost::weak_ptr<Route> _route;
-		void _set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-	};
-
-	class LIBARDOUR_API PhaseControllable : public RouteAutomationControl {
-	public:
-		PhaseControllable (std::string name, boost::shared_ptr<Route>);
-		void set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-		/* currently no automation, so no need for set_value_unchecked() */
-		void set_channel (uint32_t);
-		double get_value () const;
-		uint32_t channel() const;
-	private:
-		uint32_t _current_phase;
-		void _set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-	};
-
-	class LIBARDOUR_API SoloIsolateControllable : public RouteAutomationControl {
-	public:
-		SoloIsolateControllable (std::string name, boost::shared_ptr<Route>);
-		void set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-		/* currently no automation, so no need for set_value_unchecked() */
-		double get_value () const;
-	private:
-		void _set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-	};
-
-	class LIBARDOUR_API SoloSafeControllable : public RouteAutomationControl {
-	public:
-		SoloSafeControllable (std::string name, boost::shared_ptr<Route>);
-		void set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-		/* currently no automation, so no need for set_value_unchecked() */
-		double get_value () const;
-	private:
-		void _set_value (double, PBD::Controllable::GroupControlDisposition group_override);
-	};
-
-	void set_control (AutomationType, double val, PBD::Controllable::GroupControlDisposition group_override);
-
-	boost::shared_ptr<SoloControllable> solo_control() const {
+	boost::shared_ptr<SoloControl> solo_control() const {
 		return _solo_control;
 	}
 
-	boost::shared_ptr<MuteControllable> mute_control() const {
+	boost::shared_ptr<MuteControl> mute_control() const {
 		return _mute_control;
 	}
 
-	boost::shared_ptr<MuteMaster> mute_master() const {
-		return _mute_master;
-	}
+	bool can_be_muted_by_others () const { return can_solo(); }
+	bool muted () const { return _mute_control->muted(); }
+	bool muted_by_masters () const { return _mute_control->muted_by_masters(); }
+	bool muted_by_self () const { return _mute_control->muted_by_self(); }
+	bool muted_by_others_soloing () const;
 
-	boost::shared_ptr<SoloIsolateControllable> solo_isolate_control() const {
+	boost::shared_ptr<SoloIsolateControl> solo_isolate_control() const {
 		return _solo_isolate_control;
 	}
 
-	boost::shared_ptr<SoloSafeControllable> solo_safe_control() const {
+	boost::shared_ptr<SoloSafeControl> solo_safe_control() const {
 		return _solo_safe_control;
-	}
-
-	boost::shared_ptr<AutomationControl> monitoring_control() const {
-		/* tracks override this to provide actual monitoring control;
-		   busses have no possible choices except input monitoring.
-		*/
-		return boost::shared_ptr<AutomationControl> ();
 	}
 
 	/* Route doesn't own these items, but sub-objects that it does own have them
@@ -580,11 +496,18 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	boost::shared_ptr<Panner> panner() const;  /* may return null */
 	boost::shared_ptr<PannerShell> panner_shell() const;
-	boost::shared_ptr<GainControl> gain_control() const;
 	boost::shared_ptr<Pannable> pannable() const;
-	boost::shared_ptr<GainControl> trim_control() const;
 
-	boost::shared_ptr<PhaseControllable> phase_control() const;
+	boost::shared_ptr<GainControl> gain_control() const;
+	boost::shared_ptr<GainControl> trim_control() const;
+	boost::shared_ptr<GainControl> volume_control() const;
+	boost::shared_ptr<PhaseControl> phase_control() const;
+
+	void set_volume_applies_to_output (bool);
+
+	bool volume_applies_to_output () const {
+		return _volume_applies_to_output;
+	}
 
 	/**
 	   Return the first processor that accepts has at least one MIDI input
@@ -594,156 +517,127 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	   special case not covered by this utility function.
 	*/
 	boost::shared_ptr<Processor> the_instrument() const;
-        InstrumentInfo& instrument_info() { return _instrument_info; }
+	InstrumentInfo& instrument_info() { return _instrument_info; }
+	bool instrument_fanned_out () const { return _instrument_fanned_out;}
 
-        /* "well-known" controls for panning. Any or all of these may return
-         * null.
-         */
 
-        boost::shared_ptr<AutomationControl> pan_azimuth_control() const;
-        boost::shared_ptr<AutomationControl> pan_elevation_control() const;
-        boost::shared_ptr<AutomationControl> pan_width_control() const;
-        boost::shared_ptr<AutomationControl> pan_frontback_control() const;
-        boost::shared_ptr<AutomationControl> pan_lfe_control() const;
+	/* "well-known" controls.
+	 * Any or all of these may return NULL.
+	 */
 
-        /* "well-known" controls for an EQ in this route. Any or all may
-         * be null. eq_band_cnt() must return 0 if there is no EQ present.
-         * Passing an @param band value >= eq_band_cnt() will guarantee the
-         * return of a null ptr (or an empty string for eq_band_name()).
-         */
-        uint32_t eq_band_cnt () const;
-        std::string eq_band_name (uint32_t) const;
-        boost::shared_ptr<AutomationControl> eq_gain_controllable (uint32_t band) const;
-        boost::shared_ptr<AutomationControl> eq_freq_controllable (uint32_t band) const;
-        boost::shared_ptr<AutomationControl> eq_q_controllable (uint32_t band) const;
-        boost::shared_ptr<AutomationControl> eq_shape_controllable (uint32_t band) const;
-        boost::shared_ptr<AutomationControl> eq_enable_controllable () const;
-        boost::shared_ptr<AutomationControl> eq_hpf_controllable () const;
+	boost::shared_ptr<AutomationControl> pan_azimuth_control() const;
+	boost::shared_ptr<AutomationControl> pan_elevation_control() const;
+	boost::shared_ptr<AutomationControl> pan_width_control() const;
+	boost::shared_ptr<AutomationControl> pan_frontback_control() const;
+	boost::shared_ptr<AutomationControl> pan_lfe_control() const;
 
-        /* "well-known" controls for a compressor in this route. Any or all may
-         * be null.
-         */
-        boost::shared_ptr<AutomationControl> comp_enable_controllable () const;
-        boost::shared_ptr<AutomationControl> comp_threshold_controllable () const;
-        boost::shared_ptr<AutomationControl> comp_speed_controllable () const;
-        boost::shared_ptr<AutomationControl> comp_mode_controllable () const;
-        boost::shared_ptr<AutomationControl> comp_makeup_controllable () const;
-        boost::shared_ptr<AutomationControl> comp_redux_controllable () const;
+	uint32_t eq_band_cnt () const;
+	std::string eq_band_name (uint32_t) const;
+	boost::shared_ptr<AutomationControl> eq_enable_controllable () const;
+	boost::shared_ptr<AutomationControl> eq_gain_controllable (uint32_t band) const;
+	boost::shared_ptr<AutomationControl> eq_freq_controllable (uint32_t band) const;
+	boost::shared_ptr<AutomationControl> eq_q_controllable (uint32_t band) const;
+	boost::shared_ptr<AutomationControl> eq_shape_controllable (uint32_t band) const;
 
-        /* @param mode must be supplied by the comp_mode_controllable(). All other values
-         * result in undefined behaviour
-         */
-        std::string comp_mode_name (uint32_t mode) const;
-        /* @param mode - as for comp mode name. This returns the name for the
-         * parameter/control accessed via comp_speed_controllable(), which can
-         * be mode dependent.
-         */
-        std::string comp_speed_name (uint32_t mode) const;
+	boost::shared_ptr<AutomationControl> filter_freq_controllable (bool hpf) const;
+	boost::shared_ptr<AutomationControl> filter_slope_controllable (bool) const;
+	boost::shared_ptr<AutomationControl> filter_enable_controllable (bool) const;
 
-        /* "well-known" controls for sends to well-known busses in this route. Any or all may
-         * be null.
-         *
-         * In Mixbus, these are the sends that connect to the mixbusses.
-         * In Ardour, these are user-created sends that connect to user-created
-         * Aux busses.
-         */
-        boost::shared_ptr<AutomationControl> send_level_controllable (uint32_t n) const;
-        boost::shared_ptr<AutomationControl> send_enable_controllable (uint32_t n) const;
-        /* for the same value of @param n, this returns the name of the send
-         * associated with the pair of controllables returned by the above two methods.
-         */
-        std::string send_name (uint32_t n) const;
+	boost::shared_ptr<AutomationControl> tape_drive_controllable () const;
+	boost::shared_ptr<ReadOnlyControl>   tape_drive_mtr_controllable () const;
 
-        /* well known control that enables/disables sending to the master bus.
-         *
-         * In Ardour, this returns null.
-         * In Mixbus, it will return a suitable control, or null depending on
-         * the route.
-         */
-        boost::shared_ptr<AutomationControl> master_send_enable_controllable () const;
+	boost::shared_ptr<AutomationControl> comp_enable_controllable () const;
+	boost::shared_ptr<AutomationControl> comp_threshold_controllable () const;
+	boost::shared_ptr<AutomationControl> comp_speed_controllable () const;
+	boost::shared_ptr<AutomationControl> comp_mode_controllable () const;
+	boost::shared_ptr<AutomationControl> comp_makeup_controllable () const;
+	boost::shared_ptr<ReadOnlyControl>   comp_redux_controllable () const;
 
-        void protect_automation ();
+	std::string comp_mode_name (uint32_t mode) const;
+	std::string comp_speed_name (uint32_t mode) const;
 
-	enum {
-		/* These numbers are taken from MIDI Machine Control,
-		   which can only control up to 317 tracks without
-		   doing sysex segmentation.
-		*/
-		MasterBusRemoteControlID = 318,
-		MonitorBusRemoteControlID = 319,
-	};
+	boost::shared_ptr<AutomationControl> send_level_controllable (uint32_t n) const;
+	boost::shared_ptr<AutomationControl> send_enable_controllable (uint32_t n) const;
+	boost::shared_ptr<AutomationControl> send_pan_azimuth_controllable (uint32_t n) const;
+	boost::shared_ptr<AutomationControl> send_pan_azimuth_enable_controllable (uint32_t n) const;
 
-	void     set_remote_control_id (uint32_t id, bool notify_class_listeners = true);
-	uint32_t remote_control_id () const;
-        void     set_remote_control_id_explicit (uint32_t order_key);
+	std::string send_name (uint32_t n) const;
 
-	/* for things concerned about *this* route's RID */
+	boost::shared_ptr<AutomationControl> master_send_enable_controllable () const;
 
-	PBD::Signal0<void> RemoteControlIDChanged;
+	boost::shared_ptr<ReadOnlyControl> master_correlation_mtr_controllable (bool) const;
 
-	/* for things concerned about *any* route's RID changes */
+	boost::shared_ptr<AutomationControl> master_limiter_enable_controllable () const;
+	boost::shared_ptr<ReadOnlyControl> master_limiter_mtr_controllable () const;
+	boost::shared_ptr<ReadOnlyControl> master_k_mtr_controllable () const;
 
-	static PBD::Signal0<void> RemoteControlIDChange;
-	static PBD::Signal0<void> SyncOrderKeys;
+	void protect_automation ();
 
 	bool has_external_redirects() const;
 
-        /* can only be executed by a route for which is_monitor() is true
-	   (i.e. the monitor out)
-        */
-        void monitor_run (framepos_t start_frame, framepos_t end_frame,
-			  pframes_t nframes, int declick);
+	/* can only be executed by a route for which is_monitor() is true
+	 * (i.e. the monitor out)
+	 */
+	void monitor_run (samplepos_t start_sample, samplepos_t end_sample, pframes_t nframes);
 
-  protected:
+	bool slaved_to (boost::shared_ptr<VCA>) const;
+	bool slaved () const;
+
+	virtual void use_captured_sources (SourceList& srcs, CaptureInfos const &) {}
+
+protected:
 	friend class Session;
 
 	void catch_up_on_solo_mute_override ();
-	void mod_solo_by_others_upstream (int32_t);
-	void mod_solo_by_others_downstream (int32_t);
-	void curve_reallocate ();
+	void set_listen (bool);
+
 	virtual void set_block_size (pframes_t nframes);
 
-  protected:
-	virtual framecnt_t check_initial_delay (framecnt_t nframes, framepos_t&) { return nframes; }
+	virtual int no_roll_unlocked (pframes_t nframes, samplepos_t start_sample, samplepos_t end_sample, bool session_state_changing);
 
-        void fill_buffers_with_input (BufferSet& bufs, boost::shared_ptr<IO> io, pframes_t nframes);
+	virtual void snapshot_out_of_band_data (samplecnt_t /* nframes */) {}
+	virtual void write_out_of_band_data (BufferSet&, samplecnt_t /* nframes */) const {}
+	virtual void update_controls (BufferSet const&) {}
 
-        void passthru (BufferSet&, framepos_t start_frame, framepos_t end_frame,
-			pframes_t nframes, int declick);
+	void process_output_buffers (BufferSet& bufs,
+	                             samplepos_t start_sample, samplepos_t end_sample,
+	                             pframes_t nframes,
+	                             bool gain_automation_ok,
+	                             bool run_disk_processors);
 
-	virtual void write_out_of_band_data (BufferSet& /* bufs */, framepos_t /* start_frame */, framepos_t /* end_frame */,
-					     framecnt_t /* nframes */) {}
-
-	virtual void process_output_buffers (BufferSet& bufs,
-	                                     framepos_t start_frame, framepos_t end_frame,
-	                                     pframes_t nframes, int declick,
-	                                     bool gain_automation_ok);
+	void flush_processor_buffers_locked (samplecnt_t nframes);
 
 	virtual void bounce_process (BufferSet& bufs,
-	                             framepos_t start_frame, framecnt_t nframes,
+	                             samplepos_t start_sample, samplecnt_t nframes,
 															 boost::shared_ptr<Processor> endpoint, bool include_endpoint,
 	                             bool for_export, bool for_freeze);
 
-	framecnt_t   bounce_get_latency (boost::shared_ptr<Processor> endpoint, bool include_endpoint, bool for_export, bool for_freeze) const;
+	samplecnt_t  bounce_get_latency (boost::shared_ptr<Processor> endpoint, bool include_endpoint, bool for_export, bool for_freeze) const;
 	ChanCount    bounce_get_output_streams (ChanCount &cc, boost::shared_ptr<Processor> endpoint, bool include_endpoint, bool for_export, bool for_freeze) const;
 
-	boost::shared_ptr<IO> _input;
-	boost::shared_ptr<IO> _output;
+	bool can_freeze_processor (boost::shared_ptr<Processor>, bool allow_routing = false) const;
 
 	bool           _active;
-	framecnt_t     _signal_latency;
-	framecnt_t     _signal_latency_at_amp_position;
-	framecnt_t     _signal_latency_at_trim_position;
-	framecnt_t     _initial_delay;
-	framecnt_t     _roll_delay;
+	samplecnt_t    _signal_latency;
+	samplecnt_t    _output_latency;
 
 	ProcessorList  _processors;
-	mutable Glib::Threads::RWLock   _processor_lock;
-	boost::shared_ptr<Delivery> _main_outs;
-	boost::shared_ptr<InternalSend> _monitor_send;
-	boost::shared_ptr<InternalReturn> _intreturn;
+	mutable Glib::Threads::RWLock _processor_lock;
+
+	boost::shared_ptr<IO>               _input;
+	boost::shared_ptr<IO>               _output;
+
+	boost::shared_ptr<Delivery>         _main_outs;
+	boost::shared_ptr<InternalSend>     _monitor_send;
+	boost::shared_ptr<InternalReturn>   _intreturn;
 	boost::shared_ptr<MonitorProcessor> _monitor_control;
-	boost::shared_ptr<Pannable> _pannable;
+	boost::shared_ptr<Pannable>         _pannable;
+	boost::shared_ptr<DiskReader>       _disk_reader;
+	boost::shared_ptr<DiskWriter>       _disk_writer;
+
+	boost::shared_ptr<MonitorControl>   _monitoring_control;
+
+	DiskIOPoint _disk_io_point;
 
 	enum {
 		EmitNone = 0x00,
@@ -754,57 +648,38 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	ProcessorList  _pending_processor_order;
 	gint           _pending_process_reorder; // atomic
+	gint           _pending_listen_change; // atomic
 	gint           _pending_signals; // atomic
 
-	Flag           _flags;
-	int            _pending_declick;
 	MeterPoint     _meter_point;
 	MeterPoint     _pending_meter_point;
-	MeterType      _meter_type;
-	boost::dynamic_bitset<> _phase_invert;
-	bool           _self_solo;
-	uint32_t       _soloed_by_others_upstream;
-	uint32_t       _soloed_by_others_downstream;
-	bool           _solo_isolated;
-	uint32_t       _solo_isolated_by_upstream;
-
-	void mod_solo_isolated_by_upstream (bool);
 
 	bool           _denormal_protection;
 
 	bool _recordable : 1;
-	bool _silent : 1;
-	bool _declickable : 1;
 
-	boost::shared_ptr<SoloControllable> _solo_control;
-	boost::shared_ptr<MuteControllable> _mute_control;
-	boost::shared_ptr<MuteMaster> _mute_master;
-	boost::shared_ptr<PhaseControllable> _phase_control;
-	boost::shared_ptr<SoloIsolateControllable> _solo_isolate_control;
-	boost::shared_ptr<SoloSafeControllable> _solo_safe_control;
-
-	virtual void act_on_mute () {}
+	boost::shared_ptr<SoloControl> _solo_control;
+	boost::shared_ptr<MuteControl> _mute_control;
+	boost::shared_ptr<SoloIsolateControl> _solo_isolate_control;
+	boost::shared_ptr<SoloSafeControl> _solo_safe_control;
 
 	std::string    _comment;
 	bool           _have_internal_generator;
-	bool           _solo_safe;
 	DataType       _default_type;
 	FedBy          _fed_by;
 
-        InstrumentInfo _instrument_info;
+	InstrumentInfo _instrument_info;
+	bool           _instrument_fanned_out;
+	Location*      _loop_location;
 
 	virtual ChanCount input_streams () const;
 
-  protected:
-	virtual XMLNode& state(bool);
+	virtual XMLNode& state (bool save_template);
 
 	int configure_processors (ProcessorStreams*);
 
-	void passthru_silence (framepos_t start_frame, framepos_t end_frame,
-	                       pframes_t nframes, int declick);
-
-	void silence (framecnt_t);
-	void silence_unlocked (framecnt_t);
+	void silence (samplecnt_t);
+	void silence_unlocked (samplecnt_t);
 
 	ChanCount processor_max_streams;
 	ChanCount processor_out_streams;
@@ -812,26 +687,32 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	uint32_t pans_required() const;
 	ChanCount n_process_buffers ();
 
-	virtual void maybe_declick (BufferSet&, framecnt_t, int);
+	boost::shared_ptr<GainControl>  _gain_control;
+	boost::shared_ptr<GainControl>  _trim_control;
+	boost::shared_ptr<GainControl>  _volume_control;
+	boost::shared_ptr<PhaseControl> _phase_control;
+	boost::shared_ptr<Amp>               _amp;
+	boost::shared_ptr<Amp>               _trim;
+	boost::shared_ptr<Amp>               _volume;
+	boost::shared_ptr<PeakMeter>         _meter;
+	boost::shared_ptr<PolarityProcessor> _polarity;
 
-	boost::shared_ptr<GainControllable> _gain_control;
-	boost::shared_ptr<Amp>       _amp;
-	boost::shared_ptr<GainControllable> _trim_control;
-	boost::shared_ptr<Amp>       _trim;
-	boost::shared_ptr<PeakMeter> _meter;
+	bool _volume_applies_to_output;
+
 	boost::shared_ptr<DelayLine> _delayline;
+
+	bool is_internal_processor (boost::shared_ptr<Processor>) const;
 
 	boost::shared_ptr<Processor> the_instrument_unlocked() const;
 
-  private:
+	SlavableControlList slavables () const;
+
+private:
+	/* no copy construction */
+	Route (Route const &);
+
 	int set_state_2X (const XMLNode&, int);
 	void set_processor_state_2X (XMLNodeList const &, int);
-
-	uint32_t _order_key;
-	bool _has_order_key;
-        uint32_t _remote_control_id;
-
-	int64_t _track_number;
 
 	void input_change_handler (IOChange, void *src);
 	void output_change_handler (IOChange, void *src);
@@ -843,10 +724,6 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	bool input_port_count_changing (ChanCount);
 	bool output_port_count_changing (ChanCount);
-
-	bool _in_configure_processors;
-	bool _initial_io_setup;
-	bool _in_sidechain_setup;
 
 	int configure_processors_unlocked (ProcessorStreams*, Glib::Threads::RWLock::WriterLock*);
 	bool set_meter_point_unlocked ();
@@ -860,17 +737,23 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	void placement_range (Placement p, ProcessorList::iterator& start, ProcessorList::iterator& end);
 
 	void set_self_solo (bool yn);
-	void set_mute_master_solo ();
-
-	void set_processor_positions ();
-	framecnt_t update_port_latencies (PortSet& ports, PortSet& feeders, bool playback, framecnt_t) const;
-
-	void setup_invisible_processors ();
 	void unpan ();
 
-	void set_plugin_state_dir (boost::weak_ptr<Processor>, const std::string&);
+	void set_processor_positions ();
+	samplecnt_t update_port_latencies (PortSet& ports, PortSet& feeders, bool playback, samplecnt_t) const;
 
-	boost::shared_ptr<CapturingProcessor> _capturing_processor;
+	void setup_invisible_processors ();
+
+	pframes_t latency_preroll (pframes_t nframes, samplepos_t& start_sample, samplepos_t& end_sample);
+
+	void run_route (samplepos_t start_sample, samplepos_t end_sample, pframes_t nframes, bool gain_automation_ok, bool run_disk_reader);
+	void fill_buffers_with_input (BufferSet& bufs, boost::shared_ptr<IO> io, pframes_t nframes);
+
+	void reset_instrument_info ();
+	void solo_control_changed (bool self, PBD::Controllable::GroupControlDisposition);
+	void maybe_note_meter_position ();
+
+	void set_plugin_state_dir (boost::weak_ptr<Processor>, const std::string&);
 
 	/** A handy class to keep processor state while we attempt a reconfiguration
 	 *  that may fail.
@@ -899,12 +782,13 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 
 	friend class ProcessorState;
 
-	bool _strict_io;
+	boost::shared_ptr<CapturingProcessor> _capturing_processor;
 
-	/* no copy construction */
-	Route (Route const &);
-
-	void maybe_note_meter_position ();
+	int64_t _track_number;
+	bool    _strict_io;
+	bool    _in_configure_processors;
+	bool    _initial_io_setup;
+	bool    _in_sidechain_setup;
 
 	/** true if we've made a note of a custom meter position in these variables */
 	bool _custom_meter_position_noted;
@@ -913,9 +797,8 @@ class LIBARDOUR_API Route : public SessionObject, public Automatable, public Rou
 	*/
 	boost::weak_ptr<Processor> _processor_after_last_custom_meter;
 
-        void reset_instrument_info ();
-
-        void set_remote_control_id_internal (uint32_t id, bool notify_class_listeners = true);
+	RoutePinWindowProxy*   _pinmgr_proxy;
+	PatchChangeGridDialog* _patch_selector_dialog;
 };
 
 } // namespace ARDOUR

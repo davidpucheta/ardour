@@ -1,27 +1,29 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "gtkmm2ext/utils.h"
 
 #include "ardour/route_group.h"
 
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 
 #include "editor.h"
 #include "editor_group_tabs.h"
@@ -32,7 +34,7 @@
 #include "ui_config.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -87,15 +89,15 @@ EditorGroupTabs::compute_tabs () const
 }
 
 void
-EditorGroupTabs::draw_tab (cairo_t* cr, Tab const & tab) const
+EditorGroupTabs::draw_tab (cairo_t* cr, Tab const & tab)
 {
 	double const arc_radius = get_width();
 	double r, g, b, a;
 
 	if (tab.group && tab.group->is_active()) {
-		ArdourCanvas::color_to_rgba (tab.color, r, g, b, a);
+		Gtkmm2ext::color_to_rgba (tab.color, r, g, b, a);
 	} else {
-		ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("inactive group tab"), r, g, b, a);
+		Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("inactive group tab"), r, g, b, a);
 	}
 
 	a = 1.0;
@@ -108,20 +110,26 @@ EditorGroupTabs::draw_tab (cairo_t* cr, Tab const & tab) const
 	cairo_line_to (cr, 0, tab.from + arc_radius);
 	cairo_fill (cr);
 
-	if (tab.group) {
-		pair<string, double> const f = Gtkmm2ext::fit_to_pixels (cr, tab.group->name(), tab.to - tab.from - arc_radius * 2);
+	if (tab.group && (tab.to - tab.from) > arc_radius) {
+		int text_width, text_height;
 
-		cairo_text_extents_t ext;
-		cairo_text_extents (cr, tab.group->name().c_str(), &ext);
+		Glib::RefPtr<Pango::Layout> layout;
+		layout = Pango::Layout::create (get_pango_context ());
+		layout->set_ellipsize (Pango::ELLIPSIZE_MIDDLE);
 
-		ArdourCanvas::Color c = ArdourCanvas::contrasting_text_color (ArdourCanvas::rgba_to_color (r, g, b, a));
-		ArdourCanvas::color_to_rgba (c, r, g, b, a);
+		layout->set_text (tab.group->name ());
+		layout->set_width ((tab.to - tab.from - arc_radius) * PANGO_SCALE);
+		layout->get_pixel_size (text_width, text_height);
 
+		cairo_move_to (cr, (get_width() - text_height) * .5, (text_width + tab.to + tab.from) * .5);
+
+		Gtkmm2ext::Color c = Gtkmm2ext::contrasting_text_color (Gtkmm2ext::rgba_to_color (r, g, b, a));
+		Gtkmm2ext::color_to_rgba (c, r, g, b, a);
 		cairo_set_source_rgb (cr, r, g, b);
-		cairo_move_to (cr, get_width() - ext.height / 2, tab.from + (f.second + tab.to - tab.from) / 2);
+
 		cairo_save (cr);
-		cairo_rotate (cr, - M_PI / 2);
-		cairo_show_text (cr, f.first.c_str());
+		cairo_rotate (cr, M_PI * -.5);
+		pango_cairo_show_layout (cr, layout->gobj ());
 		cairo_restore (cr);
 	}
 }
@@ -192,8 +200,3 @@ EditorGroupTabs::selected_routes () const
 	return rl;
 }
 
-void
-EditorGroupTabs::sync_order_keys ()
-{
-	_editor->_routes->sync_order_keys_from_treeview ();
-}

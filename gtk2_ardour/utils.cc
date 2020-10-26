@@ -1,21 +1,31 @@
 /*
-    Copyright (C) 2003 Paul Davis
-
-    This program is free software; you an redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2005-2009 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2005-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2006-2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2006-2009 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2007-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015 André Nusser <andre.nusser@googlemail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "gtk2ardour-config.h"
@@ -28,28 +38,37 @@
 #include <cmath>
 #include <list>
 #include <sys/stat.h>
-#include <gtkmm/rc.h>
-#include <gtkmm/window.h>
+
+#include <boost/algorithm/string.hpp>
+
+#include <gtk/gtkpaned.h>
 #include <gtkmm/combo.h>
 #include <gtkmm/label.h>
 #include <gtkmm/paned.h>
-#include <gtk/gtkpaned.h>
-#include <boost/algorithm/string.hpp>
+#include <gtkmm/rc.h>
+#include <gtkmm/stock.h>
+#include <gtkmm/window.h>
 
+#include "pbd/basename.h"
 #include "pbd/file_utils.h"
+#include "pbd/stacktrace.h"
 
-#include <gtkmm2ext/utils.h>
-
+#include "ardour/audioengine.h"
 #include "ardour/filesystem_paths.h"
+#include "ardour/search_paths.h"
+
+#include "gtkmm2ext/colors.h"
+#include "gtkmm2ext/utils.h"
 
 #include "canvas/item.h"
-#include "canvas/utils.h"
 
+#include "actions.h"
+#include "context_menu_helper.h"
 #include "debug.h"
 #include "public_editor.h"
 #include "keyboard.h"
 #include "utils.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 #include "rgb_macros.h"
 #include "gui_thread.h"
 #include "ui_config.h"
@@ -92,6 +111,38 @@ ARDOUR_UI_UTILS::just_hide_it (GdkEventAny */*ev*/, Gtk::Window *win)
 	win->hide ();
 	return 0;
 }
+
+static bool
+idle_notify_engine_stopped ()
+{
+	Glib::RefPtr<ToggleAction> tact = ActionManager::get_toggle_action ("Window", "toggle-audio-midi-setup");
+
+	MessageDialog msg (
+			_("The current operation is not possible because of an error communicating with the audio hardware."),
+			false, Gtk::MESSAGE_WARNING, Gtk::BUTTONS_NONE, true);
+
+	msg.add_button (_("Cancel"), Gtk::RESPONSE_CANCEL);
+
+	if (tact && !tact->get_active()) {
+		msg.add_button (_("Configure Hardware"), Gtk::RESPONSE_OK);
+	}
+
+	if (msg.run () == Gtk::RESPONSE_OK) {
+		tact->set_active ();
+	}
+	return false; /* do not call again */
+}
+
+bool
+ARDOUR_UI_UTILS::engine_is_running ()
+{
+	if (ARDOUR::AudioEngine::instance()->running ()) {
+		return true;
+	}
+	Glib::signal_idle().connect (sigc::ptr_fun (&idle_notify_engine_stopped));
+	return false;
+}
+
 
 /* xpm2rgb copied from nixieclock, which bore the legend:
 
@@ -226,7 +277,8 @@ ARDOUR_UI_UTILS::sanitized_font (std::string const& name)
 	Pango::FontDescription fd (name);
 
 	if (fd.get_family().empty()) {
-		fd.set_family ("Sans");
+		/* default: "Sans" or "ArdourSans" */
+		fd.set_family (UIConfiguration::instance ().get_ui_font_family ());
 	}
 
 	return fd;
@@ -261,6 +313,22 @@ ARDOUR_UI_UTILS::get_font_for_style (string widgetname)
 	return Pango::FontDescription (pfd); /* make a copy */
 }
 
+Gdk::Color
+ARDOUR_UI_UTILS::gdk_color_from_rgb (uint32_t rgb)
+{
+	Gdk::Color c;
+	set_color_from_rgb (c, rgb);
+	return c;
+}
+
+Gdk::Color
+ARDOUR_UI_UTILS::gdk_color_from_rgba (uint32_t rgba)
+{
+	Gdk::Color c;
+	set_color_from_rgb (c, rgba >> 8);
+	return c;
+}
+
 void
 ARDOUR_UI_UTILS::set_color_from_rgb (Gdk::Color& c, uint32_t rgb)
 {
@@ -293,7 +361,6 @@ ARDOUR_UI_UTILS::gdk_color_to_rgba (Gdk::Color const& c)
 
 	return RGBA_TO_UINT (r,g,b,a);
 }
-
 
 bool
 ARDOUR_UI_UTILS::relay_key_press (GdkEventKey* ev, Gtk::Window* win)
@@ -332,65 +399,6 @@ ARDOUR_UI_UTILS::emulate_key_event (unsigned int keyval)
 	return relay_key_press(&ev, &main_window);
 }
 
-string
-ARDOUR_UI_UTILS::show_gdk_event_state (int state)
-{
-	string s;
-	if (state & GDK_SHIFT_MASK) {
-		s += "+SHIFT";
-	}
-	if (state & GDK_LOCK_MASK) {
-		s += "+LOCK";
-	}
-	if (state & GDK_CONTROL_MASK) {
-		s += "+CONTROL";
-	}
-	if (state & GDK_MOD1_MASK) {
-		s += "+MOD1";
-	}
-	if (state & GDK_MOD2_MASK) {
-		s += "+MOD2";
-	}
-	if (state & GDK_MOD3_MASK) {
-		s += "+MOD3";
-	}
-	if (state & GDK_MOD4_MASK) {
-		s += "+MOD4";
-	}
-	if (state & GDK_MOD5_MASK) {
-		s += "+MOD5";
-	}
-	if (state & GDK_BUTTON1_MASK) {
-		s += "+BUTTON1";
-	}
-	if (state & GDK_BUTTON2_MASK) {
-		s += "+BUTTON2";
-	}
-	if (state & GDK_BUTTON3_MASK) {
-		s += "+BUTTON3";
-	}
-	if (state & GDK_BUTTON4_MASK) {
-		s += "+BUTTON4";
-	}
-	if (state & GDK_BUTTON5_MASK) {
-		s += "+BUTTON5";
-	}
-	if (state & GDK_SUPER_MASK) {
-		s += "+SUPER";
-	}
-	if (state & GDK_HYPER_MASK) {
-		s += "+HYPER";
-	}
-	if (state & GDK_META_MASK) {
-		s += "+META";
-	}
-	if (state & GDK_RELEASE_MASK) {
-		s += "+RELEASE";
-	}
-
-	return s;
-}
-
 Glib::RefPtr<Gdk::Pixbuf>
 ARDOUR_UI_UTILS::get_xpm (std::string name)
 {
@@ -408,12 +416,50 @@ ARDOUR_UI_UTILS::get_xpm (std::string name)
 
 		try {
 			xpm_map[name] =  Gdk::Pixbuf::create_from_file (data_file_path);
-		} catch(const Glib::Error& e)	{
+		} catch (const Glib::Error& e) {
 			warning << "Caught Glib::Error: " << e.what() << endmsg;
 		}
 	}
 
 	return xpm_map[name];
+}
+
+void
+ARDOUR_UI_UTILS::get_color_themes (map<std::string,std::string>& themes)
+{
+	Searchpath spath(ARDOUR::theme_search_path());
+
+	for (vector<string>::iterator s = spath.begin(); s != spath.end(); ++s) {
+
+		vector<string> entries;
+
+		find_files_matching_pattern (entries, *s, string ("*") + UIConfiguration::color_file_suffix);
+
+		for (vector<string>::iterator e = entries.begin(); e != entries.end(); ++e) {
+
+			XMLTree tree;
+
+			tree.read ((*e).c_str());
+			XMLNode* root = tree.root();
+
+			if (!root || root->name() != X_("Ardour")) {
+				continue;
+			}
+
+			XMLProperty const* prop = root->property (X_("theme-name"));
+
+			if (!prop) {
+				continue;
+			}
+
+			std::string color_name = basename_nosuffix(*e);
+			size_t sep = color_name.find_first_of("-");
+			if (sep != string::npos) {
+				color_name = color_name.substr (0, sep);
+			}
+			themes.insert (make_pair (prop->value(), color_name));
+		}
+	}
 }
 
 vector<string>
@@ -463,6 +509,12 @@ ARDOUR_UI_UTILS::get_icon_path (const char* cname, string icon_set, bool is_imag
 	} else {
 		spath.add_subdirectory_to_paths ("icons");
 		find_file (spath, name, data_file_path);
+	}
+
+	if (data_file_path.empty()) {
+		Searchpath rc (ARDOUR::ardour_data_search_path());
+		rc.add_subdirectory_to_paths ("resources");
+		find_file (rc, name, data_file_path);
 	}
 
 	if (is_image && data_file_path.empty()) {
@@ -660,20 +712,10 @@ ARDOUR_UI_UTILS::escape_underscores (string const & s)
 	return o;
 }
 
-/** Replace < and > with &lt; and &gt; respectively to make < > display correctly in markup strings */
-string
-ARDOUR_UI_UTILS::escape_angled_brackets (string const & s)
-{
-	string o = s;
-	boost::replace_all (o, "<", "&lt;");
-	boost::replace_all (o, ">", "&gt;");
-	return o;
-}
-
 Gdk::Color
 ARDOUR_UI_UTILS::unique_random_color (list<Gdk::Color>& used_colors)
 {
-  	Gdk::Color newcolor;
+	Gdk::Color newcolor;
 
 	while (1) {
 
@@ -720,6 +762,43 @@ ARDOUR_UI_UTILS::rate_as_string (float r)
 	} else {
 		snprintf (buf, sizeof (buf), "%.0f kHz", r/1000.0);
 	}
+	return buf;
+}
+
+string
+ARDOUR_UI_UTILS::samples_as_time_string (samplecnt_t s, float rate, bool show_samples)
+{
+	char buf[32];
+	if (rate <= 0) {
+		snprintf (buf, sizeof (buf), "--");
+	} else if (s == 0) {
+		snprintf (buf, sizeof (buf), "0");
+	} else if (s < 1000 && show_samples) {
+		/* 0 .. 999 spl */
+		snprintf (buf, sizeof (buf), "%" PRId64" spl", s);
+	} else if (s < (rate / 1000.f)) {
+		/* 0 .. 999 usec */
+		snprintf (buf, sizeof (buf), "%.0f \u00B5s", s * 1e+6f / rate);
+	} else if (s < (rate / 100.f)) {
+		/* 1.000 .. 9.999 ms */
+		snprintf (buf, sizeof (buf), "%.3f ms", s * 1e+3f / rate);
+	} else if (s < (rate / 10.f)) {
+		/* 1.00 .. 99.99 ms */
+		snprintf (buf, sizeof (buf), "%.2f ms", s * 1e+3f / rate);
+	} else if (s < rate) {
+		/* 100.0 .. 999.9 ms */
+		snprintf (buf, sizeof (buf), "%.1f ms", s * 1e+3f / rate);
+	} else if (s < rate * 10.f) {
+		/* 1.000 s .. 9.999 s */
+		snprintf (buf, sizeof (buf), "%.3f s", s / rate);
+	} else if (s < rate * 90.f) {
+		/* 10.00 s .. 89.99 s */
+		snprintf (buf, sizeof (buf), "%.2f s", s / rate);
+	} else {
+		/* 1m30.0 ...  */
+		snprintf (buf, sizeof (buf), "'%.0fm%.1f", s / (60.f * rate), fmodf (s / rate, 60));
+	}
+	buf[31] = '\0';
 	return buf;
 }
 
@@ -774,8 +853,20 @@ ARDOUR_UI_UTILS::overwrite_file_dialog (Gtk::Window& parent, string title, strin
 	switch (dialog.run()) {
 	case RESPONSE_ACCEPT:
 		return true;
-	case RESPONSE_CANCEL:
 	default:
 		return false;
 	}
+}
+
+bool
+ARDOUR_UI_UTILS::running_from_source_tree ()
+{
+	gchar const *x = g_getenv ("ARDOUR_THEMES_PATH");
+	return x && (string (x).find ("gtk2_ardour") != string::npos);
+}
+
+Gtk::Menu*
+ARDOUR_UI_UTILS::shared_popup_menu ()
+{
+	return ARDOUR_UI::instance()->shared_popup_menu ();
 }

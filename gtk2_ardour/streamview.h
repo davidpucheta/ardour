@@ -1,20 +1,26 @@
 /*
-    Copyright (C) 2001, 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_streamview_h__
 #define __ardour_streamview_h__
@@ -46,9 +52,9 @@ namespace ArdourCanvas {
 }
 
 struct RecBoxInfo {
-	ArdourCanvas::Rectangle*   rectangle;
-	framepos_t                 start;
-	ARDOUR::framecnt_t         length;
+	ArdourCanvas::Rectangle* rectangle;
+	samplepos_t              start;
+	ARDOUR::samplecnt_t      length;
 };
 
 class Selectable;
@@ -76,7 +82,8 @@ public:
 	virtual int set_samples_per_pixel (double);
 	gdouble     get_samples_per_pixel () const { return _samples_per_pixel; }
 
- 	void set_layer_display (LayerDisplay);
+	virtual void set_layer_display (LayerDisplay);
+	virtual bool can_change_layer_display() const { return true; }
 	LayerDisplay layer_display () const { return _layer_display; }
 
 	ArdourCanvas::Container* canvas_item() { return _canvas_group; }
@@ -97,7 +104,7 @@ public:
 	void         foreach_selected_regionview (sigc::slot<void,RegionView*> slot);
 
 	void set_selected_regionviews (RegionSelection&);
-	void get_selectables (ARDOUR::framepos_t, ARDOUR::framepos_t, double, double, std::list<Selectable* >&, bool within = false);
+	void get_selectables (ARDOUR::samplepos_t, ARDOUR::samplepos_t, double, double, std::list<Selectable* >&, bool within = false);
 	void get_inverted_selectables (Selection&, std::list<Selectable* >& results);
 
 	virtual void update_contents_metrics(boost::shared_ptr<ARDOUR::Region>) {}
@@ -115,7 +122,7 @@ public:
 		return 0;
 	}
 
-	void check_record_layers (boost::shared_ptr<ARDOUR::Region>, ARDOUR::framepos_t);
+	void check_record_layers (boost::shared_ptr<ARDOUR::Region>, ARDOUR::samplepos_t);
 
 	virtual void playlist_layered (boost::weak_ptr<ARDOUR::Track>);
 
@@ -124,14 +131,16 @@ public:
 	/** Emitted when the height of regions has changed */
 	sigc::signal<void> ContentsHeightChanged;
 
+	virtual void parameter_changed (std::string const &);
+
 protected:
-       StreamView (RouteTimeAxisView&, ArdourCanvas::Container* canvas_group = 0);
+	StreamView (RouteTimeAxisView&, ArdourCanvas::Container* canvas_group = 0);
 
 	void         transport_changed();
 	void         transport_looped();
 	void         rec_enable_changed();
 	void         sess_rec_enable_changed();
-	void         create_rec_box(framepos_t frame_pos, double width);
+	void         create_rec_box(samplepos_t sample_pos, double width);
 	virtual void setup_rec_box () = 0;
 	virtual void update_rec_box ();
 
@@ -148,20 +157,20 @@ protected:
 
 	virtual void color_handler () = 0;
 
-	RouteTimeAxisView&        _trackview;
-	ArdourCanvas::Container*      _canvas_group;
-	ArdourCanvas::Rectangle*   canvas_rect; /* frame around the whole thing */
+	RouteTimeAxisView&       _trackview;
+	ArdourCanvas::Container* _canvas_group;
+	ArdourCanvas::Rectangle*  canvas_rect; /* frame around the whole thing */
 
 	typedef std::list<RegionView* > RegionViewList;
-	RegionViewList  region_views;
+	RegionViewList region_views;
 
 	double _samples_per_pixel;
 
-	sigc::connection       screen_update_connection;
-	std::vector<RecBoxInfo>     rec_rects;
+	sigc::connection        screen_update_connection;
+	std::vector<RecBoxInfo> rec_rects;
 	std::list< std::pair<boost::shared_ptr<ARDOUR::Region>,RegionView* > > rec_regions;
-	bool                   rec_updating;
-	bool                   rec_active;
+	bool                    rec_updating;
+	bool                    rec_active;
 
 	uint32_t region_color;      ///< Contained region color
 	uint32_t stream_base_color; ///< Background color
@@ -175,16 +184,16 @@ protected:
 	double height;
 
 	PBD::ScopedConnectionList rec_data_ready_connections;
-	framepos_t                last_rec_data_frame;
+	samplepos_t               last_rec_data_sample;
 
 	/* When recording, the session time at which a new layer must be created for the region
-	   being recorded, or max_framepos if not applicable.
+	   being recorded, or max_samplepos if not applicable.
 	*/
-	framepos_t _new_rec_layer_time;
+	samplepos_t _new_rec_layer_time;
 	void setup_new_rec_layer_time (boost::shared_ptr<ARDOUR::Region>);
 
 private:
-	void update_coverage_frames ();
+	void update_coverage_frame ();
 };
 
 #endif /* __ardour_streamview_h__ */

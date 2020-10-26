@@ -1,22 +1,21 @@
 /*
-    Copyright (C) 2012 Paul Davis
-    Based on code by Paul Davis, Torben Hohn as part of FST
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 /******************************************************************/
 /** VSTFX - An engine based on FST for handling linuxVST plugins **/
@@ -32,7 +31,10 @@
 #include <glib.h>
 #include <glibmm/timer.h>
 
+#include "pbd/pthread_utils.h"
+
 #include "ardour/linux_vst_support.h"
+#include "ardour/vst_plugin.h"
 
 #include <X11/X.h>
 #include <X11/Xlib.h>
@@ -70,7 +72,7 @@ static pthread_t LXVST_gui_event_thread;
 
 static bool LXVST_xerror;
 
-int TempErrorHandler(Display *display, XErrorEvent *e)
+int TempErrorHandler (Display *display, XErrorEvent *e)
 {
 	LXVST_xerror = true;
 
@@ -79,14 +81,14 @@ int TempErrorHandler(Display *display, XErrorEvent *e)
 
 #ifdef LXVST_32BIT
 
-int getXWindowProperty(Window window, Atom atom)
+int getXWindowProperty (Window window, Atom atom)
 {
 	int result = 0;
 	int userSize;
 	unsigned long bytes;
 	unsigned long userCount;
 	unsigned char *data;
- 	Atom userType;
+	Atom userType;
 	LXVST_xerror = false;
 
 	/*Use our own Xerror handler while we're in here - in an
@@ -94,25 +96,26 @@ int getXWindowProperty(Window window, Atom atom)
 	qutting the entire application because of e.g. an invalid
 	window ID*/
 
-	XErrorHandler olderrorhandler = XSetErrorHandler(TempErrorHandler);
+	XErrorHandler olderrorhandler = XSetErrorHandler (TempErrorHandler);
 
-	XGetWindowProperty(	LXVST_XDisplay, 		//The display
-						window, 				//The Window
-						atom,					//The property
-						0,						//Offset into the data
-						1,						//Number of 32Bit chunks of data
-						false,					//false = don't delete the property
-						AnyPropertyType, 		//Required property type mask
-	 					&userType,				//Actual type returned
-						&userSize,				//Actual format returned
-						&userCount,				//Actual number of items stored in the returned data
-						&bytes,					//Number of bytes remaining if a partial read
-						&data);					//The actual data read
+	XGetWindowProperty (LXVST_XDisplay,  // The display
+	                    window,          // The Window
+	                    atom,            // The property
+	                    0,               // Offset into the data
+	                    1,               // Number of 32Bit chunks of data
+	                    false,           // false = don't delete the property
+	                    AnyPropertyType, // Required property type mask
+	                    &userType,       // Actual type returned
+	                    &userSize,       // Actual format returned
+	                    &userCount,      // Actual number of items stored in the returned data
+	                    &bytes,          // Number of bytes remaining if a partial read
+	                    &data);          // The actual data read
 
-	if(LXVST_xerror == false && userCount == 1)
- 		result = *(int*)data;
+	if (LXVST_xerror == false && userCount == 1) {
+		result = *(int*)data;
+	}
 
-	XSetErrorHandler(olderrorhandler);
+	XSetErrorHandler (olderrorhandler);
 
 	/*Hopefully this will return zero if the property is not set*/
 
@@ -128,40 +131,42 @@ int getXWindowProperty(Window window, Atom atom)
 /* system of passing an eventProc address                           */
 /********************************************************************/
 
-long getXWindowProperty(Window window, Atom atom)
+long getXWindowProperty (Window window, Atom atom)
 {
 	long result = 0;
 	int userSize;
 	unsigned long bytes;
 	unsigned long userCount;
 	unsigned char *data;
- 	Atom userType;
+	Atom userType;
 	LXVST_xerror = false;
 
 	/*Use our own Xerror handler while we're in here - in an
-	attempt to stop the brain dead default Xerror behaviour of
-	qutting the entire application because of e.g. an invalid
-	window ID*/
+	 * attempt to stop the brain dead default Xerror behaviour of
+	 * qutting the entire application because of e.g. an invalid
+	 * window ID
+	 */
 
-	XErrorHandler olderrorhandler = XSetErrorHandler(TempErrorHandler);
+	XErrorHandler olderrorhandler = XSetErrorHandler (TempErrorHandler);
 
-	XGetWindowProperty(	LXVST_XDisplay,
-						window,
-						atom,
-						0,
-						2,
-						false,
-						AnyPropertyType,
-	 					&userType,
-						&userSize,
-						&userCount,
-						&bytes,
-						&data);
+	XGetWindowProperty (LXVST_XDisplay,
+	                    window,
+	                    atom,
+	                    0,
+	                    2,
+	                    false,
+	                    AnyPropertyType,
+	                    &userType,
+	                    &userSize,
+	                    &userCount,
+	                    &bytes,
+	                    &data);
 
-	if(LXVST_xerror == false && userCount == 1)
- 		result = *(long*)data;
+	if (LXVST_xerror == false && userCount == 1) {
+		result = *(long*)data;
+	}
 
-	XSetErrorHandler(olderrorhandler);
+	XSetErrorHandler (olderrorhandler);
 
 	/*Hopefully this will return zero if the property is not set*/
 
@@ -178,7 +183,7 @@ dispatch_x_events (XEvent* event, VSTState* vstfx)
 {
 	/*Handle some of the Events we might be interested in*/
 
-	switch(event->type)
+	switch (event->type)
 	{
 		/*Configure event - when the window is resized or first drawn*/
 
@@ -189,31 +194,37 @@ dispatch_x_events (XEvent* event, VSTState* vstfx)
 			int width = event->xconfigure.width;
 			int height = event->xconfigure.height;
 
-			/*If we get a config notify on the parent window XID then we need to see
-			if the size has been changed - some plugins re-size their UI window e.g.
-			when opening a preset manager (you might think that should be spawned as a new window...) */
-
-			/*if the size has changed, we flag this so that in lxvst_pluginui.cc we can make the
-			change to the GTK parent window in ardour, from its UI thread*/
+			/* If we get a config notify on the parent window XID then we need to see
+			 * if the size has been changed - some plugins re-size their UI window e.g.
+			 * when opening a preset manager.
+			 *
+			 * if the size has changed, we flag this so that in lxvst_pluginui.cc
+			 * we can make the change to the GTK parent window in ardour, from its UI thread */
 
 			if (window == (Window) (vstfx->linux_window)) {
-				if (width != vstfx->width || height!=vstfx->height) {
+#ifndef NDEBUG
+				printf ("dispatch_x_events: ConfigureNotify cfg: (%d %d) plugin: (%d %d)\n",
+						width, height,
+						vstfx->width, vstfx->height
+						);
+#endif
+				if (width != vstfx->width || height != vstfx->height) {
 					vstfx->width = width;
 					vstfx->height = height;
-					vstfx->want_resize = 1;
+					ARDOUR::VSTPlugin* plug = (ARDOUR::VSTPlugin *)(vstfx->plugin->ptr1);
+					plug->VSTSizeWindow (); /* EMIT SIGNAL */
+				}
 
-					/*QUIRK : Loomer plugins not only resize the UI but throw it into some random
-					position at the same time. We need to re-position the window at the origin of
-					the parent window*/
+				/* QUIRK : Loomer plugins not only resize the UI but throw it into some random
+				 * position at the same time. We need to re-position the window at the origin of
+				 * the parent window*/
 
-					if (vstfx->linux_plugin_ui_window) {
-						XMoveWindow (LXVST_XDisplay, vstfx->linux_plugin_ui_window, 0, 0);
-					}
+				if (vstfx->linux_plugin_ui_window) {
+					XMoveWindow (LXVST_XDisplay, vstfx->linux_plugin_ui_window, 0, 0);
 				}
 			}
 
 			break;
-
 		}
 
 		/*Reparent Notify - when the plugin UI is reparented into
@@ -239,7 +250,7 @@ dispatch_x_events (XEvent* event, VSTState* vstfx)
 
 				vstfx->linux_plugin_ui_window = PluginUIWindowID;
 #ifdef LXVST_32BIT
-				int result = getXWindowProperty(PluginUIWindowID, XInternAtom(LXVST_XDisplay, "_XEventProc", false));
+				int result = getXWindowProperty (PluginUIWindowID, XInternAtom (LXVST_XDisplay, "_XEventProc", false));
 
 				if (result == 0) {
 					vstfx->eventProc = NULL;
@@ -248,12 +259,13 @@ dispatch_x_events (XEvent* event, VSTState* vstfx)
 				}
 #endif
 #ifdef LXVST_64BIT
-				long result = getXWindowProperty(PluginUIWindowID, XInternAtom(LXVST_XDisplay, "_XEventProc", false));
+				long result = getXWindowProperty (PluginUIWindowID, XInternAtom (LXVST_XDisplay, "_XEventProc", false));
 
-				if(result == 0)
+				if (result == 0) {
 					vstfx->eventProc = NULL;
-				else
+				} else {
 					vstfx->eventProc = (void (*) (void* event))result;
+				}
 #endif
 			}
 			break;
@@ -269,15 +281,15 @@ dispatch_x_events (XEvent* event, VSTState* vstfx)
 			to effEditOpen when the editor is launched*/
 
 			if (window == (Window) (vstfx->linux_window)) {
-				char* message = XGetAtomName(LXVST_XDisplay, message_type);
+				char* message = XGetAtomName (LXVST_XDisplay, message_type);
 
-				if (strcmp(message,"LaunchEditor") == 0) {
+				if (strcmp (message,"LaunchEditor") == 0) {
 					if (event->xclient.data.l[0] == 0x0FEEDBAC) {
 						vstfx_launch_editor (vstfx);
 					}
 				}
 
-				XFree(message);
+				XFree (message);
 			}
 			break;
 		}
@@ -299,38 +311,17 @@ dispatch_x_events (XEvent* event, VSTState* vstfx)
 		return;
 	}
 
-	vstfx->eventProc((void*)event);
-}
-
-static void
-maybe_set_program (VSTState* vstfx)
-{
-	if (vstfx->want_program != -1) {
-		if (vstfx->vst_version >= 2) {
-			vstfx->plugin->dispatcher (vstfx->plugin, 67 /* effBeginSetProgram */, 0, 0, NULL, 0);
-		}
-
-		vstfx->plugin->dispatcher (vstfx->plugin, effSetProgram, 0, vstfx->want_program, NULL, 0);
-
-		if (vstfx->vst_version >= 2) {
-			vstfx->plugin->dispatcher (vstfx->plugin, 68 /* effEndSetProgram */, 0, 0, NULL, 0);
-		}
-
-		vstfx->want_program = -1;
-	}
-
-	if (vstfx->want_chunk == 1) {
-		vstfx->plugin->dispatcher (vstfx->plugin, 24 /* effSetChunk */, 1, vstfx->wanted_chunk_size, vstfx->wanted_chunk, 0);
-		vstfx->want_chunk = 0;
-	}
+	vstfx->eventProc ((void*)event);
 }
 
 /** This is the main gui event loop for the plugin, we also need to pass
 any Xevents to all the UI callbacks plugins 'may' have registered on their
 windows, that is if they don't manage their own UIs **/
 
-void* gui_event_loop (void* ptr)
+static void*
+gui_event_loop (void* ptr)
 {
+	pthread_set_name ("LXVSTEventLoop");
 	VSTState* vstfx;
 	int LXVST_sched_timer_interval = 40; //ms, 25fps
 	XEvent event;
@@ -349,11 +340,10 @@ void* gui_event_loop (void* ptr)
 
 		bool may_sleep = true;
 
-		if(LXVST_XDisplay)
-		{
+		if (LXVST_XDisplay) {
 			/*See if there are any events in the queue*/
 
-			int num_events = XPending(LXVST_XDisplay);
+			int num_events = XPending (LXVST_XDisplay);
 
 			if (num_events > 0) {
 				// keep dispatching events as fast as possible
@@ -362,19 +352,17 @@ void* gui_event_loop (void* ptr)
 
 			/*process them if there are any*/
 
-			while(num_events)
-			{
-				XNextEvent(LXVST_XDisplay, &event);
+			while (num_events) {
+				XNextEvent (LXVST_XDisplay, &event);
 
 				/*Call dispatch events, with the event, for each plugin in the linked list*/
 
-				for (vstfx = vstfx_first; vstfx; vstfx = vstfx->next)
-				{
-					pthread_mutex_lock(&vstfx->lock);
+				for (vstfx = vstfx_first; vstfx; vstfx = vstfx->next) {
+					pthread_mutex_lock (&vstfx->lock);
 
-					dispatch_x_events(&event, vstfx);
+					dispatch_x_events (&event, vstfx);
 
-					pthread_mutex_unlock(&vstfx->lock);
+					pthread_mutex_unlock (&vstfx->lock);
 				}
 
 				num_events--;
@@ -383,16 +371,15 @@ void* gui_event_loop (void* ptr)
 
 		/*We don't want to use all the CPU.. */
 
-		Glib::usleep(1000);
+		Glib::usleep (1000);
 
 		/*See if its time for us to do a scheduled event pass on all the plugins*/
 
 		clock2 = g_get_monotonic_time();
 		const int64_t elapsed_time_ms = (clock2 - clock1) / 1000;
 
-		if((LXVST_sched_timer_interval != 0) && elapsed_time_ms >= LXVST_sched_timer_interval)
-		{
-			//printf("elapsed %d ms ^= %.2f Hz\n", elapsed_time_ms, 1000.0/(double)elapsed_time_ms); // DEBUG
+		if ((LXVST_sched_timer_interval != 0) && elapsed_time_ms >= LXVST_sched_timer_interval) {
+			//printf ("elapsed %d ms ^= %.2f Hz\n", elapsed_time_ms, 1000.0/ (double)elapsed_time_ms); // DEBUG
 			pthread_mutex_lock (&plugin_mutex);
 
 again:
@@ -433,11 +420,11 @@ again:
 						pthread_mutex_unlock (&vstfx->lock);
 						goto again;
 					} else {
-						/* condition/unlock: it was signalled & unlocked in fst_create_editor()   */
+						/* condition/unlock: it was signalled & unlocked in fst_create_editor() */
 					}
 				}
 
-				maybe_set_program (vstfx);
+				vststate_maybe_set_program (vstfx);
 				vstfx->want_program = -1;
 				vstfx->want_chunk = 0;
 
@@ -461,8 +448,9 @@ again:
 
 				vstfx->plugin->dispatcher (vstfx->plugin, effEditIdle, 0, 0, NULL, 0);
 
-				if(vstfx->wantIdle)
+				if (vstfx->wantIdle) {
 					vstfx->plugin->dispatcher (vstfx->plugin, 53, 0, 0, NULL, 0);
+				}
 
 				pthread_mutex_unlock (&vstfx->lock);
 			}
@@ -472,11 +460,37 @@ again:
 		}
 
 		if (!gui_quit && may_sleep && elapsed_time_ms + 1 < LXVST_sched_timer_interval) {
-			Glib::usleep(1000 * (LXVST_sched_timer_interval - elapsed_time_ms - 1));
+			Glib::usleep (1000 * (LXVST_sched_timer_interval - elapsed_time_ms - 1));
 		}
 	}
 
-	/*Drop out to here if we set gui_quit to 1 */
+	if (LXVST_XDisplay) {
+		XCloseDisplay (LXVST_XDisplay);
+		LXVST_XDisplay = 0;
+	}
+
+	/* some plugin UIs (looking at you, u-he^abique), do set thread-keys
+	 * and free, but not unset them.
+	 *
+	 * This leads to a double-free in __nptl_deallocate_tsd
+	 * nptl/pthread_create.c:175  __pthread_keys[idx].destr (data);
+	 * when the event-loop thread is joined.
+	 *
+	 * This workaround is dedicated to all the plugin-UI-devs
+	 * who think their UI owns the complete process memory-space.
+	 *
+	 * NB. ardour itself does not use thread-keys for the
+	 * VST event-loop thread, and anyway, this thread is joined
+	 * only when ardour exit()s. If this would result in a leak,
+	 * nobody will care.
+	 */
+	if (!getenv ("ARDOUR_RUNNING_UNDER_VALGRIND")) {
+		for (pthread_key_t i = 0; i < PTHREAD_KEYS_MAX; ++i) {
+			if (pthread_getspecific (i)) {
+				pthread_setspecific (i, NULL);
+			}
+		}
+	}
 
 	return NULL;
 }
@@ -496,12 +510,12 @@ int vstfx_init (void* ptr)
 
 	/*Init the attribs to defaults*/
 
-	pthread_attr_init(&thread_attributes);
+	pthread_attr_init (&thread_attributes);
 
 	/*Make sure the thread is joinable - this should be the default anyway -
 	so we can join to it on vstfx_exit*/
 
-	pthread_attr_setdetachstate(&thread_attributes, PTHREAD_CREATE_JOINABLE);
+	pthread_attr_setdetachstate (&thread_attributes, PTHREAD_CREATE_JOINABLE);
 
 
 	/*This is where we need to open a connection to X, and start the GUI thread*/
@@ -510,13 +524,13 @@ int vstfx_init (void* ptr)
 	will talk to X down this connection - X cannot handle multi-threaded access via
 	the same Display* */
 
-	if(LXVST_XDisplay==NULL)
-		LXVST_XDisplay = XOpenDisplay(NULL);	//We might be able to make this open a specific screen etc
+	if (LXVST_XDisplay == NULL) {
+		LXVST_XDisplay = XOpenDisplay (NULL); //We might be able to make this open a specific screen etc
+	}
 
 	/*Drop out and report the error if we fail to connect to X */
 
-	if(LXVST_XDisplay==NULL)
-	{
+	if (LXVST_XDisplay == NULL) {
 		vstfx_error ("** ERROR ** VSTFX: Failed opening connection to X");
 
 		return -1;
@@ -526,15 +540,16 @@ int vstfx_init (void* ptr)
 
 	/*Create the thread - use default attrs for now, don't think we need anything special*/
 
-	thread_create_result = pthread_create(&LXVST_gui_event_thread, &thread_attributes, gui_event_loop, NULL);
+	thread_create_result = pthread_create (&LXVST_gui_event_thread, &thread_attributes, gui_event_loop, NULL);
 
-	if(thread_create_result!=0)
+	if (thread_create_result != 0)
 	{
 		/*There was a problem starting the GUI event thread*/
 
 		vstfx_error ("** ERROR ** VSTFX: Failed starting GUI event thread");
 
-		XCloseDisplay(LXVST_XDisplay);
+		XCloseDisplay (LXVST_XDisplay);
+		LXVST_XDisplay = 0;
 		gui_quit = 1;
 
 		return -1;
@@ -545,7 +560,7 @@ int vstfx_init (void* ptr)
 
 /*The vstfx Quit function*/
 
-void vstfx_exit()
+void vstfx_exit ()
 {
 	if (gui_quit) {
 		return;
@@ -555,9 +570,6 @@ void vstfx_exit()
 	/*We need to pthread_join the gui_thread here so
 	we know when it has stopped*/
 
-	// BEWARE: some Plugin GUIs can crash if the thread local storage is free()d
-	// after the shared library containing the destructor is already dl-closed.
-	// (e.g u-he LXVST GUI, crash in __nptl_deallocate_tsd) :(
 	pthread_join(LXVST_gui_event_thread, NULL);
 	pthread_mutex_destroy (&plugin_mutex);
 }
@@ -615,6 +627,11 @@ int vstfx_create_editor (VSTState* vstfx)
 	int x_size = 1;
 	int y_size = 1;
 
+	if (!LXVST_XDisplay) {
+		vstfx_error ("** ERROR ** VSTFX: No X11 Display available for plugin UI");
+		return -1;
+	}
+
 	/* Note: vstfx->lock is held while this function is called */
 
 	if (!(vstfx->plugin->flags & effFlagsHasEditor))
@@ -671,8 +688,8 @@ int vstfx_create_editor (VSTState* vstfx)
 	event.window = parent_window;
 	event.message_type = WindowActiveAtom;
 
-	event.format = 32;						//Data format
-	event.data.l[0] = 0x0FEEDBAC;			//Something we can recognize later
+	event.format    = 32;         //Data format
+	event.data.l[0] = 0x0FEEDBAC; //Something we can recognize later
 
 	/*Push the event into the queue on our Display*/
 
@@ -719,7 +736,7 @@ vstfx_launch_editor (VSTState* vstfx)
 	/* linuxDSP VSTs don't use the host Display* at all           */
 	/**************************************************************/
 
-	vstfx->plugin->dispatcher (vstfx->plugin, effEditOpen, 0, (long)LXVST_XDisplay, (void*)(parent_window), 0 );
+	vstfx->plugin->dispatcher (vstfx->plugin, effEditOpen, 0, (long)LXVST_XDisplay, (void*)(parent_window), 0);
 
 	/*QUIRK - some plugins need a slight delay after opening the editor before you can
 	ask the window size or they might return zero - specifically discoDSP */
@@ -728,7 +745,7 @@ vstfx_launch_editor (VSTState* vstfx)
 
 	/*Now we can find out how big the parent window should be (and try) to resize it*/
 
-	vstfx->plugin->dispatcher (vstfx->plugin, effEditGetRect, 0, 0, &er, 0 );
+	vstfx->plugin->dispatcher (vstfx->plugin, effEditGetRect, 0, 0, &er, 0);
 
 	if (er) {
 		// Don't crash is plugin does not implement effEditGetRect
@@ -740,7 +757,7 @@ vstfx_launch_editor (VSTState* vstfx)
 	vstfx->width = x_size;
 	vstfx->height = y_size;
 
-	XResizeWindow(LXVST_XDisplay, parent_window, x_size, y_size);
+	XResizeWindow (LXVST_XDisplay, parent_window, x_size, y_size);
 
 	XFlush (LXVST_XDisplay);
 
@@ -793,7 +810,7 @@ vstfx_event_loop_remove_plugin (VSTState* vstfx)
 
 	// if this function is called, there must be
 	// at least one plugin in the linked list
-	assert(vstfx_first);
+	assert (vstfx_first);
 
 	if (vstfx_first == vstfx) {
 		vstfx_first = vstfx_first->next;

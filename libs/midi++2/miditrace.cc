@@ -1,21 +1,20 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2015 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstdio>
 #include <fcntl.h>
@@ -23,10 +22,12 @@
 #include "pbd/error.h"
 #include "pbd/textreceiver.h"
 
-Transmitter error (Transmitter::Error);
+Transmitter debug (Transmitter::Debug);
 Transmitter info (Transmitter::Info);
 Transmitter warning (Transmitter::Warning);
+Transmitter error (Transmitter::Error);
 Transmitter fatal (Transmitter::Fatal);
+
 TextReceiver text_receiver ("mmctest");
 
 #include "midi++/port.h"
@@ -59,10 +60,10 @@ main (int argc, char *argv[])
 {
 	byte buf[1];
 
-	text_receiver.listen_to (error);
 	text_receiver.listen_to (info);
-	text_receiver.listen_to (fatal);
 	text_receiver.listen_to (warning);
+	text_receiver.listen_to (error);
+	text_receiver.listen_to (fatal);
 
 	if (setup_midi ()) {
 		exit (1);

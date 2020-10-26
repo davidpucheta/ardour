@@ -1,20 +1,22 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2009-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <map>
@@ -22,9 +24,9 @@
 #include <gtkmm/cellrenderercombo.h>
 
 #include "evoral/midi_util.h"
-#include "evoral/Note.hpp"
+#include "evoral/Note.h"
 
-#include "ardour/beats_frames_converter.h"
+#include "ardour/beats_samples_converter.h"
 #include "ardour/midi_model.h"
 #include "ardour/midi_region.h"
 #include "ardour/midi_source.h"
@@ -39,7 +41,7 @@
 #include "note_player.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -146,8 +148,10 @@ MidiListEditor::MidiListEditor (Session* s, boost::shared_ptr<MidiRegion> r, boo
 
 	redisplay_model ();
 
-	region->midi_source(0)->model()->ContentsChanged.connect (content_connection, invalidator (*this),
-								  boost::bind (&MidiListEditor::redisplay_model, this), gui_context());
+	region->midi_source(0)->model()->ContentsChanged.connect (content_connections, invalidator (*this),
+	                                                          boost::bind (&MidiListEditor::redisplay_model, this), gui_context());
+	region->RegionPropertyChanged.connect (content_connections, invalidator (*this),
+	                                       boost::bind (&MidiListEditor::redisplay_model, this), gui_context());
 
 	buttons.attach (sound_notes_button, 0, 1, 0, 1);
 	Glib::RefPtr<Gtk::Action> act = ActionManager::get_action ("Editor", "sound-midi-notes");
@@ -292,7 +296,7 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 						if (note->time() + fdelta >= 0) {
 							cmd->change (note, prop, note->time() + fdelta);
 						} else {
-							cmd->change (note, prop, Evoral::Beats());
+							cmd->change (note, prop, Temporal::Beats());
 						}
 						break;
 					case MidiModel::NoteDiffCommand::Velocity:
@@ -300,10 +304,10 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 						break;
 					case MidiModel::NoteDiffCommand::Length:
 						if (note->length().to_double() + fdelta >=
-						    Evoral::Beats::tick().to_double()) {
+						    Temporal::Beats::tick().to_double()) {
 							cmd->change (note, prop, note->length() + fdelta);
 						} else {
-							cmd->change (note, prop, Evoral::Beats::tick());
+							cmd->change (note, prop, Temporal::Beats::tick());
 						}
 						break;
 					case MidiModel::NoteDiffCommand::Channel:
@@ -335,7 +339,7 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 					if (note->time() + fdelta >= 0) {
 						cmd->change (note, prop, note->time() + fdelta);
 					} else {
-						cmd->change (note, prop, Evoral::Beats());
+						cmd->change (note, prop, Temporal::Beats());
 					}
 					break;
 				case MidiModel::NoteDiffCommand::Velocity:
@@ -343,10 +347,10 @@ MidiListEditor::scroll_event (GdkEventScroll* ev)
 					break;
 				case MidiModel::NoteDiffCommand::Length:
 					if (note->length() + fdelta >=
-					    Evoral::Beats::tick().to_double()) {
+					    Temporal::Beats::tick().to_double()) {
 						cmd->change (note, prop, note->length() + fdelta);
 					} else {
-						cmd->change (note, prop, Evoral::Beats::tick());
+						cmd->change (note, prop, Temporal::Beats::tick());
 					}
 					break;
 				case MidiModel::NoteDiffCommand::Channel:
@@ -612,6 +616,13 @@ MidiListEditor::edited (const std::string& path, const std::string& text)
 		}
 		break;
 	case 3: // name
+		ival = ParameterDescriptor::midi_note_num (text);
+		if (ival < 128) {
+			idelta = ival - note->note();
+			prop = MidiModel::NoteDiffCommand::NoteNumber;
+			opname = _("change note number");
+			apply = true;
+		}
 		break;
 	case 4: // velocity
 		if (sscanf (text.c_str(), "%d", &ival) == 1 && ival != note->velocity()) {
@@ -752,28 +763,28 @@ MidiListEditor::redisplay_model ()
 
 	if (_session) {
 
-		BeatsFramesConverter conv (_session->tempo_map(), region->position());
-		MidiModel::Notes notes = region->midi_source(0)->model()->notes();
+		BeatsSamplesConverter conv (_session->tempo_map(), region->position());
+		boost::shared_ptr<MidiModel> m (region->midi_source(0)->model());
 		TreeModel::Row row;
 		stringstream ss;
 
-		for (MidiModel::Notes::iterator i = notes.begin(); i != notes.end(); ++i) {
+		MidiModel::Notes::const_iterator i = m->note_lower_bound(conv.from (region->start()));
+		Temporal::Beats end_time = conv.from (region->start()) + conv.from (region->length());
+		for (; i != m->notes().end() && (*i)->time() < end_time; ++i) {
 			row = *(model->append());
 			row[columns.channel] = (*i)->channel() + 1;
-			row[columns.note_name] = Evoral::midi_note_name ((*i)->note());
+			row[columns.note_name] = ParameterDescriptor::midi_note_name ((*i)->note());
 			row[columns.note] = (*i)->note();
 			row[columns.velocity] = (*i)->velocity();
 
-			Timecode::BBT_Time bbt;
-
-			_session->tempo_map().bbt_time (conv.to ((*i)->time()), bbt);
+			Timecode::BBT_Time bbt (_session->tempo_map().bbt_at_sample (region->position() - region->start() + conv.to ((*i)->time())));
 
 			ss.str ("");
 			ss << bbt;
 			row[columns.start] = ss.str();
 
 			bbt.bars = 0;
-			const Evoral::Beats dur = (*i)->end_time() - (*i)->time();
+			const Temporal::Beats dur = (*i)->end_time() - (*i)->time();
 			bbt.beats = dur.get_beats ();
 			bbt.ticks = dur.get_ticks ();
 

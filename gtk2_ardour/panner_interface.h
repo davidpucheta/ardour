@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_panner_interface_h__
 #define __gtk_ardour_panner_interface_h__
@@ -24,7 +24,12 @@
 #include <gtkmm/drawingarea.h>
 #include <gtkmm/label.h>
 #include "gtkmm2ext/persistent_tooltip.h"
+
 #include "pbd/destructible.h"
+
+namespace PBD {
+	class Controllable;
+}
 
 namespace ARDOUR {
 	class Panner;
@@ -63,11 +68,12 @@ public:
 
 protected:
 	virtual void set_tooltip () = 0;
+	virtual boost::weak_ptr<PBD::Controllable> proxy_controllable () const = 0;
 
 	void value_change ();
 
-        bool on_enter_notify_event (GdkEventCrossing *);
-        bool on_leave_notify_event (GdkEventCrossing *);
+	bool on_enter_notify_event (GdkEventCrossing *);
+	bool on_leave_notify_event (GdkEventCrossing *);
 	bool on_key_release_event  (GdkEventKey *);
 	bool on_button_press_event (GdkEventButton*);
 	bool on_button_release_event (GdkEventButton*);

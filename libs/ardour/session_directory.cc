@@ -1,20 +1,25 @@
 /*
-	Copyright (C) 2007 Tim Mayberry
-
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2007-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cerrno>
 
@@ -30,7 +35,7 @@
 #include "ardour/session_directory.h"
 #include "ardour/utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 namespace ARDOUR {
 
@@ -134,9 +139,9 @@ SessionDirectory::sources_root () const
 	 *    SessionDirectory is also used directly by the AudioRegionImporter,
 	 *    and the peak-file background thread (session.cc).
 	 *
-	 * 	  There is no actual benefit to use the session-name instead of
-	 * 	  the folder-name. Under normal circumstances they are always
-	 * 	  identical.  But it would be consistent to prefer the name.
+	 *    There is no actual benefit to use the session-name instead of
+	 *    the folder-name. Under normal circumstances they are always
+	 *    identical.  But it would be consistent to prefer the name.
 	 */
 	try {
 		Glib::Dir dir(sources_root_path);
@@ -167,7 +172,7 @@ SessionDirectory::sources_root () const
 			PBD::fatal << string_compose (_("The session's interchange dir is tainted.\nThere is more than one folder in '%1'.\nPlease remove extra subdirs to reduce possible filename ambiguties."), sources_root_path) << endmsg;
 			assert (0); // not reached
 		}
-	} catch (Glib::FileError) {
+	} catch (Glib::FileError const&) {
 		;
 	}
 
@@ -216,12 +221,6 @@ SessionDirectory::midi_path () const
 }
 
 const std::string
-SessionDirectory::midi_patch_path () const
-{
-	return Glib::build_filename (sources_root(), midi_patch_dir_name);
-}
-
-const std::string
 SessionDirectory::video_path () const
 {
 	return Glib::build_filename (sources_root(), video_dir_name);
@@ -245,6 +244,12 @@ SessionDirectory::export_path () const
 	return Glib::build_filename (m_root_path, export_dir_name);
 }
 
+const std::string
+SessionDirectory::backup_path () const
+{
+	return Glib::build_filename (m_root_path, backup_dir_name);
+}
+
 const vector<std::string>
 SessionDirectory::sub_directories () const
 {
@@ -256,6 +261,7 @@ SessionDirectory::sub_directories () const
 	tmp_paths.push_back (peak_path ());
 	tmp_paths.push_back (dead_path ());
 	tmp_paths.push_back (export_path ());
+	tmp_paths.push_back (backup_path ());
 
 	return tmp_paths;
 }

@@ -1,20 +1,22 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008-2012 Hans Baier <hansfbaier@googlemail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_midi_ring_buffer_h__
 #define __ardour_midi_ring_buffer_h__
@@ -48,15 +50,15 @@ public:
 	inline bool read_prefix(T* time, Evoral::EventType* type, uint32_t* size);
 	inline bool read_contents(uint32_t size, uint8_t* buf);
 
-	size_t read(MidiBuffer& dst, framepos_t start, framepos_t end, framecnt_t offset=0, bool stop_on_overflow_in_destination=false);
-	size_t skip_to(framepos_t start);
+	size_t read(MidiBuffer& dst, samplepos_t start, samplepos_t end, samplecnt_t offset=0, bool stop_on_overflow_in_destination=false);
+	size_t skip_to(samplepos_t start);
 
 	void dump(std::ostream& dst);
-	void flush (framepos_t start, framepos_t end);
+	void flush (samplepos_t start, samplepos_t end);
 
 	void reset_tracker ();
-	void resolve_tracker (MidiBuffer& dst, framepos_t);
-	void resolve_tracker (Evoral::EventSink<framepos_t>& dst, framepos_t);
+	void resolve_tracker (MidiBuffer& dst, samplepos_t);
+	void resolve_tracker (Evoral::EventSink<samplepos_t>& dst, samplepos_t);
 
 private:
 	MidiStateTracker _tracker;

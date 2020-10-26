@@ -1,29 +1,30 @@
 /*
-    Copyright (C) 2010 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2010-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/error.h"
-#include "pbd/convert.h"
-#include "pbd/locale_guard.h"
 
 #include "ardour/speaker.h"
 #include "ardour/speakers.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -244,18 +245,13 @@ XMLNode&
 Speakers::get_state ()
 {
         XMLNode* node = new XMLNode (X_("Speakers"));
-        char buf[32];
-        LocaleGuard lg (X_("C"));
 
         for (vector<Speaker>::const_iterator i = _speakers.begin(); i != _speakers.end(); ++i) {
                 XMLNode* speaker = new XMLNode (X_("Speaker"));
 
-                snprintf (buf, sizeof (buf), "%.12g", (*i).angles().azi);
-                speaker->add_property (X_("azimuth"), buf);
-                snprintf (buf, sizeof (buf), "%.12g", (*i).angles().ele);
-                speaker->add_property (X_("elevation"), buf);
-                snprintf (buf, sizeof (buf), "%.12g", (*i).angles().length);
-                speaker->add_property (X_("distance"), buf);
+                speaker->set_property (X_("azimuth"), (*i).angles().azi);
+                speaker->set_property (X_("elevation"), (*i).angles().ele);
+                speaker->set_property (X_("distance"), (*i).angles().length);
 
                 node->add_child_nocopy (*speaker);
         }
@@ -267,32 +263,18 @@ int
 Speakers::set_state (const XMLNode& node, int /*version*/)
 {
         XMLNodeConstIterator i;
-        const XMLProperty* prop;
-        double a, e, d;
-        LocaleGuard lg (X_("C"));
-        int n = 0;
 
         _speakers.clear ();
 
-        for (i = node.children().begin(); i != node.children().end(); ++i, ++n) {
+        for (i = node.children().begin(); i != node.children().end(); ++i) {
                 if ((*i)->name() == X_("Speaker")) {
-                        if ((prop = (*i)->property (X_("azimuth"))) == 0) {
-                                warning << _("Speaker information is missing azimuth - speaker ignored") << endmsg;
+                        double a, e, d;
+                        if (!(*i)->get_property (X_("azimuth"), a) ||
+                            !(*i)->get_property (X_("elevation"), e) ||
+                            !(*i)->get_property (X_("distance"), d)) {
+                                warning << _("Speaker information is missing - speaker ignored") << endmsg;
                                 continue;
                         }
-                        a = atof (prop->value());
-
-                        if ((prop = (*i)->property (X_("elevation"))) == 0) {
-                                warning << _("Speaker information is missing elevation - speaker ignored") << endmsg;
-                                continue;
-                        }
-                        e = atof (prop->value());
-
-                        if ((prop = (*i)->property (X_("distance"))) == 0) {
-                                warning << _("Speaker information is missing distance - speaker ignored") << endmsg;
-                                continue;
-                        }
-                        d = atof (prop->value());
 
                         add_speaker (AngularVector (a, e, d));
                 }

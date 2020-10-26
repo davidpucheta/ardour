@@ -1,29 +1,31 @@
 /*
-    Copyright (C) 2014 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_value_as_string_h__
 #define __ardour_value_as_string_h__
 
 #include <stddef.h>
 
+#include "ardour/dB.h"
 #include "ardour/parameter_descriptor.h"
+
+#include "pbd/i18n.h"
 
 namespace ARDOUR {
 
@@ -44,22 +46,25 @@ value_as_string(const ARDOUR::ParameterDescriptor& desc,
 		}
 	}
 
+	if (desc.toggled) {
+		return v > 0 ? _("on") : _("off");
+	}
+
 	// Value is not a scale point, print it normally
 	if (desc.unit == ARDOUR::ParameterDescriptor::MIDI_NOTE) {
-		if (v >= 0 && v <= 127) {
-			const int         num          = rint(v);
-			static const char names[12][3] = {
-				"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"
-			};
-			snprintf(buf, sizeof(buf), "%s %d", names[num % 12], (num / 12) - 2);
-		} else {
-			// Odd, invalid range, just print the number
-			snprintf(buf, sizeof(buf), "%.0f", v);
-		}
+		snprintf(buf, sizeof(buf), "%s", ParameterDescriptor::midi_note_name (rint(v)).c_str());
+	} else if (desc.type == GainAutomation || desc.type == BusSendLevel || desc.type == TrimAutomation || desc.type == EnvelopeAutomation || desc.type == MainOutVolume) {
+		snprintf(buf, sizeof(buf), "%.2f dB", accurate_coefficient_to_dB (v));
+	} else if (desc.type == PanWidthAutomation) {
+		snprintf (buf, sizeof (buf), "%d%%", (int) floor (100.0 * v));
 	} else if (!desc.print_fmt.empty()) {
 		snprintf(buf, sizeof(buf), desc.print_fmt.c_str(), v);
 	} else if (desc.integer_step) {
 		snprintf(buf, sizeof(buf), "%d", (int)v);
+	} else if (desc.upper - desc.lower >= 1000) {
+		snprintf(buf, sizeof(buf), "%.1f", v);
+	} else if (desc.upper - desc.lower >= 100) {
+		snprintf(buf, sizeof(buf), "%.2f", v);
 	} else {
 		snprintf(buf, sizeof(buf), "%.3f", v);
 	}

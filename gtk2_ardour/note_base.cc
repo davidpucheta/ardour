@@ -1,27 +1,29 @@
 /*
-    Copyright (C) 2007 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 
 #include "gtkmm2ext/keyboard.h"
 
-#include "evoral/Note.hpp"
+#include "evoral/Note.h"
 
 #include "canvas/text.h"
 
@@ -44,6 +46,21 @@ const uint32_t NoteBase::midi_channel_colors[16] = {
 	  0x832dd3ff,  0xa92dd3ff,  0xd32dbfff,  0xd32d67ff
 	};
 
+bool             NoteBase::_color_init = false;
+Gtkmm2ext::Color NoteBase::_selected_col = 0;
+Gtkmm2ext::SVAModifier NoteBase::color_modifier;
+Gtkmm2ext::Color NoteBase::velocity_color_table[128];
+
+void
+NoteBase::set_colors ()
+{
+	for (uint8_t i = 0; i < 128; ++i) {
+		velocity_color_table[i] = 0; /* out of bounds because zero alpha makes no sense  */
+	}
+	_selected_col = UIConfiguration::instance().color ("midi note selected outline");
+	color_modifier = UIConfiguration::instance().modifier ("midi note");
+}
+
 NoteBase::NoteBase(MidiRegionView& region, bool with_events, const boost::shared_ptr<NoteType> note)
 	: _region(region)
 	, _item (0)
@@ -51,11 +68,15 @@ NoteBase::NoteBase(MidiRegionView& region, bool with_events, const boost::shared
 	, _state(None)
 	, _note(note)
 	, _with_events (with_events)
-	, _selected(false)
+	, _flags (Flags (0))
 	, _valid (true)
 	, _mouse_x_fraction (-1.0)
 	, _mouse_y_fraction (-1.0)
 {
+	if (!_color_init) {
+		NoteBase::set_colors();
+		_color_init = true;
+	}
 }
 
 NoteBase::~NoteBase()
@@ -119,12 +140,12 @@ NoteBase::on_channel_selection_change(uint16_t selection)
 {
 	// make note change its color if its channel is not marked active
 	if ( (selection & (1 << _note->channel())) == 0 ) {
-		set_fill_color(UIConfiguration::instance().color ("midi note inactive channel"));
-		set_outline_color(calculate_outline(UIConfiguration::instance().color ("midi note inactive channel"),
-		                                    _selected));
+		const Gtkmm2ext::Color inactive_ch = UIConfiguration::instance().color ("midi note inactive channel");
+		set_fill_color(inactive_ch);
+		set_outline_color(calculate_outline(inactive_ch, (_flags == Selected)));
 	} else {
 		// set the color according to the notes selection state
-		set_selected(_selected);
+		set_selected (_flags == Selected);
 	}
 	// this forces the item to update..... maybe slow...
 	_item->hide();
@@ -145,10 +166,16 @@ NoteBase::set_selected(bool selected)
 		return;
 	}
 
-	_selected = selected;
-	set_fill_color (base_color());
+	if (selected) {
+		_flags = Flags (_flags | Selected);
+	} else {
+		_flags = Flags (_flags & ~Selected);
+	}
 
-	set_outline_color(calculate_outline(base_color(), _selected));
+	const uint32_t base_col = base_color();
+	set_fill_color (base_col);
+
+	set_outline_color(calculate_outline(base_col, (_flags == Selected)));
 }
 
 #define SCALE_USHORT_TO_UINT8_T(x) ((x) / 257)
@@ -166,18 +193,23 @@ NoteBase::base_color()
 	switch (mode) {
 	case TrackColor:
 	{
-		uint32_t color = _region.midi_stream_view()->get_region_color();
-		return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (color, opacity),
-		                         UIConfiguration::instance().color ("midi note selected"),
+		const uint32_t region_color = _region.midi_stream_view()->get_region_color();
+		return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (region_color, opacity), _selected_col,
 					 0.5);
 	}
 
 	case ChannelColors:
 		return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (NoteBase::midi_channel_colors[_note->channel()], opacity),
-		                         UIConfiguration::instance().color ("midi note selected"), 0.5);
+		                          _selected_col, 0.5);
 
 	default:
-		return meter_style_fill_color(_note->velocity(), selected());
+		if (UIConfiguration::instance().get_use_note_color_for_velocity()) {
+			return meter_style_fill_color(_note->velocity(), selected());
+		} else {
+			const uint32_t region_color = _region.midi_stream_view()->get_region_color();
+			return UINT_INTERPOLATE (UINT_RGBA_CHANGE_A (region_color, opacity), _selected_col,
+			                         0.5);
+		}
 	};
 
 	return 0;
@@ -297,6 +329,60 @@ NoteBase::mouse_near_ends () const
 bool
 NoteBase::big_enough_to_trim () const
 {
-        return (x1() - x0()) > 10;
+	return (x1() - x0()) > 10;
 }
 
+
+Gtkmm2ext::Color
+NoteBase::meter_style_fill_color(uint8_t vel, bool /* selected */)
+{
+	/* note that because vel is uint8_t, we don't need bounds checking for
+	   the color lookup table.
+	*/
+
+	if (velocity_color_table[vel] == 0) {
+
+		Gtkmm2ext::Color col;
+
+		if (vel < 32) {
+			col = UINT_INTERPOLATE(UIConfiguration::instance().color ("midi meter color0"), UIConfiguration::instance().color ("midi meter color1"), (vel / 32.0));
+			col = Gtkmm2ext::change_alpha (col, color_modifier.a());
+		} else if (vel < 64) {
+			col = UINT_INTERPOLATE(UIConfiguration::instance().color ("midi meter color2"), UIConfiguration::instance().color ("midi meter color3"), ((vel-32) / 32.0));
+			col = Gtkmm2ext::change_alpha (col, color_modifier.a());
+		} else if (vel < 100) {
+			col = UINT_INTERPOLATE(UIConfiguration::instance().color ("midi meter color4"), UIConfiguration::instance().color ("midi meter color5"), ((vel-64) / 36.0));
+			col = Gtkmm2ext::change_alpha (col, color_modifier.a());
+		} else if (vel < 112) {
+			col = UINT_INTERPOLATE(UIConfiguration::instance().color ("midi meter color6"), UIConfiguration::instance().color ("midi meter color7"), ((vel-100) / 12.0));
+			col = Gtkmm2ext::change_alpha (col, color_modifier.a());
+		} else {
+			col =  UINT_INTERPOLATE(UIConfiguration::instance().color ("midi meter color8"), UIConfiguration::instance().color ("midi meter color9"), ((vel-112) / 17.0));
+			col = Gtkmm2ext::change_alpha (col, color_modifier.a());
+		}
+
+		velocity_color_table[vel] = col;
+		return col;
+	}
+
+	return velocity_color_table[vel];
+}
+
+void
+NoteBase::set_hide_selection (bool yn)
+{
+	if (yn) {
+		_flags = Flags (_flags | HideSelection);
+	} else {
+		_flags = Flags (_flags & ~HideSelection);
+	}
+
+	if (_flags & Selected) {
+		/* maybe (?) change outline color */
+		set_outline_color (calculate_outline (base_color(), !yn));
+	}
+
+	/* no need to redo color if it wasn't selected and we just changed
+	 * "hide selected" since nothing will change
+	 */
+}

@@ -1,25 +1,30 @@
 /*
-    Copyright (C) 2008-2012 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2008-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2017 Johannes Mueller <github@johannes-mueller.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_lv2_plugin_h__
 #define __ardour_lv2_plugin_h__
 
+#include <glibmm/threads.h>
 #include <set>
 #include <string>
 #include <vector>
@@ -58,9 +63,11 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	LV2Plugin (ARDOUR::AudioEngine& engine,
 	           ARDOUR::Session&     session,
 	           const void*          c_plugin,
-	           framecnt_t           sample_rate);
+	           samplecnt_t          sample_rate);
 	LV2Plugin (const LV2Plugin &);
 	~LV2Plugin ();
+
+	static bool force_state_save; // to be used only by session-state
 
 	std::string unique_id () const;
 	const char* uri () const;
@@ -71,14 +78,14 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	uint32_t    num_ports () const;
 	uint32_t    parameter_count () const;
 	float       default_value (uint32_t port);
-	framecnt_t  max_latency () const;
-	framecnt_t  signal_latency () const;
-	void        set_parameter (uint32_t port, float val);
+	samplecnt_t max_latency () const;
+	void        set_parameter (uint32_t port, float val, sampleoffset_t);
 	float       get_parameter (uint32_t port) const;
 	std::string get_docs() const;
 	std::string get_parameter_docs(uint32_t which) const;
 	int         get_parameter_descriptor (uint32_t which, ParameterDescriptor&) const;
 	uint32_t    nth_parameter (uint32_t port, bool& ok) const;
+	bool        get_layout (uint32_t which, UILayoutHint&) const;
 
 	IOPortDescription describe_io_port (DataType dt, bool input, uint32_t id) const;
 
@@ -106,17 +113,15 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 
 	int set_block_size (pframes_t);
 	bool requires_fixed_sized_buffers () const;
+	bool connect_all_audio_outputs () const;
 
 	int connect_and_run (BufferSet& bufs,
-	                     ChanMapping in, ChanMapping out,
-	                     pframes_t nframes, framecnt_t offset);
+	                     samplepos_t start, samplepos_t end, double speed,
+	                     ChanMapping const& in, ChanMapping const& out,
+	                     pframes_t nframes, samplecnt_t offset);
 
 	std::string describe_parameter (Evoral::Parameter);
 	std::string state_node_name () const { return "lv2"; }
-
-	void print_parameter (uint32_t param,
-	                      char*    buf,
-	                      uint32_t len) const;
 
 	bool parameter_is_audio (uint32_t) const;
 	bool parameter_is_control (uint32_t) const;
@@ -124,6 +129,8 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	bool parameter_is_input (uint32_t) const;
 	bool parameter_is_output (uint32_t) const;
 	bool parameter_is_toggled (uint32_t) const;
+
+	uint32_t designated_bypass_port ();
 
 	boost::shared_ptr<ScalePoints>
 	get_scale_points(uint32_t port_index) const;
@@ -159,13 +166,37 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	URIMap&       uri_map()       { return _uri_map; }
 	const URIMap& uri_map() const { return _uri_map; }
 
-	int work(uint32_t size, const void* data);
+	int work(Worker& worker, uint32_t size, const void* data);
 	int work_response(uint32_t size, const void* data);
 
 	void                       set_property(uint32_t key, const Variant& value);
 	const PropertyDescriptors& get_supported_properties() const { return _property_descriptors; }
 	const ParameterDescriptor& get_property_descriptor(uint32_t id) const;
+	Variant                    get_property_value (uint32_t) const;
 	void                       announce_property_values();
+
+	/* LV2 Option Options */
+	static void set_global_ui_background_color (uint32_t c) {
+		_ui_background_color = c;
+	}
+	static void set_global_ui_foreground_color (uint32_t c) {
+		_ui_foreground_color = c;
+	}
+	static void set_global_ui_contrasting_color (uint32_t c) {
+		_ui_contrasting_color = c;
+	}
+	static void set_global_ui_scale_factor (float s) {
+		_ui_scale_factor = s;
+	}
+	static void set_global_ui_style_boxy (bool yn) {
+		_ui_style_boxy = yn;
+	}
+	static void set_global_ui_style_flat (bool yn) {
+		_ui_style_flat = yn;
+	}
+	static void set_main_window_id (unsigned long id) {
+		_ui_transient_win_id = id;
+	}
 
   private:
 	struct Impl;
@@ -173,26 +204,33 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	void*         _module;
 	LV2_Feature** _features;
 	Worker*       _worker;
-	framecnt_t    _sample_rate;
+	Worker*       _state_worker;
+	samplecnt_t   _sample_rate;
+	float         _fsample_rate;
 	float*        _control_data;
 	float*        _shadow_data;
 	float*        _defaults;
 	LV2_Evbuf**   _ev_buffers;
 	LV2_Evbuf**   _atom_ev_buffers;
-	float*        _bpm_control_port;  ///< Special input set by ardour
-	float*        _freewheel_control_port;  ///< Special input set by ardour
-	float*        _latency_control_port;  ///< Special output set by ardour
-	framepos_t    _next_cycle_start;  ///< Expected start frame of next run cycle
-	double        _next_cycle_speed;  ///< Expected start frame of next run cycle
+	float*        _bpm_control_port; ///< Special input set by ardour
+	float*        _freewheel_control_port; ///< Special input set by ardour
+	float*        _latency_control_port; ///< Special output set by ardour
+	samplepos_t   _next_cycle_start; ///< Expected start sample of next run cycle
+	double        _next_cycle_speed; ///< Expected start sample of next run cycle
+	double        _next_cycle_beat;  ///< Expected bar_beat of next run cycle
+	double        _current_bpm;
+	double        _prev_time_scale;  ///< previous Port::speed_ratio
 	PBD::ID       _insert_id;
 	std::string   _plugin_state_dir;
+	uint32_t      _bpm_control_port_index;
 	uint32_t      _patch_port_in_index;
 	uint32_t      _patch_port_out_index;
 	URIMap&       _uri_map;
 	bool          _no_sample_accurate_ctrl;
+	bool          _connect_all_audio_outputs;
 	bool          _can_write_automation;
-	framecnt_t    _max_latency;
-	framecnt_t    _current_latency;
+	samplecnt_t   _max_latency;
+	samplecnt_t   _current_latency;
 
 	friend const void* lv2plugin_get_port_value(const char* port_symbol,
 	                                            void*       user_data,
@@ -210,7 +248,9 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 		PORT_POSITION = 1 << 7,  ///< Event port understands position
 		PORT_PATCHMSG = 1 << 8,  ///< Event port supports patch:Message
 		PORT_AUTOCTRL = 1 << 9,  ///< Event port supports auto:AutomationControl
-		PORT_CTRLED   = 1 << 10  ///< Port prop auto:AutomationControlled (can be self controlled)
+		PORT_CTRLED   = 1 << 10, ///< Port prop auto:AutomationControlled (can be self controlled)
+		PORT_CTRLER   = 1 << 11, ///< Port prop auto:AutomationController (can be self set)
+		PORT_NOAUTO   = 1 << 12  ///< Port don't allow to automate
 	} PortFlag;
 
 	typedef unsigned PortFlags;
@@ -218,6 +258,8 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	std::vector<PortFlags>         _port_flags;
 	std::vector<size_t>            _port_minimumSize;
 	std::map<std::string,uint32_t> _port_indices;
+
+	std::map<uint32_t, Variant>    _property_values;
 
 	PropertyDescriptors _property_descriptors;
 
@@ -252,18 +294,35 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	                 uint32_t       size,
 	                 const uint8_t* body);
 
-	bool write_to(RingBuffer<uint8_t>* dest,
-	              uint32_t             index,
-	              uint32_t             protocol,
-	              uint32_t             size,
-	              const uint8_t*       body);
+	bool write_to(PBD::RingBuffer<uint8_t>* dest,
+	              uint32_t                  index,
+	              uint32_t                  protocol,
+	              uint32_t                  size,
+	              const uint8_t*            body);
 
 	// Created on demand so the space is only consumed if necessary
-	RingBuffer<uint8_t>* _to_ui;
-	RingBuffer<uint8_t>* _from_ui;
+	PBD::RingBuffer<uint8_t>* _to_ui;
+	PBD::RingBuffer<uint8_t>* _from_ui;
+
+	Glib::Threads::Mutex _work_mutex;
 
 #ifdef LV2_EXTENDED
+	static void queue_draw (LV2_Inline_Display_Handle);
+	static void midnam_update (LV2_Midnam_Handle);
+	static void bankpatch_notify (LV2_BankPatch_Handle, uint8_t, uint32_t, uint8_t);
+
 	const LV2_Inline_Display_Interface* _display_interface;
+	bool _inline_display_in_gui;
+	const LV2_Midnam_Interface*    _midname_interface;
+
+	uint32_t _bankpatch[16];
+	bool seen_bankpatch;
+	bool knows_bank_patch () { return seen_bankpatch; }
+	uint32_t bank_patch (uint8_t chn) {
+		assert (chn < 16);
+		if (chn > 15) return UINT32_MAX;
+		return _bankpatch[chn];
+	}
 #endif
 
 	typedef struct {
@@ -280,10 +339,19 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	LV2_Feature    _def_state_feature;
 #ifdef LV2_EXTENDED
 	LV2_Feature    _queue_draw_feature;
+	LV2_Feature    _midnam_feature;
+	LV2_Feature    _bankpatch_feature;
 #endif
 
 	// Options passed to plugin
-	int32_t _seq_size;
+	int32_t              _seq_size;
+	static bool          _ui_style_flat;
+	static bool          _ui_style_boxy;
+	static uint32_t      _ui_background_color;
+	static uint32_t      _ui_foreground_color;
+	static uint32_t      _ui_contrasting_color;
+	static float         _ui_scale_factor;
+	static unsigned long _ui_transient_win_id;
 
 	mutable unsigned _state_version;
 
@@ -298,16 +366,24 @@ class LIBARDOUR_API LV2Plugin : public ARDOUR::Plugin, public ARDOUR::Workee
 	static char* lv2_state_make_path (void*       host_data,
 	                                  const char* path);
 
-	void init (const void* c_plugin, framecnt_t rate);
+	void init (const void* c_plugin, samplecnt_t rate);
 	void allocate_atom_event_buffers ();
-	void run (pframes_t nsamples);
+	void run (pframes_t nsamples, bool sync_work = false);
 
 	void load_supported_properties(PropertyDescriptors& descs);
 
 #ifdef LV2_EXTENDED
 	bool has_inline_display ();
+	bool inline_display_in_gui ();
 	Plugin::Display_Image_Surface* render_inline_display (uint32_t, uint32_t);
+
+	bool has_midnam ();
+	bool read_midnam ();
+	std::string midnam_model ();
+	bool _midnam_dirty;
 #endif
+
+	samplecnt_t plugin_latency () const;
 
 	void latency_compute_run ();
 	std::string do_save_preset (std::string);
@@ -326,10 +402,17 @@ public:
 
 	PluginPtr load (Session& session);
 	std::vector<Plugin::PresetRecord> get_presets (bool user_only) const;
-	virtual bool in_category (const std::string &c) const;
-	virtual bool is_instrument() const;
+
+	bool is_instrument () const;
+	bool is_utility () const;
+	bool is_analyzer () const;
 
 	char * _plugin_uri;
+
+private:
+	bool _is_instrument;
+	bool _is_utility;
+	bool _is_analyzer;
 };
 
 typedef boost::shared_ptr<LV2PluginInfo> LV2PluginInfoPtr;

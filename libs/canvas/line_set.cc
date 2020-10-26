@@ -1,24 +1,24 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "canvas/line_set.h"
-#include "canvas/utils.h"
 
 using namespace std;
 using namespace ArdourCanvas;
@@ -50,7 +50,7 @@ void
 LineSet::compute_bounding_box () const
 {
 	if (_lines.empty ()) {
-		_bounding_box = boost::optional<Rect> ();
+		_bounding_box = Rect ();
 	} else {
 
 		if (_orientation == Horizontal) {
@@ -100,15 +100,15 @@ LineSet::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 			self = item_to_window (Rect (i->pos - (i->width/2.0), 0, i->pos + (i->width/2.0), _extent));
 		}
 
-		boost::optional<Rect> isect = self.intersection (area);
+		Rect isect = self.intersection (area);
 
 		if (!isect) {
 			continue;
 		}
 
-		Rect intersection (isect.get());
+		Rect intersection (isect);
 
-		set_source_rgba (context, i->color);
+		Gtkmm2ext::set_source_rgba (context, i->color);
 		context->set_line_width (i->width);
 
 		/* Not 100% sure that the computation of the invariant
@@ -131,7 +131,7 @@ LineSet::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 }
 
 void
-LineSet::add (Coord y, Distance width, Color color)
+LineSet::add (Coord y, Distance width, Gtkmm2ext::Color color)
 {
 	begin_change ();
 

@@ -1,27 +1,27 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "pbd/compose.h"
 #include "pbd/demangle.h"
 #include "pbd/convert.h"
-
-#include "ardour/utils.h"
 
 #include "canvas/canvas.h"
 #include "canvas/debug.h"
@@ -259,14 +259,14 @@ Item::set_position (Duple p)
 		return;
 	}
 
-	boost::optional<ArdourCanvas::Rect> bbox = bounding_box ();
-	boost::optional<ArdourCanvas::Rect> pre_change_parent_bounding_box;
+	ArdourCanvas::Rect bbox = bounding_box ();
+	ArdourCanvas::Rect pre_change_parent_bounding_box;
 
 	if (bbox) {
 		/* see the comment in Canvas::item_moved() to understand
 		 * why we use the parent's bounding box here.
 		 */
-		pre_change_parent_bounding_box = item_to_parent (bbox.get());
+		pre_change_parent_bounding_box = item_to_parent (bbox);
 	}
 
 	_position = p;
@@ -410,7 +410,7 @@ Item::unparent ()
 }
 
 void
-Item::reparent (Item* new_parent)
+Item::reparent (Item* new_parent, bool already_added)
 {
 	if (new_parent == _parent) {
 		return;
@@ -429,7 +429,9 @@ Item::reparent (Item* new_parent)
 
 	find_scroll_parent ();
 
-	_parent->add (this);
+	if (!already_added) {
+		_parent->add (this);
+	}
 }
 
 void
@@ -569,14 +571,26 @@ Item::grab_focus ()
 	/* XXX */
 }
 
+void
+Item::size_allocate (Rect const & r)
+{
+	_allocation = r;
+}
+
 /** @return Bounding box in this item's coordinates */
-boost::optional<ArdourCanvas::Rect>
-Item::bounding_box () const
+ArdourCanvas::Rect
+Item::bounding_box (bool for_own_purposes) const
 {
 	if (_bounding_box_dirty) {
 		compute_bounding_box ();
 		assert (!_bounding_box_dirty);
 		add_child_bounding_boxes ();
+	}
+
+	if (!for_own_purposes) {
+		if (_allocation) {
+			return _allocation;
+		}
 	}
 
 	return _bounding_box;
@@ -585,10 +599,10 @@ Item::bounding_box () const
 Coord
 Item::height () const
 {
-	boost::optional<ArdourCanvas::Rect> bb  = bounding_box();
+	ArdourCanvas::Rect bb  = bounding_box();
 
 	if (bb) {
-		return bb->height ();
+		return bb.height ();
 	}
 	return 0;
 }
@@ -596,10 +610,10 @@ Item::height () const
 Coord
 Item::width () const
 {
-	boost::optional<ArdourCanvas::Rect> bb = bounding_box();
+	ArdourCanvas::Rect bb = bounding_box();
 
 	if (bb) {
-		return bb->width ();
+		return bb.width ();
 	}
 
 	return 0;
@@ -609,7 +623,7 @@ void
 Item::redraw () const
 {
 	if (visible() && _bounding_box && _canvas) {
-		_canvas->request_redraw (item_to_window (_bounding_box.get()));
+		_canvas->request_redraw (item_to_window (_bounding_box));
 	}
 }
 
@@ -715,13 +729,13 @@ Item::covers (Duple const & point) const
 		compute_bounding_box ();
 	}
 
-	boost::optional<Rect> r = bounding_box();
+	Rect r = bounding_box();
 
 	if (!r) {
 		return false;
 	}
 
-	return r.get().contains (p);
+	return r.contains (p);
 }
 
 /* nesting/grouping API */
@@ -757,7 +771,7 @@ Item::render_children (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 			continue;
 		}
 
-		boost::optional<Rect> item_bbox = (*i)->bounding_box ();
+		Rect item_bbox = (*i)->bounding_box ();
 
 		if (!item_bbox) {
 #ifdef CANVAS_DEBUG
@@ -768,11 +782,11 @@ Item::render_children (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 			continue;
 		}
 
-		Rect item = (*i)->item_to_window (item_bbox.get(), false);
-		boost::optional<Rect> d = item.intersection (area);
+		Rect item = (*i)->item_to_window (item_bbox, false);
+		Rect d = item.intersection (area);
 
 		if (d) {
-			Rect draw = d.get();
+			Rect draw = d;
 			if (draw.width() && draw.height()) {
 #ifdef CANVAS_DEBUG
 				if (DEBUG_ENABLED(PBD::DEBUG::CanvasRender)) {
@@ -785,7 +799,7 @@ Item::render_children (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 						     << ' '
 						     << (*i)->name
 						     << " item "
-						     << item_bbox.get()
+						     << item_bbox
 						     << " window = "
 						     << item
 						     << " intersect = "
@@ -817,30 +831,67 @@ Item::render_children (Rect const & area, Cairo::RefPtr<Cairo::Context> context)
 }
 
 void
-Item::add_child_bounding_boxes() const
+Item::prepare_for_render_children (Rect const & area) const
 {
-	boost::optional<Rect> self;
-	Rect bbox;
-	bool have_one = false;
-
-	if (_bounding_box) {
-		bbox = _bounding_box.get();
-		have_one = true;
+	if (_items.empty()) {
+		return;
 	}
 
-	for (list<Item*>::const_iterator i = _items.begin(); i != _items.end(); ++i) {
+	ensure_lut ();
+	std::vector<Item*> items = _lut->get (area);
 
-		if (!(*i)->visible()) {
+	for (std::vector<Item*>::const_iterator i = items.begin(); i != items.end(); ++i) {
+
+		if (!(*i)->visible ()) {
 			continue;
 		}
 
-		boost::optional<Rect> item_bbox = (*i)->bounding_box ();
+		Rect item_bbox = (*i)->bounding_box ();
 
 		if (!item_bbox) {
 			continue;
 		}
 
-		Rect group_bbox = (*i)->item_to_parent (item_bbox.get ());
+		Rect item = (*i)->item_to_window (item_bbox, false);
+		Rect d = item.intersection (area);
+
+		if (d) {
+			Rect draw = d;
+			if (draw.width() && draw.height()) {
+				(*i)->prepare_for_render (area);
+			}
+
+		} else {
+			// Item does not intersect with visible canvas area
+		}
+	}
+}
+
+void
+Item::add_child_bounding_boxes (bool include_hidden) const
+{
+	Rect self;
+	Rect bbox;
+	bool have_one = false;
+
+	if (_bounding_box) {
+		bbox = _bounding_box;
+		have_one = true;
+	}
+
+	for (list<Item*>::const_iterator i = _items.begin(); i != _items.end(); ++i) {
+
+		if (!(*i)->visible() && !include_hidden) {
+			continue;
+		}
+
+		Rect item_bbox = (*i)->bounding_box ();
+
+		if (!item_bbox) {
+			continue;
+		}
+
+		Rect group_bbox = (*i)->item_to_parent (item_bbox);
 		if (have_one) {
 			bbox = bbox.extend (group_bbox);
 		} else {
@@ -850,7 +901,7 @@ Item::add_child_bounding_boxes() const
 	}
 
 	if (!have_one) {
-		_bounding_box = boost::optional<Rect> ();
+		_bounding_box = Rect ();
 	} else {
 		_bounding_box = bbox;
 	}
@@ -862,7 +913,18 @@ Item::add (Item* i)
 	/* XXX should really notify canvas about this */
 
 	_items.push_back (i);
-	i->reparent (this);
+	i->reparent (this, true);
+	invalidate_lut ();
+	_bounding_box_dirty = true;
+}
+
+void
+Item::add_front (Item* i)
+{
+	/* XXX should really notify canvas about this */
+
+	_items.push_front (i);
+	i->reparent (this, true);
 	invalidate_lut ();
 	_bounding_box_dirty = true;
 }
@@ -1012,11 +1074,11 @@ Item::child_changed ()
 void
 Item::add_items_at_point (Duple const point, vector<Item const *>& items) const
 {
-	boost::optional<Rect> const bbox = bounding_box ();
+	Rect const bbox = bounding_box ();
 
 	/* Point is in window coordinate system */
 
-	if (!bbox || !item_to_window (bbox.get()).contains (point)) {
+	if (!bbox || !item_to_window (bbox).contains (point)) {
 		return;
 	}
 
@@ -1065,7 +1127,7 @@ Item::stop_tooltip_timeout ()
 void
 Item::dump (ostream& o) const
 {
-	boost::optional<ArdourCanvas::Rect> bb = bounding_box();
+	ArdourCanvas::Rect bb = bounding_box();
 
 	o << _canvas->indent() << whatami() << ' ' << this << " self-Visible ? " << self_visible() << " visible ? " << visible();
 	o << " @ " << position();
@@ -1077,8 +1139,8 @@ Item::dump (ostream& o) const
 #endif
 
 	if (bb) {
-		o << endl << _canvas->indent() << "\tbbox: " << bb.get();
-		o << endl << _canvas->indent() << "\tCANVAS bbox: " << item_to_canvas (bb.get());
+		o << endl << _canvas->indent() << "\tbbox: " << bb;
+		o << endl << _canvas->indent() << "\tCANVAS bbox: " << item_to_canvas (bb);
 	} else {
 		o << " bbox unset";
 	}
@@ -1094,11 +1156,11 @@ Item::dump (ostream& o) const
 		o << " Self-Visible ? " << self_visible();
 		o << " Visible ? " << visible();
 
-		boost::optional<Rect> bb = bounding_box();
+		Rect bb = bounding_box();
 
 		if (bb) {
-			o << endl << _canvas->indent() << "  bbox: " << bb.get();
-			o << endl << _canvas->indent() << "  CANVAS bbox: " << item_to_canvas (bb.get());
+			o << endl << _canvas->indent() << "  bbox: " << bb;
+			o << endl << _canvas->indent() << "  CANVAS bbox: " << item_to_canvas (bb);
 		} else {
 			o << "  bbox unset";
 		}

@@ -1,20 +1,21 @@
 /*
-    Copyright (C) 2014 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2014-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 
@@ -46,16 +47,16 @@ ScrollGroup::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) c
 	 * WITHOUT scroll offsets in effect
 	 */
 
-	boost::optional<Rect> r = bounding_box();
+	Rect r = bounding_box();
 
 	if (!r) {
 		return;
 	}
 
-	Rect self (_position.x + r.get().x0,
-	           _position.y + r.get().y0,
-	           _position.x + r.get().x1,
-	           _position.y + r.get().y1);
+	Rect self (_position.x + r.x0,
+	           _position.y + r.y0,
+	           _position.x + r.x1,
+	           _position.y + r.y1);
 
 	self.x1 = min (_position.x + _canvas->width(), self.x1);
 	self.y1 = min (_position.y + _canvas->height(), self.y1);
@@ -84,7 +85,7 @@ ScrollGroup::scroll_to (Duple const& d)
 bool
 ScrollGroup::covers_canvas (Duple const& d) const
 {
-        boost::optional<Rect> r = bounding_box ();
+        Rect r = bounding_box ();
 
 	if (!r) {
 		return false;
@@ -95,13 +96,13 @@ ScrollGroup::covers_canvas (Duple const& d) const
            within the canvas.
         */
 
-	return r->translate (position()).contains (d);
+	return r.translate (position()).contains (d);
 }
 
 bool
 ScrollGroup::covers_window (Duple const& d) const
 {
-	boost::optional<Rect> r = bounding_box ();
+	Rect r = bounding_box ();
 
 	if (!r) {
 		return false;
@@ -112,5 +113,5 @@ ScrollGroup::covers_window (Duple const& d) const
            within the canvas.
         */
 
-	return r->translate (position()).contains (d);
+	return r.translate (position()).contains (d);
 }

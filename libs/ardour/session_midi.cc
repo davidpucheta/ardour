@@ -1,21 +1,27 @@
 /*
-  Copyright (C) 1999-2002 Paul Davis
-
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2009 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2013 Michael Fisher <mfisher31@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <string>
 #include <cmath>
@@ -35,7 +41,7 @@
 #include "pbd/timersub.h"
 #include "pbd/stacktrace.h"
 
-#include "timecode/time.h"
+#include "temporal/time.h"
 
 #include "ardour/audio_track.h"
 #include "ardour/audioengine.h"
@@ -45,10 +51,10 @@
 #include "ardour/midi_ui.h"
 #include "ardour/profile.h"
 #include "ardour/session.h"
-#include "ardour/slave.h"
+#include "ardour/transport_master.h"
 #include "ardour/ticker.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -130,19 +136,6 @@ Session::mmc_record_pause (MIDI::MachineControl &/*mmc*/)
 void
 Session::mmc_record_strobe (MIDI::MachineControl &/*mmc*/)
 {
-	if (Profile->get_trx()) {
-
-		/* In Tracks Live, there is no concept of punch, so we just
-		   treat RecordStrobe like RecordPause. This violates the MMC
-		   specification.
-		*/
-
-		if (Config->get_mmc_control()) {
-			maybe_enable_record();
-		}
-		return;
-	}
-
 	if (!Config->get_mmc_control() || (_step_editors > 0)) {
 		return;
 	}
@@ -283,7 +276,7 @@ Session::mmc_locate (MIDI::MachineControl &/*mmc*/, const MIDI::byte* mmc_tc)
 		return;
 	}
 
-	framepos_t target_frame;
+	samplepos_t target_sample;
 	Timecode::Time timecode;
 
 	timecode.hours = mmc_tc[0] & 0xf;
@@ -294,10 +287,10 @@ Session::mmc_locate (MIDI::MachineControl &/*mmc*/, const MIDI::byte* mmc_tc)
 	timecode.drop = timecode_drop_frames();
 
 	// Also takes timecode offset into account:
-	timecode_to_sample( timecode, target_frame, true /* use_offset */, false /* use_subframes */ );
+	timecode_to_sample( timecode, target_sample, true /* use_offset */, false /* use_subframes */ );
 
-	if (target_frame > max_framepos) {
-		target_frame = max_framepos;
+	if (target_sample > max_samplepos) {
+		target_sample = max_samplepos;
 	}
 
 	/* Some (all?) MTC/MMC devices do not send a full MTC frame
@@ -306,14 +299,14 @@ Session::mmc_locate (MIDI::MachineControl &/*mmc*/, const MIDI::byte* mmc_tc)
 	   of an MTC slave to become out of date. Catch this.
 	*/
 
-	MTC_Slave* mtcs = dynamic_cast<MTC_Slave*> (_slave);
+	boost::shared_ptr<MTC_TransportMaster> mtcs = boost::dynamic_pointer_cast<MTC_TransportMaster> (transport_master());
 
-	if (mtcs != 0) {
+	if (mtcs) {
 		// cerr << "Locate *with* MTC slave\n";
 		mtcs->handle_locate (mmc_tc);
 	} else {
 		// cerr << "Locate without MTC slave\n";
-		request_locate (target_frame, false);
+		request_locate (target_sample, MustStop);
 	}
 }
 
@@ -335,6 +328,36 @@ Session::mmc_shuttle (MIDI::MachineControl &/*mmc*/, float speed, bool forw)
 	}
 }
 
+boost::shared_ptr<Route>
+Session::get_midi_nth_route_by_id (PresentationInfo::order_t n) const
+{
+	PresentationInfo::Flag f;
+
+	/* These numbers are defined by the MMC specification.
+	 */
+
+	if (n == 318) {
+		f = PresentationInfo::MasterOut;
+	} else if (n == 319) {
+		f = PresentationInfo::MonitorOut;
+	} else {
+		f = PresentationInfo::Route;
+	}
+
+	boost::shared_ptr<RouteList> r = routes.reader ();
+	PresentationInfo::order_t match_cnt = 0;
+
+	for (RouteList::iterator i = r->begin(); i != r->end(); ++i) {
+		if ((*i)->presentation_info().flag_match (f)) {
+			if (match_cnt++ == n) {
+				return *i;
+			}
+		}
+	}
+
+	return boost::shared_ptr<Route>();
+}
+
 void
 Session::mmc_record_enable (MIDI::MachineControl &mmc, size_t trk, bool enabled)
 {
@@ -342,18 +365,27 @@ Session::mmc_record_enable (MIDI::MachineControl &mmc, size_t trk, bool enabled)
 		return;
 	}
 
-	RouteList::iterator i;
-	boost::shared_ptr<RouteList> r = routes.reader();
+	boost::shared_ptr<Route> r = get_midi_nth_route_by_id (trk);
 
-	for (i = r->begin(); i != r->end(); ++i) {
-		AudioTrack *at;
+	if (r) {
+		boost::shared_ptr<AudioTrack> at;
 
-		if ((at = dynamic_cast<AudioTrack*>((*i).get())) != 0) {
-			if (trk == at->remote_control_id()) {
-				at->set_record_enabled (enabled, Controllable::UseGroup);
-				break;
-			}
+		if ((at = boost::dynamic_pointer_cast<AudioTrack> (r))) {
+			at->rec_enable_control()->set_value (enabled, Controllable::UseGroup);
 		}
+	}
+}
+
+void
+Session::mtc_tx_resync_latency (bool playback)
+{
+	if (deletion_in_progress() || !playback) {
+		return;
+	}
+	boost::shared_ptr<Port> mtxport = _midi_ports->mtc_output_port ();
+	if (mtxport) {
+		mtxport->get_connected_latency_range(mtc_out_latency, true);
+		DEBUG_TRACE (DEBUG::MTC, string_compose ("resync latency: %1\n", mtc_out_latency.max));
 	}
 }
 
@@ -363,9 +395,9 @@ Session::mmc_record_enable (MIDI::MachineControl &mmc, size_t trk, bool enabled)
  * @param t time to send.
  */
 int
-Session::send_full_time_code (framepos_t const t, MIDI::pframes_t nframes)
+Session::send_full_time_code (samplepos_t const t, MIDI::pframes_t nframes)
 {
-	/* This function could easily send at a given frame offset, but would
+	/* This function could easily send at a given sample offset, but would
 	 * that be useful?  Does ardour do sub-block accurate locating? [DR] */
 
 	MIDI::byte msg[10];
@@ -376,7 +408,8 @@ Session::send_full_time_code (framepos_t const t, MIDI::pframes_t nframes)
 	if (_engine.freewheeling() || !Config->get_send_mtc()) {
 		return 0;
 	}
-	if (_slave && !_slave->locked()) {
+
+	if (transport_master_is_external() && !transport_master()->locked()) {
 		return 0;
 	}
 
@@ -384,44 +417,38 @@ Session::send_full_time_code (framepos_t const t, MIDI::pframes_t nframes)
 	sample_to_timecode (t, timecode, true /* use_offset */, false /* no subframes */);
 
 	// sample-align outbound to rounded (no subframes) timecode
-	framepos_t mtc_tc;
+	samplepos_t mtc_tc;
 	timecode_to_sample(timecode, mtc_tc, true, false);
 	outbound_mtc_timecode_frame = mtc_tc;
-
 	transmitting_timecode_time = timecode;
 
-	double const quarter_frame_duration = ((framecnt_t) _frames_per_timecode_frame) / 4.0;
+	sampleoffset_t mtc_offset = mtc_out_latency.max;
+
+	// only if rolling.. ?
+	outbound_mtc_timecode_frame += mtc_offset;
+
+	// outbound_mtc_timecode_frame needs to be >= _transport_sample
+	// or a new full timecode will be queued next cycle.
+	while (outbound_mtc_timecode_frame < t) {
+		Timecode::increment (transmitting_timecode_time, config.get_subframes_per_frame());
+		outbound_mtc_timecode_frame += _samples_per_timecode_frame;
+	}
+
+	double const quarter_frame_duration = ((samplecnt_t) _samples_per_timecode_frame) / 4.0;
 	if (ceil((t - mtc_tc) / quarter_frame_duration) > 0) {
 		Timecode::increment (transmitting_timecode_time, config.get_subframes_per_frame());
-		outbound_mtc_timecode_frame += _frames_per_timecode_frame;
+		outbound_mtc_timecode_frame += _samples_per_timecode_frame;
 	}
 
-	DEBUG_TRACE (DEBUG::MTC, string_compose ("Full MTC TC %1\n", outbound_mtc_timecode_frame));
+	DEBUG_TRACE (DEBUG::MTC, string_compose ("Full MTC TC %1 (off %2)\n", outbound_mtc_timecode_frame, mtc_offset));
 
-	// I don't understand this bit yet.. [DR]
-	// I do [rg]:
-	// according to MTC spec 24, 30 drop and 30 non-drop TC, the frame-number represented by 8 quarter frames must be even.
+	/* according to MTC spec 24, 30 drop and 30 non-drop TC, the frame-number represented by 8 quarter frames must be even. */
 	if (((mtc_timecode_bits >> 5) != MIDI::MTC_25_FPS) && (transmitting_timecode_time.frames % 2)) {
-		// start MTC quarter frame transmission on an even frame
+		/* start MTC quarter frame transmission on an even frame */
 		Timecode::increment (transmitting_timecode_time, config.get_subframes_per_frame());
-		outbound_mtc_timecode_frame += _frames_per_timecode_frame;
+		outbound_mtc_timecode_frame += _samples_per_timecode_frame;
 	}
 
-#if 0 // compensate for audio latency  -- disabled [rg]
-	/* this needs more thought and work.
-	 * the proper solution will be to just offset MTC by the MIDI port's latency.
-	 *
-	 * using worst_playback_latency() is wrong when the generated MTC is used to sync
-	 * clients which send audio to Ardour for recording.
-	 * worst_capture_latency() vs. worst_playback_latency()
-	 *
-	 * NB. similarly to session_ltc, the offset should be subtracted from the timecode to send,
-	 * instead of being added to timestamp when to send the timecode.
-	 * Otherwise the timestamp may not fall into the jack-cycle of the current _transport frame.
-	 * and no MTC QF will be sent.
-	 */
-	outbound_mtc_timecode_frame += worst_playback_latency();
-#endif
 	next_quarter_frame_to_send = 0;
 
 	// Sync slave to the same Timecode time as we are on
@@ -440,7 +467,7 @@ Session::send_full_time_code (framepos_t const t, MIDI::pframes_t nframes)
 	// Send message at offset 0, sent time is for the start of this cycle
 
 	MidiBuffer& mb (_midi_ports->mtc_output_port()->get_midi_buffer (nframes));
-	mb.push_back (Port::port_offset(), sizeof (msg), msg);
+	mb.push_back (0, Evoral::MIDI_EVENT, sizeof (msg), msg);
 
 	_pframes_since_last_mtc = 0;
 	return 0;
@@ -454,13 +481,20 @@ Session::send_full_time_code (framepos_t const t, MIDI::pframes_t nframes)
  * earlier already this cycle by send_full_time_code)
  */
 int
-Session::send_midi_time_code_for_cycle (framepos_t start_frame, framepos_t end_frame, ARDOUR::pframes_t nframes)
+Session::send_midi_time_code_for_cycle (samplepos_t start_sample, samplepos_t end_sample, ARDOUR::pframes_t nframes)
 {
+	// start_sample == start_sample  for normal cycles
+	// start_sample > _transport_sample  for split cycles
 	if (_engine.freewheeling() || !_send_qf_mtc || transmitting_timecode_time.negative || (next_quarter_frame_to_send < 0)) {
 		// cerr << "(MTC) Not sending MTC\n";
 		return 0;
 	}
-	if (_slave && !_slave->locked()) {
+	if (transport_master_is_external() && !transport_master()->locked()) {
+		return 0;
+	}
+
+	if (_transport_speed < 0) {
+		// we don't support rolling backwards
 		return 0;
 	}
 
@@ -476,61 +510,66 @@ Session::send_midi_time_code_for_cycle (framepos_t start_frame, framepos_t end_f
 	assert (next_quarter_frame_to_send <= 7);
 
 	/* Duration of one quarter frame */
-	double const quarter_frame_duration = _frames_per_timecode_frame / 4.0;
+	double const quarter_frame_duration = _samples_per_timecode_frame / 4.0;
 
 	DEBUG_TRACE (DEBUG::MTC, string_compose ("TF %1 SF %2 MT %3 QF %4 QD %5\n",
-				_transport_frame, start_frame, outbound_mtc_timecode_frame,
-				next_quarter_frame_to_send, quarter_frame_duration));
+	                                         _transport_sample, start_sample, outbound_mtc_timecode_frame,
+	                                         next_quarter_frame_to_send, quarter_frame_duration));
 
-	if (rint(outbound_mtc_timecode_frame + (next_quarter_frame_to_send * quarter_frame_duration)) < _transport_frame) {
-		send_full_time_code (_transport_frame, nframes);
+	if (rint(outbound_mtc_timecode_frame + (next_quarter_frame_to_send * quarter_frame_duration)) < _transport_sample) {
+		// send full timecode and set outbound_mtc_timecode_frame, next_quarter_frame_to_send
+		send_full_time_code (_transport_sample, nframes);
+	}
+
+	if (rint(outbound_mtc_timecode_frame + (next_quarter_frame_to_send * quarter_frame_duration)) < start_sample) {
+		// no QF for this cycle
 		return 0;
 	}
 
 	/* Send quarter frames for this cycle */
-	while (end_frame > rint(outbound_mtc_timecode_frame + (next_quarter_frame_to_send * quarter_frame_duration))) {
+	while (end_sample > rint(outbound_mtc_timecode_frame + (next_quarter_frame_to_send * quarter_frame_duration))) {
 
-		DEBUG_TRACE (DEBUG::MTC, string_compose ("next frame to send: %1\n", next_quarter_frame_to_send));
+		DEBUG_TRACE (DEBUG::MTC, string_compose ("next sample to send: %1\n", next_quarter_frame_to_send));
 
 		switch (next_quarter_frame_to_send) {
-			case 0:
-				mtc_msg[1] = 0x00 | (transmitting_timecode_time.frames & 0xf);
-				break;
-			case 1:
-				mtc_msg[1] = 0x10 | ((transmitting_timecode_time.frames & 0xf0) >> 4);
-				break;
-			case 2:
-				mtc_msg[1] = 0x20 | (transmitting_timecode_time.seconds & 0xf);
-				break;
-			case 3:
-				mtc_msg[1] = 0x30 | ((transmitting_timecode_time.seconds & 0xf0) >> 4);
-				break;
-			case 4:
-				mtc_msg[1] = 0x40 | (transmitting_timecode_time.minutes & 0xf);
-				break;
-			case 5:
-				mtc_msg[1] = 0x50 | ((transmitting_timecode_time.minutes & 0xf0) >> 4);
-				break;
-			case 6:
-				mtc_msg[1] = 0x60 | ((mtc_timecode_bits | transmitting_timecode_time.hours) & 0xf);
-				break;
-			case 7:
-				mtc_msg[1] = 0x70 | (((mtc_timecode_bits | transmitting_timecode_time.hours) & 0xf0) >> 4);
-				break;
+		case 0:
+			mtc_msg[1] = 0x00 | (transmitting_timecode_time.frames & 0xf);
+			break;
+		case 1:
+			mtc_msg[1] = 0x10 | ((transmitting_timecode_time.frames & 0xf0) >> 4);
+			break;
+		case 2:
+			mtc_msg[1] = 0x20 | (transmitting_timecode_time.seconds & 0xf);
+			break;
+		case 3:
+			mtc_msg[1] = 0x30 | ((transmitting_timecode_time.seconds & 0xf0) >> 4);
+			break;
+		case 4:
+			mtc_msg[1] = 0x40 | (transmitting_timecode_time.minutes & 0xf);
+			break;
+		case 5:
+			mtc_msg[1] = 0x50 | ((transmitting_timecode_time.minutes & 0xf0) >> 4);
+			break;
+		case 6:
+			mtc_msg[1] = 0x60 | ((mtc_timecode_bits | transmitting_timecode_time.hours) & 0xf);
+			break;
+		case 7:
+			mtc_msg[1] = 0x70 | (((mtc_timecode_bits | transmitting_timecode_time.hours) & 0xf0) >> 4);
+			break;
 		}
 
-		const framepos_t msg_time = rint(outbound_mtc_timecode_frame	+ (quarter_frame_duration * next_quarter_frame_to_send));
+		const samplepos_t msg_time = rint (outbound_mtc_timecode_frame + (quarter_frame_duration * next_quarter_frame_to_send));
 
 		// This message must fall within this block or something is broken
-		assert (msg_time >= start_frame);
-		assert (msg_time < end_frame);
+		assert (msg_time >= start_sample);
+		assert (msg_time < end_sample);
 
-		/* convert from session frames back to JACK frames using the transport speed */
-		ARDOUR::pframes_t const out_stamp = (msg_time - start_frame) / _transport_speed;
+		/* convert from session samples back to JACK samples using the transport speed */
+		ARDOUR::pframes_t const out_stamp = (msg_time - start_sample) / _transport_speed;
 		assert (out_stamp < nframes);
 
 		MidiBuffer& mb (_midi_ports->mtc_output_port()->get_midi_buffer(nframes));
-		if (!mb.push_back (out_stamp, 2, mtc_msg)) {
+		if (!mb.push_back (out_stamp, Evoral::MIDI_EVENT, 2, mtc_msg)) {
 			error << string_compose(_("Session: cannot send quarter-frame MTC message (%1)"), strerror (errno))
 			      << endmsg;
 			return -1;
@@ -538,11 +577,11 @@ Session::send_midi_time_code_for_cycle (framepos_t start_frame, framepos_t end_f
 
 #ifndef NDEBUG
 		if (DEBUG_ENABLED(DEBUG::MTC)) {
-			DEBUG_STR_DECL(foo)
+			DEBUG_STR_DECL(foo);
 			DEBUG_STR_APPEND(foo,"sending ");
 			DEBUG_STR_APPEND(foo, transmitting_timecode_time);
 			DEBUG_TRACE (DEBUG::MTC, string_compose ("%1 qfm = %2, stamp = %3\n", DEBUG_STR(foo).str(), next_quarter_frame_to_send,
-								 out_stamp));
+			                                         out_stamp));
 		}
 #endif
 
@@ -555,9 +594,8 @@ Session::send_midi_time_code_for_cycle (framepos_t start_frame, framepos_t end_f
 			// Increment timecode time twice
 			Timecode::increment (transmitting_timecode_time, config.get_subframes_per_frame());
 			Timecode::increment (transmitting_timecode_time, config.get_subframes_per_frame());
-			// Re-calculate timing of first quarter frame
-			//timecode_to_sample( transmitting_timecode_time, outbound_mtc_timecode_frame, true /* use_offset */, false );
-			outbound_mtc_timecode_frame += 2.0 * _frames_per_timecode_frame;
+			// Increment timing of first quarter frame
+			outbound_mtc_timecode_frame += 2.0 * _samples_per_timecode_frame;
 		}
 	}
 
@@ -571,12 +609,7 @@ Session::send_midi_time_code_for_cycle (framepos_t start_frame, framepos_t end_f
 void
 Session::send_immediate_mmc (MachineControlCommand c)
 {
-	if (AudioEngine::instance()->in_process_thread()) {
-		_mmc->send (c, Port::port_offset());
-	} else {
-		_mmc->send (c, 0);
-	}
-
+	_mmc->send (c, 0);
 }
 
 bool
@@ -608,13 +641,12 @@ Session::mmc_step_timeout ()
 	return true;
 }
 
-/***********************************************************************
- OUTBOUND SYSTEM COMMON STUFF
-**********************************************************************/
-
+/* *********************************************************************
+ * OUTBOUND SYSTEM COMMON STUFF
+ **********************************************************************/
 
 void
-Session::send_song_position_pointer (framepos_t)
+Session::send_song_position_pointer (samplepos_t)
 {
 	if (midi_clock) {
 		/* Do nothing for the moment */
@@ -628,18 +660,6 @@ Session::start_midi_thread ()
 	midi_control_ui = new MidiControlUI (*this);
 	midi_control_ui->run ();
 	return 0;
-}
-
-boost::shared_ptr<ARDOUR::Port>
-Session::midi_input_port () const
-{
-	return _midi_ports->midi_input_port ();
-}
-
-boost::shared_ptr<ARDOUR::Port>
-Session::midi_output_port () const
-{
-	return _midi_ports->midi_output_port ();
 }
 
 boost::shared_ptr<ARDOUR::Port>
@@ -666,6 +686,12 @@ Session::scene_input_port () const
 	return _midi_ports->scene_input_port ();
 }
 
+boost::shared_ptr<AsyncMIDIPort>
+Session::vkbd_output_port () const
+{
+	return _midi_ports->vkbd_output_port ();
+}
+
 boost::shared_ptr<MidiPort>
 Session::midi_clock_output_port () const
 {
@@ -673,18 +699,103 @@ Session::midi_clock_output_port () const
 }
 
 boost::shared_ptr<MidiPort>
-Session::midi_clock_input_port () const
-{
-	return _midi_ports->midi_clock_input_port ();
-}
-boost::shared_ptr<MidiPort>
 Session::mtc_output_port () const
 {
 	return _midi_ports->mtc_output_port ();
 }
-boost::shared_ptr<MidiPort>
-Session::mtc_input_port () const
+
+void
+Session::midi_track_presentation_info_changed (PropertyChange const& what_changed, boost::weak_ptr<MidiTrack> mt)
 {
-	return _midi_ports->mtc_input_port ();
+	if (!Config->get_midi_input_follows_selection()) {
+		return;
+	}
+
+	if (!what_changed.contains (Properties::selected)) {
+		return;
+	}
+
+	boost::shared_ptr<MidiTrack> new_midi_target (mt.lock ());
+
+	if (new_midi_target->is_selected()) {
+		rewire_selected_midi (new_midi_target);
+	}
 }
 
+void
+Session::rewire_selected_midi (boost::shared_ptr<MidiTrack> new_midi_target)
+{
+	if (!new_midi_target) {
+		return;
+	}
+
+	boost::shared_ptr<MidiTrack> old_midi_target = current_midi_target.lock ();
+
+	if (new_midi_target == old_midi_target) {
+		return;
+	}
+
+	vector<string> msp;
+	AudioEngine::instance()->get_midi_selection_ports (msp);
+
+	if (!msp.empty()) {
+
+		for (vector<string>::const_iterator p = msp.begin(); p != msp.end(); ++p) {
+			PortManager::MidiPortInformation mpi (AudioEngine::instance()->midi_port_information (*p));
+
+			/* if a port is marked for control data, do not
+			 * disconnect it from everything since it may also be
+			 * used via a control surface or some other
+			 * functionality.
+			 */
+
+			if (0 == (mpi.properties & MidiPortControl)) {
+				/* disconnect the port from everything */
+				AudioEngine::instance()->disconnect (*p);
+			} else {
+				/* only disconnect from non-control ports */
+				vector<string> port_connections;
+				AudioEngine::instance()->get_connections (*p, port_connections);
+				for (vector<string>::iterator i = port_connections.begin(); i != port_connections.end(); ++i) {
+					/* test if (*i) is a control-surface input port */
+					if (AudioEngine::instance()->port_is_control_only (*i)) {
+						continue;
+					}
+					AudioEngine::instance()->disconnect (*p, *i);
+				}
+			}
+			/* connect it to the new target */
+			new_midi_target->input()->connect (new_midi_target->input()->nth(0), (*p), this);
+		}
+	}
+
+	current_midi_target = new_midi_target;
+}
+
+void
+Session::rewire_midi_selection_ports ()
+{
+	if (!Config->get_midi_input_follows_selection()) {
+		return;
+	}
+
+	boost::shared_ptr<MidiTrack> target = current_midi_target.lock();
+
+	if (!target) {
+		return;
+	}
+
+	vector<string> msp;
+	AudioEngine::instance()->get_midi_selection_ports (msp);
+
+	if (msp.empty()) {
+		return;
+	}
+
+	target->input()->disconnect (this);
+
+	for (vector<string>::const_iterator p = msp.begin(); p != msp.end(); ++p) {
+		AudioEngine::instance()->disconnect (*p);
+		target->input()->connect (target->input()->nth (0), (*p), this);
+	}
+}

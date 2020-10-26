@@ -1,22 +1,25 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2013 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2014 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <string>
 
@@ -24,7 +27,7 @@
 #include <glibmm/fileutils.h>
 
 #include "pbd/xml++.h"
-#include "pbd/convert.h"
+#include "pbd/string_convert.h"
 #include "pbd/enumwriter.h"
 #include "pbd/localtime_r.h"
 
@@ -37,7 +40,7 @@
 #include "ardour/export_timespan.h"
 #include "ardour/utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 using namespace Glib;
@@ -49,6 +52,7 @@ namespace ARDOUR
 ExportFilename::ExportFilename (Session & session) :
   include_label (false),
   include_session (false),
+  use_session_snapshot_name (false),
   include_revision (false),
   include_channel_config (false),
   include_format_name (false),
@@ -86,18 +90,19 @@ ExportFilename::get_state ()
 
 	FieldPair dir = analyse_folder();
 	child = node->add_child ("Folder");
-	child->add_property ("relative", dir.first ? "true" : "false");
-	child->add_property ("path", dir.second);
+	child->set_property ("relative", dir.first);
+	child->set_property ("path", dir.second);
 
 	add_field (node, "label", include_label, label);
 	add_field (node, "session", include_session);
+	add_field (node, "snapshot", use_session_snapshot_name);
 	add_field (node, "timespan", include_timespan);
 	add_field (node, "revision", include_revision);
 	add_field (node, "time", include_time, enum_2_string (time_format));
 	add_field (node, "date", include_date, enum_2_string (date_format));
 
 	XMLNode * extra_node = new XMLNode ("ExportRevision");
-	extra_node->add_property ("revision", to_string (revision, std::dec));
+	extra_node->set_property ("revision", revision);
 	session.add_extra_xml (*extra_node);
 
 	return *node;
@@ -107,7 +112,6 @@ int
 ExportFilename::set_state (const XMLNode & node)
 {
 	XMLNode * child;
-	XMLProperty * prop;
 	FieldPair pair;
 
 	child = node.child ("Folder");
@@ -115,15 +119,14 @@ ExportFilename::set_state (const XMLNode & node)
 
 	folder = "";
 
-	if ((prop = child->property ("relative"))) {
-		if (string_is_affirmative (prop->value())) {
-			folder = session.session_directory().root_path();
-		}
+	bool is_relative;
+	if (child->get_property ("relative", is_relative) && is_relative) {
+		folder = session.session_directory ().root_path ();
 	}
 
-	if ((prop = child->property ("path"))) {
-		std::string tmp;
-		tmp = Glib::build_filename (folder, prop->value());
+	std::string tmp;
+	if (child->get_property ("path", tmp)) {
+		tmp = Glib::build_filename (folder, tmp);
 		if (!Glib::file_test (tmp, Glib::FILE_TEST_EXISTS)) {
 			warning << string_compose (_("Existing export folder for this session (%1) does not exist - ignored"), tmp) << endmsg;
 		} else {
@@ -131,7 +134,7 @@ ExportFilename::set_state (const XMLNode & node)
 		}
 	}
 
-	if (folder.empty()) {
+	if (folder.empty() || !Glib::file_test (folder, FileTest (FILE_TEST_EXISTS | G_FILE_TEST_IS_DIR))) {
 		folder = session.session_directory().export_path();
 	}
 
@@ -141,6 +144,9 @@ ExportFilename::set_state (const XMLNode & node)
 
 	pair = get_field (node, "session");
 	include_session = pair.first;
+
+	pair = get_field (node, "snapshot");
+	use_session_snapshot_name = pair.first;
 
 	pair = get_field (node, "timespan");
 	include_timespan = pair.first;
@@ -162,8 +168,8 @@ ExportFilename::set_state (const XMLNode & node)
 		extra_node = session.instant_xml ("ExportRevision");
 	}
 
-	if (extra_node && (prop = extra_node->property ("revision"))) {
-		revision = atoi (prop->value());
+	if (extra_node) {
+		extra_node->get_property ("revision", revision);
 	}
 
 	return 0;
@@ -182,14 +188,17 @@ ExportFilename::get_path (ExportFormatSpecPtr format) const
 			&& !include_timespan
 			&& !include_channel_config
 			&& !include_channel
-			&& !include_date
-			&& !include_format_name) {
+			&& !include_date) {
 		with_timespan = true;
 	}
 
 	if (include_session) {
 		path += filename_empty ? "" : "_";
-		path += session.name();
+		if (use_session_snapshot_name) {
+			path += session.snap_name();
+		} else {
+			path += session.name();
+		}
 		filename_empty = false;
 	}
 
@@ -202,7 +211,7 @@ ExportFilename::get_path (ExportFormatSpecPtr format) const
 	if (include_revision) {
 		path += filename_empty ? "" : "_";
 		path += "r";
-		path += to_string (revision, std::dec);
+		path += to_string (revision);
 		filename_empty = false;
 	}
 
@@ -221,7 +230,7 @@ ExportFilename::get_path (ExportFormatSpecPtr format) const
 	if (include_channel) {
 		path += filename_empty ? "" : "_";
 		path += "channel";
-		path += to_string (channel, std::dec);
+		path += to_string (channel);
 		filename_empty = false;
 	}
 
@@ -237,7 +246,7 @@ ExportFilename::get_path (ExportFormatSpecPtr format) const
 		filename_empty = false;
 	}
 
-	if (include_format_name) {
+	if (include_format_name && format) {
 		path += filename_empty ? "" : "_";
 		path += format->name();
 		filename_empty = false;
@@ -247,8 +256,10 @@ ExportFilename::get_path (ExportFormatSpecPtr format) const
 		path = "export";
 	}
 
-	path += ".";
-	path += format->extension ();
+	if (format) {
+		path += ".";
+		path += format->extension ();
+	}
 
 	path = legalize_for_universal_path (path);
 
@@ -356,10 +367,10 @@ ExportFilename::add_field (XMLNode * node, string const & name, bool enabled, st
 		return;
 	}
 
-	child->add_property ("name", name);
-	child->add_property ("enabled", enabled ? "true" : "false");
+	child->set_property ("name", name);
+	child->set_property ("enabled", enabled);
 	if (!value.empty()) {
-		child->add_property ("value", value);
+		child->set_property ("value", value);
 	}
 }
 
@@ -372,20 +383,11 @@ ExportFilename::get_field (XMLNode const & node, string const & name)
 	XMLNodeList children = node.children();
 
 	for (XMLNodeList::iterator it = children.begin(); it != children.end(); ++it) {
-		XMLProperty * prop = (*it)->property ("name");
-		if (prop && !prop->value().compare (name)) {
+		std::string str;
+		if ((*it)->get_property ("name", str) && name == str) {
 
-			prop = (*it)->property ("enabled");
-			if (prop && !prop->value().compare ("true")) {
-				pair.first = true;
-			} else {
-				pair.first = false;
-			}
-
-			prop = (*it)->property ("value");
-			if (prop) {
-				pair.second = prop->value();
-			}
+			(*it)->get_property ("enabled", pair.first);
+			(*it)->get_property ("value", pair.second);
 
 			return pair;
 		}

@@ -1,31 +1,28 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1999-2015 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __libpbd_configuration_variable_h__
 #define __libpbd_configuration_variable_h__
 
-#include <iostream>
-#include <sstream>
 #include <string>
 
 #include "pbd/xml++.h"
-#include "pbd/convert.h"
+#include "pbd/string_convert.h"
 #include "pbd/libpbd_visibility.h"
 
 namespace PBD {
@@ -63,9 +60,7 @@ class /*LIBPBD_API*/ ConfigVariable : public ConfigVariableBase
 	}
 
 	std::string get_as_string () const {
-		std::ostringstream ss;
-		ss << value;
-		return ss.str ();
+		return to_string<T>(value);
 	}
 
 	virtual bool set (T val) {
@@ -79,9 +74,7 @@ class /*LIBPBD_API*/ ConfigVariable : public ConfigVariableBase
 	}
 
 	virtual void set_from_string (std::string const & s) {
-		std::stringstream ss;
-		ss << s;
-		ss >> value;
+		value = string_to<T>(s);
 	}
 
   protected:
@@ -125,43 +118,6 @@ class /*LIBPBD_API*/ ConfigVariable<std::string> : public ConfigVariableBase
 	std::string value;
 };
 
-template<>
-class /*LIBPBD_API*/ ConfigVariable<bool> : public ConfigVariableBase
-{
-  public:
-
-	ConfigVariable (std::string str) : ConfigVariableBase (str), value (false) {}
-	ConfigVariable (std::string str, bool val) : ConfigVariableBase (str), value (val) {}
-
-	bool get() const {
-		return value;
-	}
-
-	std::string get_as_string () const {
-		std::ostringstream ss;
-		ss << value;
-		return ss.str ();
-	}
-
-	virtual bool set (bool val) {
-		if (val == value) {
-			miss ();
-			return false;
-		}
-		value = val;
-		notify ();
-		return true;
-	}
-
-	void set_from_string (std::string const & s) {
-		value = PBD::string_is_affirmative (s);
-	}
-
-  protected:
-	virtual bool get_for_save() { return value; }
-	bool value;
-};
-
 template<class T>
 class /*LIBPBD_API*/ ConfigVariableWithMutation : public ConfigVariable<T>
 {
@@ -178,11 +134,7 @@ class /*LIBPBD_API*/ ConfigVariableWithMutation : public ConfigVariable<T>
 	}
 
 	void set_from_string (std::string const & s) {
-		T v;
-		std::stringstream ss;
-		ss << s;
-		ss >> v;
-		set (v);
+		set (string_to<T>(s));
 	}
 
   protected:

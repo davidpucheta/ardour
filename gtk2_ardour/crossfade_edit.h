@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2013 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2007-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_xfade_edit_h__
 #define __gtk_ardour_xfade_edit_h__
@@ -28,7 +32,7 @@
 
 #include "canvas/canvas.h"
 
-#include "evoral/Curve.hpp"
+#include "evoral/Curve.h"
 #include "ardour/session_handle.h"
 
 #include "ardour_dialog.h"
@@ -44,12 +48,15 @@ namespace ArdourCanvas {
 	class Rectangle;
 	class Line;
 	class Polygon;
+}
+
+namespace ArdourWaveview {
 	class WaveView;
 }
 
 class CrossfadeEditor : public ArdourDialog
 {
-  public:
+public:
 	CrossfadeEditor (ARDOUR::Session*, boost::shared_ptr<ARDOUR::Crossfade>, double miny, double maxy);
 	~CrossfadeEditor ();
 
@@ -57,25 +64,24 @@ class CrossfadeEditor : public ArdourDialog
 
 	static const double canvas_border;
 
-	/* these are public so that a caller/subclass can make them do the right thing.
-	 */
+	/* these are public so that a caller/subclass can make them do the right thing. */
 
 	Gtk::Button* cancel_button;
 	Gtk::Button* ok_button;
 
 	struct PresetPoint {
-	    double x;
-	    double y;
+		double x;
+		double y;
 
-	    PresetPoint (double a, double b)
-		    : x (a), y (b) {}
+		PresetPoint (double a, double b)
+			: x (a), y (b) {}
 	};
 
 	struct Preset : public std::list<PresetPoint> {
-	    const char* name;
-	    const char* image_name;
+		const char* name;
+		const char* image_name;
 
-	    Preset (const char* n, const char* x) : name (n), image_name (x) {}
+		Preset (const char* n, const char* x) : name (n), image_name (x) {}
 	};
 
 	typedef std::list<Preset*> Presets;
@@ -83,46 +89,46 @@ class CrossfadeEditor : public ArdourDialog
 	static Presets* fade_in_presets;
 	static Presets* fade_out_presets;
 
-  protected:
+protected:
 	bool on_key_press_event (GdkEventKey*);
 	bool on_key_release_event (GdkEventKey*);
 
-  private:
+private:
 	boost::shared_ptr<ARDOUR::Crossfade> xfade;
 
 	Gtk::VBox vpacker;
 
 	struct Point {
-	    ~Point();
+		~Point();
 
-	    ArdourCanvas::Rectangle* box;
-	    ArdourCanvas::PolyLine* curve;
-	    double x;
-	    double y;
+		ArdourCanvas::Rectangle* box;
+		ArdourCanvas::PolyLine* curve;
+		double x;
+		double y;
 
-	    static const int32_t size;
+		static const int32_t size;
 
-	    void move_to (double x, double y, double xfract, double yfract);
+		void move_to (double x, double y, double xfract, double yfract);
 	};
 
 	struct PointSorter {
-	    bool operator() (const CrossfadeEditor::Point* a, const CrossfadeEditor::Point *b) {
-		    return a->x < b->x;
-	    }
+		bool operator() (const CrossfadeEditor::Point* a, const CrossfadeEditor::Point *b) {
+			return a->x < b->x;
+		}
 	};
 
 	ArdourCanvas::Rectangle*   toplevel;
 	ArdourCanvas::GtkCanvas* canvas;
 
 	struct Half {
-	    ArdourCanvas::PolyLine* line;
-	    ArdourCanvas::Polygon*  shading;
-	    std::list<Point*>       points;
-	    ARDOUR::AutomationList  normative_curve; /* 0 - 1.0, linear */
-	    ARDOUR::AutomationList  gain_curve;      /* 0 - 2.0, gain mapping */
-	    std::vector<ArdourCanvas::WaveView*>  waves;
+		ArdourCanvas::PolyLine* line;
+		ArdourCanvas::Polygon*  shading;
+		std::list<Point*>       points;
+		ARDOUR::AutomationList  normative_curve; /* 0 - 1.0, linear */
+		ARDOUR::AutomationList  gain_curve;      /* 0 - 2.0, gain mapping */
+		std::vector<ArdourWaveView::WaveView*>  waves;
 
-	    Half();
+		Half();
 	};
 
 	enum WhichFade {

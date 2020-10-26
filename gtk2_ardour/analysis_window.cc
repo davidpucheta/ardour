@@ -1,22 +1,25 @@
 /*
-    Copyright (C) 2006 Paul Davis
-    Written by Sampo Savolainen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm2ext/gtk_ui.h>
 #include <gtkmm/stock.h>
@@ -36,27 +39,21 @@
 #include "selection.h"
 #include "audio_region_view.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
 
-AnalysisWindow::AnalysisWindow() :
-
-	  source_selection_label       (_("Signal source")),
-	  source_selection_ranges_rb   (_("Selected ranges")),
-	  source_selection_regions_rb  (_("Selected regions")),
-
-	  display_model_label                   (_("Display model")),
-	  display_model_composite_separate_rb   (_("Composite graphs for each track")),
-	  display_model_composite_all_tracks_rb (_("Composite graph of all tracks")),
-
-	  show_minmax_button	 (_("Show frequency power range")),
-	  show_normalized_button (_("Normalize values")),
-
-	  fft_graph (16384)
+AnalysisWindow::AnalysisWindow()
+	: source_selection_label       (_("Signal source"))
+	, source_selection_ranges_rb   (_("Selected ranges"))
+	, source_selection_regions_rb  (_("Selected regions"))
+	, show_minmax_button           (_("Show frequency power range"))
+	, show_normalized_button       (_("Fit dB range"))
+	, show_proportional_button     (_("Proportional Spectrum, -18dB"))
+	, fft_graph                    (16384)
 {
-	set_name(_("FFT analysis window"));
+	set_name  (_("FFT analysis window"));
 	set_title (_("Spectral Analysis"));
 
 	track_list_ready = false;
@@ -107,49 +104,31 @@ AnalysisWindow::AnalysisWindow() :
 				sigc::bind ( sigc::mem_fun(*this, &AnalysisWindow::source_selection_changed), &source_selection_regions_rb));
 	}
 
-	vbox.pack_start(hseparator1, false, false);
-
-	// "Display model"
-	vbox.pack_start(display_model_label, false, false);
-	{
-		Gtk::RadioButtonGroup group = display_model_composite_separate_rb.get_group();
-		display_model_composite_all_tracks_rb.set_group (group);
-
-		display_model_composite_separate_rb.set_active();
-
-		vbox.pack_start (display_model_composite_separate_rb,   false, false);
-		vbox.pack_start (display_model_composite_all_tracks_rb, false, false);
-
-		// "Composite graphs for all tracks"
-		display_model_composite_separate_rb.signal_toggled().connect (
-				sigc::bind ( sigc::mem_fun(*this, &AnalysisWindow::display_model_changed), &display_model_composite_separate_rb));
-
-		// "Composite graph of all tracks"
-		display_model_composite_all_tracks_rb.signal_toggled().connect (
-				sigc::bind ( sigc::mem_fun(*this, &AnalysisWindow::display_model_changed), &display_model_composite_all_tracks_rb));
-	}
-
 	// Analyze button
 
 	refresh_button.set_name("EditorGTKButton");
 	refresh_button.set_label(_("Re-analyze data"));
 
+
 	refresh_button.signal_clicked().connect ( sigc::bind ( sigc::mem_fun(*this, &AnalysisWindow::analyze_data), &refresh_button));
 
 	vbox.pack_start(refresh_button, false, false, 10);
 
+	vbox.pack_start(hseparator1, false, false);
 
 	// Feature checkboxes
+
+	// normalize, fit y-range
+	show_normalized_button.signal_toggled().connect( sigc::mem_fun(*this, &AnalysisWindow::show_normalized_changed));
+	vbox.pack_start(show_normalized_button, false, false);
 
 	// minmax
 	show_minmax_button.signal_toggled().connect( sigc::mem_fun(*this, &AnalysisWindow::show_minmax_changed));
 	vbox.pack_start(show_minmax_button, false, false);
 
-	// normalize
-	show_normalized_button.signal_toggled().connect( sigc::mem_fun(*this, &AnalysisWindow::show_normalized_changed));
-	vbox.pack_start(show_normalized_button, false, false);
-
-
+	// pink-noise / proportional spectrum
+	show_proportional_button.signal_toggled().connect( sigc::mem_fun(*this, &AnalysisWindow::show_proportional_changed));
+	vbox.pack_start(show_proportional_button, false, false);
 
 
 
@@ -183,6 +162,12 @@ void
 AnalysisWindow::show_normalized_changed()
 {
 	fft_graph.set_show_normalized(show_normalized_button.get_active());
+}
+
+void
+AnalysisWindow::show_proportional_changed()
+{
+	fft_graph.set_show_proportioanl(show_proportional_button.get_active());
 }
 
 void
@@ -273,12 +258,12 @@ AnalysisWindow::analyze_data (Gtk::Button * /*button*/)
 
 				// std::cerr << "Analyzing ranges on track " << rui->route()->name() << std::endl;
 
-				FFTResult *res = fft_graph.prepareResult(rui->color(), rui->route()->name());
+				FFTResult *res = fft_graph.prepareResult(rui->route_color(), rui->route()->name());
 				for (std::list<AudioRange>::iterator j = ts.begin(); j != ts.end(); ++j) {
 
 					int n;
 					for (int channel = 0; channel < n_inputs; channel++) {
-						framecnt_t x = 0;
+						samplecnt_t x = 0;
 
 						while (x < j->length()) {
 							// TODO: What about stereo+ channels? composite all to one, I guess
@@ -308,7 +293,7 @@ AnalysisWindow::analyze_data (Gtk::Button * /*button*/)
 				Gtk::TreeModel::Row newrow = *(tlmodel)->append();
 				newrow[tlcols.trackname]   = rui->route()->name();
 				newrow[tlcols.visible]     = true;
-				newrow[tlcols.color]       = rui->color();
+				newrow[tlcols.color]       = rui->route_color ();
 				newrow[tlcols.graph]       = res;
 			}
 		} else if (source_selection_regions_rb.get_active()) {
@@ -331,8 +316,8 @@ AnalysisWindow::analyze_data (Gtk::Button * /*button*/)
 				int n;
 				for (unsigned int channel = 0; channel < arv->region()->n_channels(); channel++) {
 
-					framecnt_t x = 0;
-					framecnt_t length = arv->region()->length();
+					samplecnt_t x = 0;
+					samplecnt_t length = arv->region()->length();
 
 					while (x < length) {
 						// TODO: What about stereo+ channels? composite all to one, I guess

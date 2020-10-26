@@ -1,30 +1,35 @@
 /*
-    Copyright (C) 2006-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2012-2017 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <vector>
 
 #include <sys/time.h>
 #include <sys/stat.h>
-#include <stdio.h> // for rename(), sigh
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+
+#include <glib.h>
+#include <glib/gstdio.h>
 
 #include "pbd/convert.h"
 #include "pbd/basename.h"
@@ -44,7 +49,7 @@
 #include "ardour/source.h"
 #include "ardour/utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -59,6 +64,7 @@ FileSource::FileSource (Session& session, DataType type, const string& path, con
 	, _file_is_new (!origin.empty()) // if origin is left unspecified (empty string) then file must exist
 	, _channel (0)
 	, _origin (origin)
+	, _gain (1.f)
 {
 	set_within_session_from_path (path);
 }
@@ -67,6 +73,7 @@ FileSource::FileSource (Session& session, const XMLNode& node, bool /*must_exist
 	: Source (session, node)
 	, _file_is_new (false)
 	, _channel (0)
+	, _gain (1.f)
 {
 	/* this setting of _path is temporary - we expect derived classes
 	   to call ::init() which will actually locate the file
@@ -92,11 +99,7 @@ FileSource::existence_check ()
 void
 FileSource::prevent_deletion ()
 {
-	if (!(_flags & Destructive)) {
-		mark_immutable ();
-	} else {
-		_flags = Flag (_flags & ~(Removable|RemovableIfEmpty|RemoveAtDestroy));
-	}
+	mark_immutable ();
 }
 
 bool
@@ -112,8 +115,6 @@ FileSource::removable () const
 int
 FileSource::init (const string& pathstr, bool must_exist)
 {
-	_timeline_position = 0;
-
 	if (Stateful::loading_state_version < 3000) {
 		if (!find_2X (_session, _type, pathstr, must_exist, _file_is_new, _channel, _path)) {
 			throw MissingSource (pathstr, _type);
@@ -140,16 +141,14 @@ FileSource::init (const string& pathstr, bool must_exist)
 int
 FileSource::set_state (const XMLNode& node, int /*version*/)
 {
-	const XMLProperty* prop;
-
-	if ((prop = node.property (X_("channel"))) != 0) {
-		_channel = atoi (prop->value());
-	} else {
+	if (!node.get_property (X_("channel"), _channel)) {
 		_channel = 0;
 	}
 
-	if ((prop = node.property (X_("origin"))) != 0) {
-		_origin = prop->value();
+	node.get_property (X_("origin"), _origin);
+
+	if (!node.get_property (X_("gain"), _gain)) {
+		_gain = 1.f;
 	}
 
 	return 0;
@@ -205,16 +204,16 @@ FileSource::move_to_trash (const string& trash_dir_name)
 		}
 	}
 
-	if (::rename (_path.c_str(), newpath.c_str()) != 0) {
+	if (::g_rename (_path.c_str(), newpath.c_str()) != 0) {
 		PBD::error << string_compose (
 				_("cannot rename file source from %1 to %2 (%3)"),
-				_path, newpath, strerror (errno)) << endmsg;
+				_path, newpath, g_strerror (errno)) << endmsg;
 		return -1;
 	}
 
 	if (move_dependents_to_trash() != 0) {
 		/* try to back out */
-		::rename (newpath.c_str(), _path.c_str());
+		::g_rename (newpath.c_str(), _path.c_str());
 		return -1;
 	}
 
@@ -228,10 +227,10 @@ FileSource::move_to_trash (const string& trash_dir_name)
 
 /** Find the actual source file based on \a filename.
  *
- * If the source is within the session tree, \a filename should be a simple filename (no slashes).
- * If the source is external, \a filename should be a full path.
+ * If the source is within the session tree, \a path should be a simple filename (no slashes).
+ * If the source is external, \a path should be a full path.
  * In either case, found_path is set to the complete absolute path of the source file.
- * \return true iff the file was found.
+ * \return true if the file was found.
  */
 bool
 FileSource::find (Session& s, DataType type, const string& path, bool must_exist,
@@ -293,7 +292,7 @@ FileSource::find (Session& s, DataType type, const string& path, bool must_exist
 
 			/* more than one match: ask the user */
 
-                        int which = FileSource::AmbiguousFileName (path, de_duped_hits).get_value_or (-1);
+                        int which = FileSource::AmbiguousFileName (path, de_duped_hits).value_or (-1);
 
                         if (which < 0) {
                                 goto out;
@@ -431,7 +430,7 @@ FileSource::find_2X (Session& s, DataType type, const string& path, bool must_ex
 		if (cnt > 1) {
 
 			error << string_compose (
-					_("FileSource: \"%1\" is ambigous when searching\n\t"), pathstr) << endmsg;
+					_("FileSource: \"%1\" is ambiguous when searching\n\t"), pathstr) << endmsg;
 			goto out;
 
 		} else if (cnt == 0) {
@@ -484,7 +483,7 @@ FileSource::find_2X (Session& s, DataType type, const string& path, bool must_ex
 			if (must_exist) {
 				error << string_compose(
 						_("Filesource: cannot find required file (%1): %2"),
-						path, strerror (errno)) << endmsg;
+						path, g_strerror (errno)) << endmsg;
 				goto out;
 			}
 
@@ -492,7 +491,7 @@ FileSource::find_2X (Session& s, DataType type, const string& path, bool must_ex
 			if (errno != ENOENT) {
 				error << string_compose(
 						_("Filesource: cannot check for existing file (%1): %2"),
-						path, strerror (errno)) << endmsg;
+						path, g_strerror (errno)) << endmsg;
 				goto out;
 			}
 #endif
@@ -514,19 +513,14 @@ out:
 void
 FileSource::mark_immutable ()
 {
-	/* destructive sources stay writable, and their other flags don't change.  */
-	if (!(_flags & Destructive)) {
-		_flags = Flag (_flags & ~(Writable|Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
-	}
+	_flags = Flag (_flags & ~(Writable|Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
+	close();
 }
 
 void
 FileSource::mark_immutable_except_write ()
 {
-	/* destructive sources stay writable, and their other flags don't change.  */
-	if (!(_flags & Destructive)) {
-		_flags = Flag (_flags & ~(Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
-	}
+	_flags = Flag (_flags & ~(Removable|RemovableIfEmpty|RemoveAtDestroy|CanRename));
 }
 
 void
@@ -552,6 +546,15 @@ FileSource::set_path (const std::string& newpath)
 	} else {
 		_origin = newpath;
 	}
+}
+
+
+void
+FileSource::replace_file (const std::string& newpath)
+{
+	close ();
+	_path = newpath;
+	_name = Glib::path_get_basename (newpath);
 }
 
 void
@@ -592,8 +595,8 @@ FileSource::rename (const string& newpath)
 
 	if (Glib::file_test (oldpath.c_str(), Glib::FILE_TEST_EXISTS)) {
 		/* rename only needed if file exists on disk */
-		if (::rename (oldpath.c_str(), newpath.c_str()) != 0) {
-			error << string_compose (_("cannot rename file %1 to %2 (%3)"), oldpath, newpath, strerror(errno)) << endmsg;
+		if (::g_rename (oldpath.c_str(), newpath.c_str()) != 0) {
+			error << string_compose (_("cannot rename file %1 to %2 (%3)"), oldpath, newpath, g_strerror(errno)) << endmsg;
 			return -1;
 		}
 	}

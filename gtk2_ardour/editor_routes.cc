@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2000-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2015 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2018 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstdlib>
 #include <cassert>
@@ -28,13 +32,21 @@
 #include "pbd/unwind.h"
 
 #include "ardour/debug.h"
+#include "ardour/audio_track.h"
 #include "ardour/midi_track.h"
 #include "ardour/route.h"
+#include "ardour/selection.h"
 #include "ardour/session.h"
+#include "ardour/solo_isolate_control.h"
+#include "ardour/utils.h"
+#include "ardour/vca.h"
+#include "ardour/vca_manager.h"
 
 #include "gtkmm2ext/cell_renderer_pixbuf_multi.h"
 #include "gtkmm2ext/cell_renderer_pixbuf_toggle.h"
 #include "gtkmm2ext/treeutils.h"
+
+#include "widgets/tooltips.h"
 
 #include "actions.h"
 #include "ardour_ui.h"
@@ -46,14 +58,16 @@
 #include "keyboard.h"
 #include "midi_time_axis.h"
 #include "mixer_strip.h"
+#include "plugin_setup_dialog.h"
 #include "route_sorter.h"
-#include "tooltips.h"
+#include "vca_time_axis.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
+using namespace ArdourWidgets;
 using namespace ARDOUR_UI_UTILS;
 using namespace PBD;
 using namespace Gtk;
@@ -70,6 +84,8 @@ struct ColumnInfo {
 EditorRoutes::EditorRoutes (Editor* e)
 	: EditorComponent (e)
 	, _ignore_reorder (false)
+	, _ignore_selection_change (false)
+	, column_does_not_select (false)
 	, _no_redisplay (false)
 	, _adding_routes (false)
 	, _route_deletion_in_progress (false)
@@ -78,7 +94,6 @@ EditorRoutes::EditorRoutes (Editor* e)
 	, _queue_tv_update (0)
 	, _menu (0)
 	, old_focus (0)
-	, selection_countdown (0)
 	, name_editable (0)
 {
 	static const int column_width = 22;
@@ -89,6 +104,8 @@ EditorRoutes::EditorRoutes (Editor* e)
 	_model = ListStore::create (_columns);
 	_display.set_model (_model);
 
+	_display.get_selection()->set_select_function (sigc::mem_fun (*this, &EditorRoutes::select_function));
+
 	// Record enable toggle
 	CellRendererPixbufMulti* rec_col_renderer = manage (new CellRendererPixbufMulti());
 
@@ -98,7 +115,7 @@ EditorRoutes::EditorRoutes (Editor* e)
 	rec_col_renderer->set_pixbuf (3, ::get_icon("record-step"));
 	rec_col_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_tv_rec_enable_changed));
 
-	TreeViewColumn* rec_state_column = manage (new TreeViewColumn("R", *rec_col_renderer));
+	rec_state_column = manage (new TreeViewColumn("R", *rec_col_renderer));
 
 	rec_state_column->add_attribute(rec_col_renderer->property_state(), _columns.rec_state);
 	rec_state_column->add_attribute(rec_col_renderer->property_visible(), _columns.is_track);
@@ -108,6 +125,23 @@ EditorRoutes::EditorRoutes (Editor* e)
 	rec_state_column->set_expand(false);
 	rec_state_column->set_fixed_width(column_width);
 
+
+	// Record safe toggle
+	CellRendererPixbufMulti* rec_safe_renderer = manage (new CellRendererPixbufMulti ());
+
+	rec_safe_renderer->set_pixbuf (0, ::get_icon("rec-safe-disabled"));
+	rec_safe_renderer->set_pixbuf (1, ::get_icon("rec-safe-enabled"));
+	rec_safe_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_tv_rec_safe_toggled));
+
+	rec_safe_column = manage (new TreeViewColumn(_("RS"), *rec_safe_renderer));
+	rec_safe_column->add_attribute(rec_safe_renderer->property_state(), _columns.rec_safe);
+	rec_safe_column->add_attribute(rec_safe_renderer->property_visible(), _columns.is_track);
+	rec_safe_column->set_sizing(TREE_VIEW_COLUMN_FIXED);
+	rec_safe_column->set_alignment(ALIGN_CENTER);
+	rec_safe_column->set_expand(false);
+	rec_safe_column->set_fixed_width(column_width);
+
+
 	// MIDI Input Active
 
 	CellRendererPixbufMulti* input_active_col_renderer = manage (new CellRendererPixbufMulti());
@@ -115,7 +149,7 @@ EditorRoutes::EditorRoutes (Editor* e)
 	input_active_col_renderer->set_pixbuf (1, ::get_icon("midi-input-active"));
 	input_active_col_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_input_active_changed));
 
-	TreeViewColumn* input_active_column = manage (new TreeViewColumn ("I", *input_active_col_renderer));
+	input_active_column = manage (new TreeViewColumn ("I", *input_active_col_renderer));
 
 	input_active_column->add_attribute(input_active_col_renderer->property_state(), _columns.is_input_active);
 	input_active_column->add_attribute (input_active_col_renderer->property_visible(), _columns.is_midi);
@@ -133,7 +167,7 @@ EditorRoutes::EditorRoutes (Editor* e)
 	mute_col_renderer->set_pixbuf (Gtkmm2ext::ExplicitActive, ::get_icon("mute-enabled"));
 	mute_col_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_tv_mute_enable_toggled));
 
-	TreeViewColumn* mute_state_column = manage (new TreeViewColumn("M", *mute_col_renderer));
+	mute_state_column = manage (new TreeViewColumn("M", *mute_col_renderer));
 
 	mute_state_column->add_attribute(mute_col_renderer->property_state(), _columns.mute_state);
 	mute_state_column->set_sizing(TREE_VIEW_COLUMN_FIXED);
@@ -149,7 +183,7 @@ EditorRoutes::EditorRoutes (Editor* e)
 	solo_col_renderer->set_pixbuf (Gtkmm2ext::ImplicitActive, ::get_icon("soloed-by-others"));
 	solo_col_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_tv_solo_enable_toggled));
 
-	TreeViewColumn* solo_state_column = manage (new TreeViewColumn("S", *solo_col_renderer));
+	solo_state_column = manage (new TreeViewColumn("S", *solo_col_renderer));
 
 	solo_state_column->add_attribute(solo_col_renderer->property_state(), _columns.solo_state);
 	solo_state_column->add_attribute(solo_col_renderer->property_visible(), _columns.solo_visible);
@@ -165,10 +199,10 @@ EditorRoutes::EditorRoutes (Editor* e)
 	solo_iso_renderer->set_pixbuf (1, ::get_icon("solo-isolate-enabled"));
 	solo_iso_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_tv_solo_isolate_toggled));
 
-	TreeViewColumn* solo_isolate_state_column = manage (new TreeViewColumn("SI", *solo_iso_renderer));
+	solo_isolate_state_column = manage (new TreeViewColumn("SI", *solo_iso_renderer));
 
 	solo_isolate_state_column->add_attribute(solo_iso_renderer->property_state(), _columns.solo_isolate_state);
-	solo_isolate_state_column->add_attribute(solo_iso_renderer->property_visible(), _columns.solo_visible);
+	solo_isolate_state_column->add_attribute(solo_iso_renderer->property_visible(), _columns.solo_lock_iso_visible);
 	solo_isolate_state_column->set_sizing(TREE_VIEW_COLUMN_FIXED);
 	solo_isolate_state_column->set_alignment(ALIGN_CENTER);
 	solo_isolate_state_column->set_expand(false);
@@ -181,9 +215,9 @@ EditorRoutes::EditorRoutes (Editor* e)
 	solo_safe_renderer->set_pixbuf (1, ::get_icon("solo-safe-enabled"));
 	solo_safe_renderer->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::on_tv_solo_safe_toggled));
 
-	TreeViewColumn* solo_safe_state_column = manage (new TreeViewColumn(_("SS"), *solo_safe_renderer));
+	solo_safe_state_column = manage (new TreeViewColumn(_("SS"), *solo_safe_renderer));
 	solo_safe_state_column->add_attribute(solo_safe_renderer->property_state(), _columns.solo_safe_state);
-	solo_safe_state_column->add_attribute(solo_safe_renderer->property_visible(), _columns.solo_visible);
+	solo_safe_state_column->add_attribute(solo_safe_renderer->property_visible(), _columns.solo_lock_iso_visible);
 	solo_safe_state_column->set_sizing(TREE_VIEW_COLUMN_FIXED);
 	solo_safe_state_column->set_alignment(ALIGN_CENTER);
 	solo_safe_state_column->set_expand(false);
@@ -193,8 +227,13 @@ EditorRoutes::EditorRoutes (Editor* e)
 	_visible_column = _display.append_column ("", _columns.visible) - 1;
 	_active_column = _display.append_column ("", _columns.active) - 1;
 
+	name_column = _display.get_column (_name_column);
+	visible_column = _display.get_column (_visible_column);
+	active_column = _display.get_column (_active_column);
+
 	_display.append_column (*input_active_column);
 	_display.append_column (*rec_state_column);
+	_display.append_column (*rec_safe_column);
 	_display.append_column (*mute_state_column);
 	_display.append_column (*solo_state_column);
 	_display.append_column (*solo_isolate_state_column);
@@ -210,10 +249,11 @@ EditorRoutes::EditorRoutes (Editor* e)
 		{ 2, S_("Active|A"),    _("Track/Bus active ?") },
 		{ 3, S_("MidiInput|I"), _("MIDI input enabled") },
 		{ 4, S_("Rec|R"),       _("Record enabled") },
-		{ 5, S_("Mute|M"),      _("Muted") },
-		{ 6, S_("Solo|S"),      _("Soloed") },
-		{ 7, S_("SoloIso|SI"),  _("Solo Isolated") },
-		{ 8, S_("SoloLock|SS"), _("Solo Safe (Locked)") },
+		{ 5, S_("Rec|RS"),      _("Record Safe") },
+		{ 6, S_("Mute|M"),      _("Muted") },
+		{ 7, S_("Solo|S"),      _("Soloed") },
+		{ 8, S_("SoloIso|SI"),  _("Solo Isolated") },
+		{ 9, S_("SoloLock|SS"), _("Solo Safe (Locked)") },
 		{ -1, 0, 0 }
 	};
 
@@ -226,14 +266,12 @@ EditorRoutes::EditorRoutes (Editor* e)
 	}
 
 	_display.set_headers_visible (true);
-	_display.get_selection()->set_mode (SELECTION_SINGLE);
-	_display.get_selection()->set_select_function (sigc::mem_fun (*this, &EditorRoutes::selection_filter));
+	_display.get_selection()->set_mode (SELECTION_MULTIPLE);
 	_display.get_selection()->signal_changed().connect (sigc::mem_fun (*this, &EditorRoutes::selection_changed));
 	_display.set_reorderable (true);
 	_display.set_name (X_("EditGroupList"));
 	_display.set_rules_hint (true);
 	_display.set_size_request (100, -1);
-	_display.add_object_drag (_columns.route.index(), "routes");
 
 	CellRendererText* name_cell = dynamic_cast<CellRendererText*> (_display.get_column_cell_renderer (_name_column));
 
@@ -276,11 +314,13 @@ EditorRoutes::EditorRoutes (Editor* e)
 	active_col->set_sizing (TREE_VIEW_COLUMN_FIXED);
 	active_col->set_fixed_width (30);
 	active_col->set_alignment (ALIGN_CENTER);
+	active_col->add_attribute (active_cell->property_visible(), _columns.no_vca);
 
 	_model->signal_row_deleted().connect (sigc::mem_fun (*this, &EditorRoutes::row_deleted));
 	_model->signal_rows_reordered().connect (sigc::mem_fun (*this, &EditorRoutes::reordered));
 
 	_display.signal_button_press_event().connect (sigc::mem_fun (*this, &EditorRoutes::button_press), false);
+	_display.signal_button_release_event().connect (sigc::mem_fun (*this, &EditorRoutes::button_release), false);
 	_scroller.signal_key_press_event().connect (sigc::mem_fun(*this, &EditorRoutes::key_press), false);
 
 	_scroller.signal_focus_in_event().connect (sigc::mem_fun (*this, &EditorRoutes::focus_in), false);
@@ -291,7 +331,12 @@ EditorRoutes::EditorRoutes (Editor* e)
 
 	_display.set_enable_search (false);
 
-	Route::SyncOrderKeys.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::sync_treeview_from_order_keys, this), gui_context());
+	Route::PluginSetup.connect_same_thread (*this, boost::bind (&EditorRoutes::plugin_setup, this, _1, _2, _3));
+}
+
+EditorRoutes::~EditorRoutes ()
+{
+	delete _menu;
 }
 
 bool
@@ -329,11 +374,6 @@ EditorRoutes::enter_notify (GdkEventCrossing*)
 		return true;
 	}
 
-	/* arm counter so that ::selection_filter() will deny selecting anything for the
-	 * next two attempts to change selection status.
-	 */
-	selection_countdown = 2;
-	_scroller.grab_focus ();
 	Keyboard::magic_widget_grab_focus ();
 	return false;
 }
@@ -341,8 +381,6 @@ EditorRoutes::enter_notify (GdkEventCrossing*)
 bool
 EditorRoutes::leave_notify (GdkEventCrossing*)
 {
-	selection_countdown = 0;
-
 	if (old_focus) {
 		old_focus->grab_focus ();
 		old_focus = 0;
@@ -393,17 +431,38 @@ EditorRoutes::on_input_active_changed (std::string const & path_string)
 void
 EditorRoutes::on_tv_rec_enable_changed (std::string const & path_string)
 {
-	DisplaySuspender ds;
 	// Get the model row that has been toggled.
 	Gtk::TreeModel::Row row = *_model->get_iter (Gtk::TreeModel::Path (path_string));
 
 	TimeAxisView* tv = row[_columns.tv];
-	RouteTimeAxisView *rtv = dynamic_cast<RouteTimeAxisView*> (tv);
+	StripableTimeAxisView* stv = dynamic_cast<StripableTimeAxisView*> (tv);
 
-	if (rtv && rtv->track()) {
-		boost::shared_ptr<RouteList> rl (new RouteList);
-		rl->push_back (rtv->route());
-		_session->set_record_enabled (rl, !rtv->track()->record_enabled(), Session::rt_cleanup);
+	if (!stv || !stv->stripable()) {
+		return;
+	}
+
+	boost::shared_ptr<AutomationControl> ac = stv->stripable()->rec_enable_control();
+
+	if (ac) {
+		ac->set_value (!ac->get_value(), Controllable::UseGroup);
+	}
+}
+
+void
+EditorRoutes::on_tv_rec_safe_toggled (std::string const & path_string)
+{
+	Gtk::TreeModel::Row row = *_model->get_iter (Gtk::TreeModel::Path (path_string));
+	TimeAxisView* tv = row[_columns.tv];
+	StripableTimeAxisView* stv = dynamic_cast<StripableTimeAxisView*> (tv);
+
+	if (!stv || !stv->stripable()) {
+		return;
+	}
+
+	boost::shared_ptr<AutomationControl> ac (stv->stripable()->rec_safe_control());
+
+	if (ac) {
+		ac->set_value (!ac->get_value(), Controllable::UseGroup);
 	}
 }
 
@@ -414,12 +473,16 @@ EditorRoutes::on_tv_mute_enable_toggled (std::string const & path_string)
 	Gtk::TreeModel::Row row = *_model->get_iter (Gtk::TreeModel::Path (path_string));
 
 	TimeAxisView *tv = row[_columns.tv];
-	RouteTimeAxisView *rtv = dynamic_cast<RouteTimeAxisView*> (tv);
+	StripableTimeAxisView* stv = dynamic_cast<StripableTimeAxisView*> (tv);
 
-	if (rtv != 0) {
-		boost::shared_ptr<RouteList> rl (new RouteList);
-		rl->push_back (rtv->route());
-		_session->set_mute (rl, !rtv->route()->muted(), Session::rt_cleanup);
+	if (!stv || !stv->stripable()) {
+		return;
+	}
+
+	boost::shared_ptr<AutomationControl> ac (stv->stripable()->mute_control());
+
+	if (ac) {
+		ac->set_value (!ac->get_value(), Controllable::UseGroup);
 	}
 }
 
@@ -430,16 +493,16 @@ EditorRoutes::on_tv_solo_enable_toggled (std::string const & path_string)
 	Gtk::TreeModel::Row row = *_model->get_iter (Gtk::TreeModel::Path (path_string));
 
 	TimeAxisView *tv = row[_columns.tv];
-	RouteTimeAxisView* rtv = dynamic_cast<RouteTimeAxisView*> (tv);
+	StripableTimeAxisView* stv = dynamic_cast<StripableTimeAxisView*> (tv);
 
-	if (rtv != 0) {
-		boost::shared_ptr<RouteList> rl (new RouteList);
-		rl->push_back (rtv->route());
-		if (Config->get_solo_control_is_listen_control()) {
-			_session->set_listen (rl, !rtv->route()->listening_via_monitor(), Session::rt_cleanup);
-		} else {
-			_session->set_solo (rl, !rtv->route()->self_soloed(), Session::rt_cleanup);
-		}
+	if (!stv || !stv->stripable()) {
+		return;
+	}
+
+	boost::shared_ptr<AutomationControl> ac (stv->stripable()->solo_control());
+
+	if (ac) {
+		ac->set_value (!ac->get_value(), Controllable::UseGroup);
 	}
 }
 
@@ -450,10 +513,16 @@ EditorRoutes::on_tv_solo_isolate_toggled (std::string const & path_string)
 	Gtk::TreeModel::Row row = *_model->get_iter (Gtk::TreeModel::Path (path_string));
 
 	TimeAxisView *tv = row[_columns.tv];
-	RouteTimeAxisView* rtv = dynamic_cast<RouteTimeAxisView*> (tv);
+	StripableTimeAxisView* stv = dynamic_cast<StripableTimeAxisView*> (tv);
 
-	if (rtv) {
-		rtv->route()->set_solo_isolated (!rtv->route()->solo_isolated(), Controllable::UseGroup);
+	if (!stv || !stv->stripable()) {
+		return;
+	}
+
+	boost::shared_ptr<AutomationControl> ac (stv->stripable()->solo_isolate_control());
+
+	if (ac) {
+		ac->set_value (!ac->get_value(), Controllable::UseGroup);
 	}
 }
 
@@ -464,10 +533,16 @@ EditorRoutes::on_tv_solo_safe_toggled (std::string const & path_string)
 	Gtk::TreeModel::Row row = *_model->get_iter (Gtk::TreeModel::Path (path_string));
 
 	TimeAxisView *tv = row[_columns.tv];
-	RouteTimeAxisView* rtv = dynamic_cast<RouteTimeAxisView*> (tv);
+	StripableTimeAxisView* stv = dynamic_cast<StripableTimeAxisView*> (tv);
 
-	if (rtv) {
-		rtv->route()->set_solo_safe (!rtv->route()->solo_safe(), Controllable::UseGroup);
+	if (!stv || !stv->stripable()) {
+		return;
+	}
+
+	boost::shared_ptr<AutomationControl> ac (stv->stripable()->solo_safe_control());
+
+	if (ac) {
+		ac->set_value (!ac->get_value(), Controllable::UseGroup);
 	}
 }
 
@@ -486,21 +561,11 @@ EditorRoutes::build_menu ()
 	items.push_back (MenuElem (_("Hide All"), sigc::mem_fun (*this, &EditorRoutes::hide_all_routes)));
 	items.push_back (MenuElem (_("Show All Audio Tracks"), sigc::mem_fun (*this, &EditorRoutes::show_all_audiotracks)));
 	items.push_back (MenuElem (_("Hide All Audio Tracks"), sigc::mem_fun (*this, &EditorRoutes::hide_all_audiotracks)));
-	items.push_back (MenuElem (_("Show All Audio Busses"), sigc::mem_fun (*this, &EditorRoutes::show_all_audiobus)));
-	items.push_back (MenuElem (_("Hide All Audio Busses"), sigc::mem_fun (*this, &EditorRoutes::hide_all_audiobus)));
 	items.push_back (MenuElem (_("Show All Midi Tracks"), sigc::mem_fun (*this, &EditorRoutes::show_all_miditracks)));
 	items.push_back (MenuElem (_("Hide All Midi Tracks"), sigc::mem_fun (*this, &EditorRoutes::hide_all_miditracks)));
+	items.push_back (MenuElem (_("Show All Busses"), sigc::mem_fun (*this, &EditorRoutes::show_all_audiobus)));
+	items.push_back (MenuElem (_("Hide All Busses"), sigc::mem_fun (*this, &EditorRoutes::hide_all_audiobus)));
 	items.push_back (MenuElem (_("Only Show Tracks with Regions Under Playhead"), sigc::mem_fun (*this, &EditorRoutes::show_tracks_with_regions_at_playhead)));
-}
-
-void
-EditorRoutes::show_menu ()
-{
-	if (_menu == 0) {
-		build_menu ();
-	}
-
-	_menu->popup (1, gtk_get_current_event_time());
 }
 
 void
@@ -517,7 +582,6 @@ EditorRoutes::redisplay_real ()
 
 	for (n = 0, position = 0, i = rows.begin(); i != rows.end(); ++i) {
 		TimeAxisView *tv = (*i)[_columns.tv];
-		boost::shared_ptr<Route> route = (*i)[_columns.route];
 
 		if (tv == 0) {
 			// just a "title" row
@@ -594,27 +658,28 @@ EditorRoutes::row_deleted (Gtk::TreeModel::Path const &)
 	 * when a route is actually removed. we don't differentiate between
 	 * the two cases.
 	 *
-	 * note that the sync_orders_keys() step may not actually change any
-	 * RID's (e.g. the last track may be removed, so all other tracks keep
-	 * the same RID), which means that no redisplay would happen. so we
-	 * have to force a redisplay.
+	 * note that the sync_presentation_info_from_treeview() step may not
+	 * actually change any presentation info (e.g. the last track may be
+	 * removed, so all other tracks keep the same presentation info), which
+	 * means that no redisplay would happen. so we have to force a
+	 * redisplay.
 	 */
 
 	DEBUG_TRACE (DEBUG::OrderKeys, "editor routes treeview row deleted\n");
 
 	DisplaySuspender ds;
-	sync_order_keys_from_treeview ();
+	sync_presentation_info_from_treeview ();
 }
 
 void
 EditorRoutes::reordered (TreeModel::Path const &, TreeModel::iterator const &, int* /*what*/)
 {
-	/* reordering implies that RID's will change, so sync_order_keys() will
-	   cause a redisplay.
+	/* reordering implies that RID's will change, so
+	   sync_presentation_info_from_treeview() will cause a redisplay.
 	*/
 
 	DEBUG_TRACE (DEBUG::OrderKeys, "editor routes treeview reordered\n");
-	sync_order_keys_from_treeview ();
+	sync_presentation_info_from_treeview ();
 }
 
 void
@@ -647,82 +712,131 @@ EditorRoutes::active_changed (std::string const & path)
 	}
 
 	Gtk::TreeModel::Row row = *_model->get_iter (path);
-	boost::shared_ptr<Route> route = row[_columns.route];
-	bool const active = row[_columns.active];
-	route->set_active (!active, this);
+	boost::shared_ptr<Stripable> stripable = row[_columns.stripable];
+	boost::shared_ptr<Route> route = boost::dynamic_pointer_cast<Route> (stripable);
+	if (route) {
+		bool const active = row[_columns.active];
+		route->set_active (!active, this);
+	}
 }
 
 void
-EditorRoutes::routes_added (list<RouteTimeAxisView*> routes)
+EditorRoutes::time_axis_views_added (list<TimeAxisView*> tavs)
 {
 	PBD::Unwinder<bool> at (_adding_routes, true);
 	bool from_scratch = (_model->children().size() == 0);
 	Gtk::TreeModel::Children::iterator insert_iter = _model->children().end();
 
 	for (Gtk::TreeModel::Children::iterator it = _model->children().begin(); it != _model->children().end(); ++it) {
-		boost::shared_ptr<Route> r = (*it)[_columns.route];
 
-		if (r->order_key() == (routes.front()->route()->order_key() + routes.size())) {
+		boost::shared_ptr<Stripable> r = (*it)[_columns.stripable];
+
+		if (r->presentation_info().order() == (tavs.front()->stripable()->presentation_info().order() + tavs.size())) {
 			insert_iter = it;
 			break;
 		}
 	}
 
-	DisplaySuspender ds;
+	{
+		PBD::Unwinder<bool> uw (_ignore_selection_change, true);
+		_display.set_model (Glib::RefPtr<ListStore>());
+	}
 
-	_display.set_model (Glib::RefPtr<ListStore>());
+	for (list<TimeAxisView*>::iterator x = tavs.begin(); x != tavs.end(); ++x) {
 
-	for (list<RouteTimeAxisView*>::iterator x = routes.begin(); x != routes.end(); ++x) {
-
-		boost::shared_ptr<MidiTrack> midi_trk = boost::dynamic_pointer_cast<MidiTrack> ((*x)->route());
+		VCATimeAxisView* vtav = dynamic_cast<VCATimeAxisView*> (*x);
+		RouteTimeAxisView* rtav = dynamic_cast<RouteTimeAxisView*> (*x);
 
 		TreeModel::Row row = *(_model->insert (insert_iter));
 
-		row[_columns.text] = (*x)->route()->name();
-		row[_columns.visible] = (*x)->marked_for_display();
-		row[_columns.active] = (*x)->route()->active ();
-		row[_columns.tv] = *x;
-		row[_columns.route] = (*x)->route ();
-		row[_columns.is_track] = (boost::dynamic_pointer_cast<Track> ((*x)->route()) != 0);
+		boost::shared_ptr<Stripable> stripable;
+		boost::shared_ptr<MidiTrack> midi_trk;
 
-		if (midi_trk) {
-			row[_columns.is_input_active] = midi_trk->input_active ();
-			row[_columns.is_midi] = true;
-		} else {
+		if (vtav) {
+
+			stripable = vtav->vca();
+
+			row[_columns.is_track] = false;
 			row[_columns.is_input_active] = false;
 			row[_columns.is_midi] = false;
+			row[_columns.no_vca] = false;
+
+		} else if (rtav) {
+
+			stripable = rtav->route ();
+			midi_trk= boost::dynamic_pointer_cast<MidiTrack> (stripable);
+
+			row[_columns.is_track] = (boost::dynamic_pointer_cast<Track> (stripable) != 0);
+			row[_columns.no_vca] = true;
+
+			if (midi_trk) {
+				row[_columns.is_input_active] = midi_trk->input_active ();
+				row[_columns.is_midi] = true;
+			} else {
+				row[_columns.is_input_active] = false;
+				row[_columns.is_midi] = false;
+			}
 		}
 
-		row[_columns.mute_state] = (*x)->route()->muted() ? Gtkmm2ext::ExplicitActive : Gtkmm2ext::Off;
-		row[_columns.solo_state] = RouteUI::solo_active_state ((*x)->route());
-		row[_columns.solo_visible] = !(*x)->route()->is_master ();
-		row[_columns.solo_isolate_state] = (*x)->route()->solo_isolated();
-		row[_columns.solo_safe_state] = (*x)->route()->solo_safe();
+		if (!stripable) {
+			continue;
+		}
+
+		row[_columns.text] = stripable->name();
+		row[_columns.visible] = (*x)->marked_for_display();
+		row[_columns.active] = true;
+		row[_columns.tv] = *x;
+		row[_columns.stripable] = stripable;
+		row[_columns.mute_state] = RouteUI::mute_active_state (_session, stripable);
+		row[_columns.solo_state] = RouteUI::solo_active_state (stripable);
+		row[_columns.solo_visible] = !stripable->is_master ();
+		row[_columns.solo_lock_iso_visible] = row[_columns.solo_visible] && row[_columns.no_vca];
+		row[_columns.solo_isolate_state] = RouteUI::solo_isolate_active_state (stripable);
+		row[_columns.solo_safe_state] = RouteUI::solo_safe_active_state (stripable);
 		row[_columns.name_editable] = true;
 
-		boost::weak_ptr<Route> wr ((*x)->route());
+		boost::weak_ptr<Stripable> ws (stripable);
 
-		(*x)->route()->gui_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::handle_gui_changes, this, _1, _2), gui_context());
-		(*x)->route()->PropertyChanged.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::route_property_changed, this, _1, wr), gui_context());
+		/* for now, we need both of these. PropertyChanged covers on
+		 * pre-defined, "global" things of interest to a
+		 * UI. gui_changed covers arbitrary, un-enumerated, un-typed
+		 * changes that may only be of interest to a particular
+		 * UI (e.g. track-height is not of any relevant to OSC)
+		 */
 
-		if ((*x)->is_track()) {
-			boost::shared_ptr<Track> t = boost::dynamic_pointer_cast<Track> ((*x)->route());
-			t->RecordEnableChanged.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_rec_display, this), gui_context());
+		stripable->gui_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::handle_gui_changes, this, _1, _2), gui_context());
+		stripable->PropertyChanged.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::route_property_changed, this, _1, ws), gui_context());
+		stripable->presentation_info().PropertyChanged.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::route_property_changed, this, _1, ws), gui_context());
+
+		if (boost::dynamic_pointer_cast<Track> (stripable)) {
+			boost::shared_ptr<Track> t = boost::dynamic_pointer_cast<Track> (stripable);
+			t->rec_enable_control()->Changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_rec_display, this), gui_context());
+			t->rec_safe_control()->Changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_rec_display, this), gui_context());
 		}
 
-		if ((*x)->is_midi_track()) {
-			boost::shared_ptr<MidiTrack> t = boost::dynamic_pointer_cast<MidiTrack> ((*x)->route());
-			t->StepEditStatusChange.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_rec_display, this), gui_context());
-			t->InputActiveChanged.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_input_active_display, this), gui_context());
+		if (midi_trk) {
+			midi_trk->StepEditStatusChange.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_rec_display, this), gui_context());
+			midi_trk->InputActiveChanged.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_input_active_display, this), gui_context());
 		}
 
-		(*x)->route()->mute_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_mute_display, this), gui_context());
-		(*x)->route()->solo_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_display, this), gui_context());
-		(*x)->route()->listen_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_display, this), gui_context());
-		(*x)->route()->solo_isolated_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_isolate_display, this), gui_context());
-		(*x)->route()->solo_safe_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_safe_display, this), gui_context());
-		(*x)->route()->active_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_active_display, this), gui_context ());
+		boost::shared_ptr<AutomationControl> ac;
 
+		if ((ac = stripable->mute_control()) != 0) {
+			ac->Changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_mute_display, this), gui_context());
+		}
+		if ((ac = stripable->solo_control()) != 0) {
+			ac->Changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_display, this), gui_context());
+		}
+		if ((ac = stripable->solo_isolate_control()) != 0) {
+			ac->Changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_isolate_display, this), gui_context());
+		}
+		if ((ac = stripable->solo_safe_control()) != 0) {
+			ac->Changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_solo_safe_display, this), gui_context());
+		}
+
+		if (rtav) {
+			rtav->route()->active_changed.connect (*this, MISSING_INVALIDATOR, boost::bind (&EditorRoutes::update_active_display, this), gui_context ());
+		}
 	}
 
 	update_rec_display ();
@@ -733,12 +847,18 @@ EditorRoutes::routes_added (list<RouteTimeAxisView*> routes)
 	update_input_active_display ();
 	update_active_display ();
 
-	_display.set_model (_model);
+	{
+		PBD::Unwinder<bool> uw (_ignore_selection_change, true);
+		_display.set_model (_model);
+	}
 
 	/* now update route order keys from the treeview/track display order */
+
 	if (!from_scratch) {
-		sync_order_keys_from_treeview ();
+		sync_presentation_info_from_treeview ();
 	}
+
+	redisplay ();
 }
 
 void
@@ -768,6 +888,8 @@ EditorRoutes::route_removed (TimeAxisView *tv)
 	TreeModel::Children rows = _model->children();
 	TreeModel::Children::iterator ri;
 
+	PBD::Unwinder<bool> uw (_ignore_selection_change, true);
+
 	for (ri = rows.begin(); ri != rows.end(); ++ri) {
 		if ((*ri)[_columns.tv] == tv) {
 			PBD::Unwinder<bool> uw (_route_deletion_in_progress, true);
@@ -775,24 +897,22 @@ EditorRoutes::route_removed (TimeAxisView *tv)
 			break;
 		}
 	}
-
-	/* the deleted signal for the treeview/model will take
-	   care of any updates.
-	*/
 }
 
 void
-EditorRoutes::route_property_changed (const PropertyChange& what_changed, boost::weak_ptr<Route> r)
+EditorRoutes::route_property_changed (const PropertyChange& what_changed, boost::weak_ptr<Stripable> s)
 {
-	if (!what_changed.contains (ARDOUR::Properties::name)) {
+	if (!what_changed.contains (ARDOUR::Properties::hidden) && !what_changed.contains (ARDOUR::Properties::name)) {
 		return;
 	}
 
-	ENSURE_GUI_THREAD (*this, &EditorRoutes::route_name_changed, r)
+	if (_adding_routes) {
+		return;
+	}
 
-	boost::shared_ptr<Route> route = r.lock ();
+	boost::shared_ptr<Stripable> stripable = s.lock ();
 
-	if (!route) {
+	if (!stripable) {
 		return;
 	}
 
@@ -800,9 +920,22 @@ EditorRoutes::route_property_changed (const PropertyChange& what_changed, boost:
 	TreeModel::Children::iterator i;
 
 	for (i = rows.begin(); i != rows.end(); ++i) {
-		boost::shared_ptr<Route> t = (*i)[_columns.route];
-		if (t == route) {
-			(*i)[_columns.text] = route->name();
+
+		boost::shared_ptr<Stripable> ss = (*i)[_columns.stripable];
+
+		if (ss == stripable) {
+
+			if (what_changed.contains (ARDOUR::Properties::name)) {
+				(*i)[_columns.text] = stripable->name();
+				break;
+			}
+
+			if (what_changed.contains (ARDOUR::Properties::hidden)) {
+				(*i)[_columns.visible] = !stripable->presentation_info().hidden();
+				redisplay ();
+
+			}
+
 			break;
 		}
 	}
@@ -829,10 +962,9 @@ EditorRoutes::update_visibility ()
 		(*i)[_columns.visible] = tv->marked_for_display ();
 	}
 
-	/* force route order keys catch up with visibility changes
-	 */
+	/* force route order keys catch up with visibility changes */
 
-	sync_order_keys_from_treeview ();
+	sync_presentation_info_from_treeview ();
 }
 
 void
@@ -869,66 +1001,7 @@ EditorRoutes::show_track_in_display (TimeAxisView& tv)
 }
 
 void
-EditorRoutes::reset_remote_control_ids ()
-{
-	if (Config->get_remote_model() == UserOrdered || !_session || _session->deletion_in_progress()) {
-		return;
-	}
-
-	TreeModel::Children rows = _model->children();
-
-	if (rows.empty()) {
-		return;
-	}
-
-
-	DEBUG_TRACE (DEBUG::OrderKeys, "editor reset remote control ids\n");
-
-	TreeModel::Children::iterator ri;
-	bool rid_change = false;
-	uint32_t rid = 1;
-	uint32_t invisible_key = UINT32_MAX;
-
-	for (ri = rows.begin(); ri != rows.end(); ++ri) {
-
-		/* skip two special values */
-
-		if (rid == Route::MasterBusRemoteControlID) {
-			rid++;
-		}
-
-		if (rid == Route::MonitorBusRemoteControlID) {
-			rid++;
-		}
-
-		boost::shared_ptr<Route> route = (*ri)[_columns.route];
-		bool visible = (*ri)[_columns.visible];
-
-		if (!route->is_master() && !route->is_monitor()) {
-
-			uint32_t new_rid = (visible ? rid : invisible_key--);
-
-			if (new_rid != route->remote_control_id()) {
-				route->set_remote_control_id_explicit (new_rid);
-				rid_change = true;
-			}
-
-			if (visible) {
-				rid++;
-			}
-
-		}
-	}
-
-	if (rid_change) {
-		/* tell the world that we changed the remote control IDs */
-		_session->notify_remote_id_change ();
-	}
-}
-
-
-void
-EditorRoutes::sync_order_keys_from_treeview ()
+EditorRoutes::sync_presentation_info_from_treeview ()
 {
 	if (_ignore_reorder || !_session || _session->deletion_in_progress()) {
 		return;
@@ -940,60 +1013,43 @@ EditorRoutes::sync_order_keys_from_treeview ()
 		return;
 	}
 
+	DEBUG_TRACE (DEBUG::OrderKeys, "editor sync presentation info from treeview\n");
 
-	DEBUG_TRACE (DEBUG::OrderKeys, "editor sync order keys from treeview\n");
+	bool change = false;
+	PresentationInfo::order_t order = 0;
 
-	TreeModel::Children::iterator ri;
-	bool changed = false;
-	bool rid_change = false;
-	uint32_t order = 0;
-	uint32_t rid = 1;
-	uint32_t invisible_key = UINT32_MAX;
+	PresentationInfo::ChangeSuspender cs;
 
-	for (ri = rows.begin(); ri != rows.end(); ++ri) {
-
-		boost::shared_ptr<Route> route = (*ri)[_columns.route];
+	for (TreeModel::Children::iterator ri = rows.begin(); ri != rows.end(); ++ri) {
+		boost::shared_ptr<Stripable> stripable = (*ri)[_columns.stripable];
 		bool visible = (*ri)[_columns.visible];
 
-		uint32_t old_key = route->order_key ();
-
-		if (order != old_key) {
-			route->set_order_key (order);
-
-			changed = true;
+#ifndef NDEBUG // these should not exist in the treeview
+		assert (stripable);
+		if (stripable->is_monitor() || stripable->is_auditioner()) {
+			assert (0);
+			continue;
 		}
+#endif
 
-		if ((Config->get_remote_model() == MixerOrdered) && !route->is_master() && !route->is_monitor()) {
+		stripable->presentation_info().set_hidden (!visible);
 
-			uint32_t new_rid = (visible ? rid : invisible_key--);
-
-			if (new_rid != route->remote_control_id()) {
-				route->set_remote_control_id_explicit (new_rid);
-				rid_change = true;
-			}
-
-			if (visible) {
-				rid++;
-			}
-
+		if (order != stripable->presentation_info().order()) {
+			stripable->set_presentation_order (order);
+			change = true;
 		}
-
 		++order;
 	}
 
-	if (changed) {
-		/* tell the world that we changed the editor sort keys */
-		_session->sync_order_keys ();
-	}
+	change |= _session->ensure_stripable_sort_order ();
 
-	if (rid_change) {
-		/* tell the world that we changed the remote control IDs */
-		_session->notify_remote_id_change ();
+	if (change) {
+		_session->set_dirty();
 	}
 }
 
 void
-EditorRoutes::sync_treeview_from_order_keys ()
+EditorRoutes::sync_treeview_from_presentation_info (PropertyChange const & what_changed)
 {
 	/* Some route order key(s) have been changed, make sure that
 	   we update out tree/list model and GUI to reflect the change.
@@ -1003,51 +1059,80 @@ EditorRoutes::sync_treeview_from_order_keys ()
 		return;
 	}
 
-	DEBUG_TRACE (DEBUG::OrderKeys, "editor sync model from order keys.\n");
+	DEBUG_TRACE (DEBUG::OrderKeys, "editor sync model from presentation info.\n");
 
-	/* we could get here after either a change in the Mixer or Editor sort
-	 * order, but either way, the mixer order keys reflect the intended
-	 * order for the GUI, so reorder the treeview model to match it.
-	 */
+	PropertyChange hidden_or_order;
+	hidden_or_order.add (Properties::hidden);
+	hidden_or_order.add (Properties::order);
 
-	vector<int> neworder;
 	TreeModel::Children rows = _model->children();
-	uint32_t old_order = 0;
+
 	bool changed = false;
 
-	if (rows.empty()) {
-		return;
-	}
+	if (what_changed.contains (hidden_or_order)) {
+		vector<int> neworder;
+		uint32_t old_order = 0;
 
-	OrderKeySortedRoutes sorted_routes;
-
-	for (TreeModel::Children::iterator ri = rows.begin(); ri != rows.end(); ++ri, ++old_order) {
-		boost::shared_ptr<Route> route = (*ri)[_columns.route];
-		sorted_routes.push_back (RoutePlusOrderKey (route, old_order, route->order_key ()));
-	}
-
-	SortByNewDisplayOrder cmp;
-
-	sort (sorted_routes.begin(), sorted_routes.end(), cmp);
-	neworder.assign (sorted_routes.size(), 0);
-
-	uint32_t n = 0;
-
-	for (OrderKeySortedRoutes::iterator sr = sorted_routes.begin(); sr != sorted_routes.end(); ++sr, ++n) {
-
-		neworder[n] = sr->old_display_order;
-
-		if (sr->old_display_order != n) {
-			changed = true;
+		if (rows.empty()) {
+			return;
 		}
 
-		DEBUG_TRACE (DEBUG::OrderKeys, string_compose ("EDITOR change order for %1 from %2 to %3\n",
-							       sr->route->name(), sr->old_display_order, n));
+		TreeOrderKeys sorted;
+		for (TreeModel::Children::iterator ri = rows.begin(); ri != rows.end(); ++ri, ++old_order) {
+			boost::shared_ptr<Stripable> stripable = (*ri)[_columns.stripable];
+			/* use global order */
+			sorted.push_back (TreeOrderKey (old_order, stripable));
+		}
+
+		TreeOrderKeySorter cmp;
+
+		sort (sorted.begin(), sorted.end(), cmp);
+		neworder.assign (sorted.size(), 0);
+
+		uint32_t n = 0;
+
+		for (TreeOrderKeys::iterator sr = sorted.begin(); sr != sorted.end(); ++sr, ++n) {
+
+			neworder[n] = sr->old_display_order;
+
+			if (sr->old_display_order != n) {
+				changed = true;
+			}
+		}
+
+		if (changed) {
+			Unwinder<bool> uw (_ignore_reorder, true);
+			/* prevent traverse_cells: assertion 'row_path != NULL'
+			 * in case of DnD re-order: row-removed + row-inserted.
+			 *
+			 * The rows (stripables) are not actually removed from the model,
+			 * but only from the display in the DnDTreeView.
+			 * ->reorder() will fail to find the row_path.
+			 * (re-order drag -> remove row -> sync PI from TV -> notify -> sync TV from PI -> crash)
+			 */
+			Unwinder<bool> uw2 (_ignore_selection_change, true);
+
+			_display.unset_model();
+			_model->reorder (neworder);
+			_display.set_model (_model);
+		}
 	}
 
-	if (changed) {
-		Unwinder<bool> uw (_ignore_reorder, true);
-		_model->reorder (neworder);
+	if (changed || what_changed.contains (Properties::selected)) {
+		/* by the time this is invoked, the GUI Selection model has
+		 * already updated itself.
+		 */
+		PBD::Unwinder<bool> uw (_ignore_selection_change, true);
+
+		/* set the treeview model selection state */
+		for (TreeModel::Children::iterator ri = rows.begin(); ri != rows.end(); ++ri) {
+			boost::shared_ptr<Stripable> stripable = (*ri)[_columns.stripable];
+			if (stripable && stripable->is_selected()) {
+				_display.get_selection()->select (*ri);
+			} else {
+				_display.get_selection()->unselect (*ri);
+			}
+		}
 	}
 
 	redisplay ();
@@ -1098,7 +1183,7 @@ EditorRoutes::set_all_tracks_visibility (bool yn)
 	/* force route order keys catch up with visibility changes
 	 */
 
-	sync_order_keys_from_treeview ();
+	sync_presentation_info_from_treeview ();
 }
 
 void
@@ -1163,7 +1248,7 @@ EditorRoutes::set_all_audio_midi_visibility (int tracks, bool yn)
 	/* force route order keys catch up with visibility changes
 	 */
 
-	sync_order_keys_from_treeview ();
+	sync_presentation_info_from_treeview ();
 }
 
 void
@@ -1241,25 +1326,27 @@ EditorRoutes::key_press (GdkEventKey* ev)
 
 		case 'm':
 			if (get_relevant_routes (rl)) {
-				_session->set_mute (rl, !rl->front()->muted(), Session::rt_cleanup);
+				_session->set_controls (route_list_to_control_list (rl, &Stripable::mute_control), rl->front()->muted() ? 0.0 : 1.0, Controllable::NoGroup);
 			}
 			return true;
 			break;
 
 		case 's':
 			if (get_relevant_routes (rl)) {
-				if (Config->get_solo_control_is_listen_control()) {
-					_session->set_listen (rl, !rl->front()->listening_via_monitor(), Session::rt_cleanup);
-				} else {
-					_session->set_solo (rl, !rl->front()->self_soloed(), Session::rt_cleanup);
-				}
+				_session->set_controls (route_list_to_control_list (rl, &Stripable::solo_control), rl->front()->self_soloed() ? 0.0 : 1.0, Controllable::NoGroup);
 			}
 			return true;
 			break;
 
 		case 'r':
 			if (get_relevant_routes (rl)) {
-				_session->set_record_enabled (rl, !rl->front()->record_enabled(), Session::rt_cleanup);
+				for (RouteList::const_iterator r = rl->begin(); r != rl->end(); ++r) {
+					boost::shared_ptr<Track> t = boost::dynamic_pointer_cast<Track> (*r);
+					if (t) {
+						_session->set_controls (route_list_to_control_list (rl, &Stripable::rec_enable_control), !t->rec_enable_control()->get_value(), Controllable::NoGroup);
+						break;
+					}
+				}
 			}
 			break;
 
@@ -1314,10 +1401,26 @@ EditorRoutes::get_relevant_routes (boost::shared_ptr<RouteList> rl)
 }
 
 bool
+EditorRoutes::select_function(const Glib::RefPtr<Gtk::TreeModel>&, const Gtk::TreeModel::Path&, bool)
+{
+	return !column_does_not_select;
+}
+
+bool
+EditorRoutes::button_release (GdkEventButton*)
+{
+	column_does_not_select = false;
+	return false;
+}
+
+bool
 EditorRoutes::button_press (GdkEventButton* ev)
 {
 	if (Keyboard::is_context_menu_event (ev)) {
-		show_menu ();
+		if (_menu == 0) {
+			build_menu ();
+		}
+		_menu->popup (ev->button, ev->time);
 		return true;
 	}
 
@@ -1332,6 +1435,18 @@ EditorRoutes::button_press (GdkEventButton* ev)
 		/* end any editing by grabbing focus */
 		_display.grab_focus ();
 		return true;
+	}
+
+	if ((tvc == rec_state_column) ||
+	    (tvc == rec_safe_column) ||
+	    (tvc == input_active_column) ||
+	    (tvc == mute_state_column) ||
+	    (tvc == solo_state_column) ||
+	    (tvc == solo_safe_state_column) ||
+	    (tvc == solo_isolate_state_column) ||
+	    (tvc == visible_column) ||
+	    (tvc == active_column)) {
+		column_does_not_select = true;
 	}
 
 	//Scroll editor canvas to selected track
@@ -1351,6 +1466,10 @@ EditorRoutes::button_press (GdkEventButton* ev)
 void
 EditorRoutes::selection_changed ()
 {
+	if (_ignore_selection_change || column_does_not_select) {
+		return;
+	}
+
 	_editor->begin_reversible_selection_op (X_("Select Track from Route List"));
 
 	if (_display.get_selection()->count_selected_rows() > 0) {
@@ -1358,8 +1477,6 @@ EditorRoutes::selection_changed ()
 		TreeIter iter;
 		TreeView::Selection::ListHandle_Path rows = _display.get_selection()->get_selected_rows ();
 		TrackViewList selected;
-
-		_editor->get_selection().clear_regions ();
 
 		for (TreeView::Selection::ListHandle_Path::iterator i = rows.begin(); i != rows.end(); ++i) {
 
@@ -1381,188 +1498,139 @@ EditorRoutes::selection_changed ()
 	_editor->commit_reversible_selection_op ();
 }
 
-bool
-EditorRoutes::selection_filter (Glib::RefPtr<TreeModel> const &, TreeModel::Path const&, bool /*selected*/)
-{
-	if (selection_countdown) {
-		if (--selection_countdown == 0) {
-			return true;
-		} else {
-			/* no selection yet ... */
-			return false;
-		}
-	}
-	return true;
-}
-
-struct EditorOrderRouteSorter
-{
-	bool operator() (boost::shared_ptr<Route> a, boost::shared_ptr<Route> b) {
-		if (a->is_master()) {
-			/* master before everything else */
-			return true;
-		} else if (b->is_master()) {
-			/* everything else before master */
-			return false;
-		}
-		return a->order_key () < b->order_key ();
-	}
-};
-
 void
 EditorRoutes::initial_display ()
 {
+
+	if (!_session) {
+		clear ();
+		return;
+	}
+
 	DisplaySuspender ds;
 	_model->clear ();
 
-	if (!_session) {
-		return;
-	}
+	StripableList s;
 
-	RouteList r (*_session->get_routes());
+	_session->get_stripables (s);
+	_editor->add_stripables (s);
 
-	r.sort (EditorOrderRouteSorter ());
-	_editor->add_routes (r);
+	sync_treeview_from_presentation_info (Properties::order);
 }
 
-void
-EditorRoutes::display_drag_data_received (const RefPtr<Gdk::DragContext>& context,
-					     int x, int y,
-					     const SelectionData& data,
-					     guint info, guint time)
-{
-	if (data.get_target() == "GTK_TREE_MODEL_ROW") {
-		_display.on_drag_data_received (context, x, y, data, info, time);
-		return;
-	}
+struct ViewStripable {
+	TimeAxisView* tav;
+	boost::shared_ptr<Stripable> stripable;
 
-	context->drag_finish (true, false, time);
-}
+	ViewStripable (TimeAxisView* t, boost::shared_ptr<Stripable> s)
+		: tav (t), stripable (s) {}
+};
 
 void
 EditorRoutes::move_selected_tracks (bool up)
 {
-	if (_editor->selection->tracks.empty()) {
+	TimeAxisView* scroll_to = 0;
+	StripableList sl;
+	_session->get_stripables (sl);
+
+	if (sl.size() < 2) {
+		/* nope */
 		return;
 	}
 
-	typedef std::pair<TimeAxisView*,boost::shared_ptr<Route> > ViewRoute;
-	std::list<ViewRoute> view_routes;
-	std::vector<int> neworder;
-	TreeModel::Children rows = _model->children();
-	TreeModel::Children::iterator ri;
+	sl.sort (Stripable::Sorter());
 
-	for (ri = rows.begin(); ri != rows.end(); ++ri) {
-		TimeAxisView* tv = (*ri)[_columns.tv];
-		boost::shared_ptr<Route> route = (*ri)[_columns.route];
+	std::list<ViewStripable> view_stripables;
 
-		view_routes.push_back (ViewRoute (tv, route));
+	/* build a list that includes time axis view information */
+
+	for (StripableList::const_iterator sli = sl.begin(); sli != sl.end(); ++sli) {
+		TimeAxisView* tv = _editor->time_axis_view_from_stripable (*sli);
+		view_stripables.push_back (ViewStripable (tv, *sli));
 	}
 
-	list<ViewRoute>::iterator trailing;
-	list<ViewRoute>::iterator leading;
+	/* for each selected stripable, move it above or below the adjacent
+	 * stripable that has a time-axis view representation here. If there's
+	 * no such representation, then
+	 */
 
-	if (up) {
+	list<ViewStripable>::iterator unselected_neighbour;
+	list<ViewStripable>::iterator vsi;
 
-		trailing = view_routes.begin();
-		leading = view_routes.begin();
+	{
+		PresentationInfo::ChangeSuspender cs;
 
-		++leading;
+		if (up) {
+			unselected_neighbour = view_stripables.end ();
+			vsi = view_stripables.begin();
 
-		while (leading != view_routes.end()) {
-			if (_editor->selection->selected (leading->first)) {
-				view_routes.insert (trailing, ViewRoute (leading->first, leading->second));
-				leading = view_routes.erase (leading);
-			} else {
-				++leading;
-				++trailing;
+			while (vsi != view_stripables.end()) {
+
+				if (vsi->stripable->is_selected()) {
+
+					if (unselected_neighbour != view_stripables.end()) {
+
+						PresentationInfo::order_t unselected_neighbour_order = unselected_neighbour->stripable->presentation_info().order();
+						PresentationInfo::order_t my_order = vsi->stripable->presentation_info().order();
+
+						unselected_neighbour->stripable->set_presentation_order (my_order);
+						vsi->stripable->set_presentation_order (unselected_neighbour_order);
+
+						if (!scroll_to) {
+							scroll_to = vsi->tav;
+						}
+					}
+
+				} else {
+
+					if (vsi->tav) {
+						unselected_neighbour = vsi;
+					}
+
+				}
+
+				++vsi;
 			}
+
+		} else {
+
+			unselected_neighbour = view_stripables.end();
+			vsi = unselected_neighbour;
+
+			do {
+
+				--vsi;
+
+				if (vsi->stripable->is_selected()) {
+
+					if (unselected_neighbour != view_stripables.end()) {
+
+						PresentationInfo::order_t unselected_neighbour_order = unselected_neighbour->stripable->presentation_info().order();
+						PresentationInfo::order_t my_order = vsi->stripable->presentation_info().order();
+
+						unselected_neighbour->stripable->set_presentation_order (my_order);
+						vsi->stripable->set_presentation_order (unselected_neighbour_order);
+
+						if (!scroll_to) {
+							scroll_to = vsi->tav;
+						}
+					}
+
+				} else {
+
+					if (vsi->tav) {
+						unselected_neighbour = vsi;
+					}
+
+				}
+
+			} while (vsi != view_stripables.begin());
 		}
-
-	} else {
-
-		/* if we could use reverse_iterator in list::insert, this code
-		   would be a beautiful reflection of the code above. but we can't
-		   and so it looks like a bit of a mess.
-		*/
-
-		trailing = view_routes.end();
-		leading = view_routes.end();
-
-		--leading; if (leading == view_routes.begin()) { return; }
-		--leading;
-		--trailing;
-
-		while (1) {
-
-			if (_editor->selection->selected (leading->first)) {
-				list<ViewRoute>::iterator tmp;
-
-				/* need to insert *after* trailing, not *before* it,
-				   which is what insert (iter, val) normally does.
-				*/
-
-				tmp = trailing;
-				tmp++;
-
-				view_routes.insert (tmp, ViewRoute (leading->first, leading->second));
-
-				/* can't use iter = cont.erase (iter); form here, because
-				   we need iter to move backwards.
-				*/
-
-				tmp = leading;
-				--tmp;
-
-				bool done = false;
-
-				if (leading == view_routes.begin()) {
-					/* the one we've just inserted somewhere else
-					   was the first in the list. erase this copy,
-					   and then break, because we're done.
-					*/
-					done = true;
-				}
-
-				view_routes.erase (leading);
-
-				if (done) {
-					break;
-				}
-
-				leading = tmp;
-
-			} else {
-				if (leading == view_routes.begin()) {
-					break;
-				}
-				--leading;
-				--trailing;
-			}
-		};
 	}
 
-	for (leading = view_routes.begin(); leading != view_routes.end(); ++leading) {
-		uint32_t order = leading->second->order_key ();
-		neworder.push_back (order);
+	if (scroll_to) {
+		_editor->ensure_time_axis_view_is_visible (*scroll_to, false);
 	}
-
-#ifndef NDEBUG
-	DEBUG_TRACE (DEBUG::OrderKeys, "New order after moving tracks:\n");
-	for (vector<int>::iterator i = neworder.begin(); i != neworder.end(); ++i) {
-		DEBUG_TRACE (DEBUG::OrderKeys, string_compose ("\t%1\n", *i));
-	}
-	DEBUG_TRACE (DEBUG::OrderKeys, "-------\n");
-
-	for (vector<int>::iterator i = neworder.begin(); i != neworder.end(); ++i) {
-		if (*i >= (int) neworder.size()) {
-			cerr << "Trying to move something to " << *i << " of " << neworder.size() << endl;
-		}
-		assert (*i < (int) neworder.size ());
-	}
-#endif
-
-	_model->reorder (neworder);
 }
 
 void
@@ -1572,10 +1640,10 @@ EditorRoutes::update_input_active_display ()
 	TreeModel::Children::iterator i;
 
 	for (i = rows.begin(); i != rows.end(); ++i) {
-		boost::shared_ptr<Route> route = (*i)[_columns.route];
+		boost::shared_ptr<Stripable> stripable = (*i)[_columns.stripable];
 
-		if (boost::dynamic_pointer_cast<Track> (route)) {
-			boost::shared_ptr<MidiTrack> mt = boost::dynamic_pointer_cast<MidiTrack> (route);
+		if (boost::dynamic_pointer_cast<Track> (stripable)) {
+			boost::shared_ptr<MidiTrack> mt = boost::dynamic_pointer_cast<MidiTrack> (stripable);
 
 			if (mt) {
 				(*i)[_columns.is_input_active] = mt->input_active();
@@ -1600,16 +1668,24 @@ EditorRoutes::idle_update_mute_rec_solo_etc()
 	TreeModel::Children::iterator i;
 
 	for (i = rows.begin(); i != rows.end(); ++i) {
-		boost::shared_ptr<Route> route = (*i)[_columns.route];
-		(*i)[_columns.mute_state] = RouteUI::mute_active_state (_session, route);
-		(*i)[_columns.solo_state] = RouteUI::solo_active_state (route);
-		(*i)[_columns.solo_isolate_state] = RouteUI::solo_isolate_active_state (route) ? 1 : 0;
-		(*i)[_columns.solo_safe_state] = RouteUI::solo_safe_active_state (route) ? 1 : 0;
-		(*i)[_columns.active] = route->active ();
-		if (boost::dynamic_pointer_cast<Track> (route)) {
+		boost::shared_ptr<Stripable> stripable = (*i)[_columns.stripable];
+		boost::shared_ptr<Route> route = boost::dynamic_pointer_cast<Route> (stripable);
+		(*i)[_columns.mute_state] = RouteUI::mute_active_state (_session, stripable);
+		(*i)[_columns.solo_state] = RouteUI::solo_active_state (stripable);
+		(*i)[_columns.solo_isolate_state] = RouteUI::solo_isolate_active_state (stripable) ? 1 : 0;
+		(*i)[_columns.solo_safe_state] = RouteUI::solo_safe_active_state (stripable) ? 1 : 0;
+		if (route) {
+			(*i)[_columns.active] = route->active ();
+		} else {
+			(*i)[_columns.active] = true;
+		}
+
+		boost::shared_ptr<Track> trk (boost::dynamic_pointer_cast<Track>(route));
+
+		if (trk) {
 			boost::shared_ptr<MidiTrack> mt = boost::dynamic_pointer_cast<MidiTrack> (route);
 
-			if (route->record_enabled()) {
+			if (trk->rec_enable_control()->get_value()) {
 				if (_session->record_status() == Session::Recording) {
 					(*i)[_columns.rec_state] = 1;
 				} else {
@@ -1621,7 +1697,8 @@ EditorRoutes::idle_update_mute_rec_solo_etc()
 				(*i)[_columns.rec_state] = 0;
 			}
 
-			(*i)[_columns.name_editable] = !route->record_enabled ();
+			(*i)[_columns.rec_safe] = trk->rec_safe_control()->get_value();
+			(*i)[_columns.name_editable] = !trk->rec_enable_control()->get_value();
 		}
 	}
 
@@ -1675,6 +1752,7 @@ EditorRoutes::views () const
 void
 EditorRoutes::clear ()
 {
+	PBD::Unwinder<bool> uw (_ignore_selection_change, true);
 	_display.set_model (Glib::RefPtr<Gtk::TreeStore> (0));
 	_model->clear ();
 	_display.set_model (_model);
@@ -1705,10 +1783,10 @@ EditorRoutes::name_edit (std::string const & path, std::string const & new_text)
 		return;
 	}
 
-	boost::shared_ptr<Route> route = (*iter)[_columns.route];
+	boost::shared_ptr<Stripable> stripable = (*iter)[_columns.stripable];
 
-	if (route && route->name() != new_text) {
-		route->set_name (new_text);
+	if (stripable && stripable->name() != new_text) {
+		stripable->set_name (new_text);
 	}
 }
 
@@ -1721,11 +1799,11 @@ EditorRoutes::solo_changed_so_update_mute ()
 void
 EditorRoutes::show_tracks_with_regions_at_playhead ()
 {
-	boost::shared_ptr<RouteList> const r = _session->get_routes_with_regions_at (_session->transport_frame ());
+	boost::shared_ptr<RouteList> const r = _session->get_routes_with_regions_at (_session->transport_sample ());
 
 	set<TimeAxisView*> show;
 	for (RouteList::const_iterator i = r->begin(); i != r->end(); ++i) {
-		TimeAxisView* tav = _editor->axis_view_from_route (*i);
+		TimeAxisView* tav = _editor->time_axis_view_from_stripable (*i);
 		if (tav) {
 			show.insert (tav);
 		}
@@ -1745,5 +1823,13 @@ EditorRoutes::show_tracks_with_regions_at_playhead ()
 	/* force route order keys catch up with visibility changes
 	 */
 
-	sync_order_keys_from_treeview ();
+	sync_presentation_info_from_treeview ();
+}
+
+int
+EditorRoutes::plugin_setup (boost::shared_ptr<Route> r, boost::shared_ptr<PluginInsert> pi, ARDOUR::Route::PluginSetupOptions flags)
+{
+	PluginSetupDialog psd (r, pi, flags);
+	int rv = psd.run ();
+	return rv + (psd.fan_out() ? 4 : 0);
 }

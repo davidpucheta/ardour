@@ -13,10 +13,6 @@ from waflib.Task import Task
 top = '.'
 out = 'build'
 
-scanner_app_src = [
-    'scanner.cc',
-    ]
-
 # needed for code used from libardour
 I18N_PACKAGE = 'ardour'
 
@@ -42,7 +38,35 @@ def set_winegcc(self):
 
 def build(bld):
     VERSION = "%s.%s" % (bld.env['MAJOR'], bld.env['MINOR'])
-    if not (bld.is_defined('WINDOWS_VST_SUPPORT') or bld.is_defined('LXVST_SUPPORT')):
+
+    if bld.is_defined('VST3_SUPPORT'):
+        obj = bld (features = 'cxx c cxxprogram')
+        obj.source    = 'vst3-scanner.cc'
+        obj.target    = 'ardour-vst3-scanner'
+        obj.includes  = [ '../pbd/', '../ardour/', '../vst3/', '..' ]
+        obj.defines   = [
+            'VST3_SCANNER_APP',
+            'VERSIONSTRING="' + str(bld.env['VERSION']) + '"',
+            'PACKAGE="' + I18N_PACKAGE + str(bld.env['MAJOR']) + '"',
+            'LIBARDOUR="' + bld.env['lwrcase_dirname'] + '"',
+            'LOCALEDIR="' + os.path.join(os.path.normpath(bld.env['DATADIR']), 'locale') + '"',
+            ]
+        obj.use = [ 'libpbd' ]
+        obj.uselib = 'GIOMM DL UUID ARCHIVE CURL XML'
+
+        if sys.platform == 'darwin':
+            obj.uselib += ' OSX'
+        if bld.env['build_target'] == 'mingw':
+            obj.uselib += ' GDI32'
+            obj.linkflags = ['-mwindows']
+
+        if re.search ("bsd", sys.platform) != None:
+            obj.defines.append('_POSIX_C_SOURCE=200809')
+            obj.defines.append('_XOPEN_SOURCE=700')
+
+        obj.install_path = os.path.join(bld.env['LIBDIR'])
+
+    if not (bld.is_defined('WINDOWS_VST_SUPPORT') or bld.is_defined('LXVST_SUPPORT') or bld.is_defined ('MACVST_SUPPORT')):
         return
 
     if bld.is_defined('WINDOWS_VST_SUPPORT') and bld.env['build_target'] != 'mingw':
@@ -52,9 +76,7 @@ def build(bld):
         obj.target = 'ardour-vst-scanner'
         obj.chmod  = Utils.O755
         obj.install_path = os.path.join(bld.env['LIBDIR'])
-        obj.dict   = {
-            'VERSION' : bld.env['VERSION'],
-                }
+        obj.VERSION = bld.env['VERSION']
 
         obj = bld (features = 'c cxx cxxprogram wine')
         obj.source = (
@@ -66,7 +88,7 @@ def build(bld):
         obj.target = 'ardour-vst-scanner.exe.so'
         obj.uselib = ['GIOMM', 'DL']
         obj.use = [ 'libpbd' ]
-        obj.cxxflags  = [ '-fPIC' ]
+        obj.cxxflags = [  bld.env['compiler_flags_dict']['pic'] ]
     else:
         obj = bld (features = 'cxx c cxxprogram')
         obj.source = ( 'scanner.cc' )
@@ -77,7 +99,7 @@ def build(bld):
             obj.linkflags = ['-mwindows']
             obj.use = [ 'libpbd', 'vstwin' ]
         else:
-            obj.uselib = ['GIOMM', 'DL']
+            obj.uselib = ['GIOMM', 'DL', 'OSX', 'XML', 'ARCHIVE', 'CURL']
             obj.use = [ 'libpbd' ]
 
     obj.includes  = [ '../pbd/', '../ardour/', '.' ]
@@ -88,4 +110,8 @@ def build(bld):
         'PACKAGE="' + I18N_PACKAGE + str(bld.env['MAJOR']) + '"',
         'LIBARDOUR="' + bld.env['lwrcase_dirname'] + '"',
         ]
+    if re.search ("bsd", sys.platform) != None:
+        obj.defines.append('_POSIX_C_SOURCE=200809')
+        obj.defines.append('_XOPEN_SOURCE=700')
+
     obj.install_path = os.path.join(bld.env['LIBDIR'])

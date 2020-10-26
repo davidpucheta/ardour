@@ -1,20 +1,24 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2018 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_delivery_h__
 #define __ardour_delivery_h__
@@ -25,6 +29,7 @@
 #include "ardour/types.h"
 #include "ardour/chan_count.h"
 #include "ardour/io_processor.h"
+#include "ardour/gain_control.h"
 
 namespace ARDOUR {
 
@@ -48,7 +53,9 @@ public:
 		/* listen - internal send used only to deliver to control/monitor bus */
 		Listen = 0x8,
 		/* aux - internal send used to deliver to any bus, by user request */
-		Aux    = 0x10
+		Aux    = 0x10,
+		/* foldback - internal send used only to deliver to a personal monitor bus */
+		Foldback = 0x20
 	};
 
 	static bool role_requires_output_ports (Role r) { return r == Main || r == Send || r == Insert; }
@@ -71,20 +78,19 @@ public:
 	bool can_support_io_configuration (const ChanCount& in, ChanCount& out);
 	bool configure_io (ChanCount in, ChanCount out);
 
-	void run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pframes_t nframes, bool);
+	void run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, double speed, pframes_t nframes, bool);
 
 	/* supplemental method used with MIDI */
 
-	void flush_buffers (framecnt_t nframes);
+	void flush_buffers (samplecnt_t nframes);
 	void no_outs_cuz_we_no_monitor(bool);
-	void transport_stopped (framepos_t frame);
-	void realtime_locate ();
+	void non_realtime_transport_stop (samplepos_t now, bool flush);
+	void realtime_locate (bool);
 
 	BufferSet& output_buffers() { return *_output_buffers; }
 
 	PBD::Signal0<void> MuteChange;
 
-	XMLNode& state (bool full);
 	int set_state (const XMLNode&, int version);
 
 	/* Panning */
@@ -95,6 +101,10 @@ public:
 	boost::shared_ptr<PannerShell> panner_shell() const { return _panshell; }
 	boost::shared_ptr<Panner> panner() const;
 
+	void add_gain (boost::shared_ptr<GainControl> gc) {
+		_gain_control = gc;
+	}
+
 	void unpan ();
 	void reset_panner ();
 	void defer_pan_reset ();
@@ -103,7 +113,9 @@ public:
 	uint32_t pans_required() const { return _configured_input.n_audio(); }
 	virtual uint32_t pan_outs() const;
 
-  protected:
+protected:
+	XMLNode& state ();
+
 	Role        _role;
 	BufferSet*  _output_buffers;
 	gain_t      _current_gain;
@@ -111,9 +123,11 @@ public:
 
 	gain_t target_gain ();
 
-  private:
-	bool        _no_outs_cuz_we_no_monitor;
-	boost::shared_ptr<MuteMaster> _mute_master;
+private:
+	bool _no_outs_cuz_we_no_monitor;
+
+	boost::shared_ptr<MuteMaster>  _mute_master;
+	boost::shared_ptr<GainControl> _gain_control;
 
 	static bool panners_legal;
 	static PBD::Signal0<void> PannersLegal;

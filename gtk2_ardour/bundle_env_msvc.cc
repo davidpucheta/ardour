@@ -1,24 +1,25 @@
 /*
-    Copyright (C) 2014 John Emmas
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014-2017 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2015-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "bundle_env.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include <shlobj.h>
 #include <stdlib.h>
@@ -236,6 +237,7 @@ string fonts_conf_file;
 	if (!fonts_conf_file.empty()) {
 		fonts_conf_file += "\\";
 		fonts_conf_file += PROGRAM_NAME;
+		fonts_conf_file += PROGRAM_VERSION;
 		fonts_conf_file += FONTS_CONF_LOCATION;
 #else
 	if (PBD::find_file (ARDOUR::ardour_config_search_path(), "fonts.conf", fonts_conf_file)) {
@@ -261,6 +263,7 @@ string pango_modules_file;
 	if (!pango_modules_file.empty()) {
 		pango_modules_file += "\\";
 		pango_modules_file += PROGRAM_NAME;
+		pango_modules_file += PROGRAM_VERSION;
 		pango_modules_file += PANGO_CONF_LOCATION;
 #if 0
 // JE - handy for non-English locale testing (Greek, in this case)
@@ -299,6 +302,7 @@ string gdk_pixbuf_loaders_file;
 	if (!gdk_pixbuf_loaders_file.empty()) {
 		gdk_pixbuf_loaders_file += "\\";
 		gdk_pixbuf_loaders_file += PROGRAM_NAME;
+		gdk_pixbuf_loaders_file += PROGRAM_VERSION;
 		gdk_pixbuf_loaders_file += PIXBUFLOADERS_CONF_LOCATION;
 #else
 	if (PBD::find_file (ARDOUR::ardour_config_search_path(), "gdk-pixbuf.loaders", gdk_pixbuf_loaders_file)) {
@@ -325,6 +329,7 @@ string clearlooks_la_file;
 	if (!clearlooks_la_file.empty()) {
 		clearlooks_la_file += "\\";
 		clearlooks_la_file += PROGRAM_NAME;
+		clearlooks_la_file += PROGRAM_VERSION;
 		clearlooks_la_file += CLEARLOOKS_CONF_LOCATION;
 #else
 	if (PBD::find_file (ARDOUR::ardour_config_search_path(), "libclearlooks.la", clearlooks_la_file)) {
@@ -373,6 +378,7 @@ fixup_bundle_environment (int argc, char* argv[], string & localedir)
 	// Next, set up 'ARDOUR_DATA_PATH'
 	path  = get_module_folder() + "\\";
 	path += PROGRAM_NAME;
+	path += PROGRAM_VERSION;
 	path += "\\share";
 	Glib::setenv ("ARDOUR_DATA_PATH", path, true);
 
@@ -384,21 +390,6 @@ fixup_bundle_environment (int argc, char* argv[], string & localedir)
 	path = user_config_directory() + "\\win32;";
 #endif
 	Glib::setenv ("ARDOUR_CONFIG_PATH", path, true);
-
-
-	// Next, set up 'ARDOUR_PATH'
-	path  = user_config_directory();
-	path  = Glib::path_get_dirname (path);
-	path += G_SEARCHPATH_SEPARATOR;
-	path += windows_search_path().to_string();
-	path += "\\icons;";
-	path += windows_search_path().to_string();
-	path += "\\pixmaps;";
-	path += ardour_data_search_path().to_string();  // In fact, adds both the 'data' search
-	path += G_SEARCHPATH_SEPARATOR;                 // path and our 'config' search path
-	path += dir_path;
-	path += "\\etc";
-	Glib::setenv ("ARDOUR_PATH", path, true);
 
 
 	// Next, set up 'ARDOUR_INSTANT_XML_PATH'
@@ -425,6 +416,7 @@ fixup_bundle_environment (int argc, char* argv[], string & localedir)
 	}
 	path += get_module_folder() + "\\";
 	path += PROGRAM_NAME;
+	path += PROGRAM_VERSION;
 	path += "\\bin\\vamp";
 	path += G_SEARCHPATH_SEPARATOR;
 	path += "%ProgramFiles%\\Vamp Plugins";
@@ -492,22 +484,29 @@ fixup_bundle_environment (int argc, char* argv[], string & localedir)
 
 void load_custom_fonts()
 {
-	std::string ardour_mono_file;
+	FcConfig* config = FcInitLoadConfigAndFonts();
 
-	if (!find_file (ardour_data_search_path(), "ArdourMono.ttf", ardour_mono_file)) {
+	std::string font_file;
+
+	if (!find_file (ardour_data_search_path(), "ArdourMono.ttf", font_file)) {
 		cerr << _("Cannot find ArdourMono TrueType font") << endl;
+	} else {
+		FcBool ret = FcConfigAppFontAddFile(config, reinterpret_cast<const FcChar8*>(font_file.c_str()));
+		if (ret == FcFalse) {
+			cerr << _("Cannot load ArdourMono TrueType font.") << endl;
+		}
 	}
 
-	FcConfig *config = FcInitLoadConfigAndFonts();
-	FcBool ret = FcConfigAppFontAddFile(config, reinterpret_cast<const FcChar8*>(ardour_mono_file.c_str()));
-
-	if (ret == FcFalse) {
-		cerr << _("Cannot load ArdourMono TrueType font.") << endl;
+	if (!find_file (ardour_data_search_path(), "ArdourSans.ttf", font_file)) {
+		cerr << _("Cannot find ArdourSans TrueType font") << endl;
+	} else {
+		FcBool ret = FcConfigAppFontAddFile(config, reinterpret_cast<const FcChar8*>(font_file.c_str()));
+		if (ret == FcFalse) {
+			cerr << _("Cannot load ArdourSans TrueType font.") << endl;
+		}
 	}
 
-	ret = FcConfigSetCurrent(config);
-
-	if (ret == FcFalse) {
+	if (FcFalse == FcConfigSetCurrent(config)) {
 		cerr << _("Failed to set fontconfig configuration.") << endl;
 	}
 }

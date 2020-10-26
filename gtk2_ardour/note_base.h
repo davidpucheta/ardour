@@ -1,28 +1,31 @@
 /*
-    Copyright (C) 2007 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_note_base_h__
 #define __gtk_ardour_note_base_h__
 
 #include <boost/shared_ptr.hpp>
 
+#include "temporal/beats.h"
 #include "canvas/types.h"
+#include "gtkmm2ext/colors.h"
 
 #include "rgb_macros.h"
 #include "ui_config.h"
@@ -52,8 +55,14 @@ namespace ArdourCanvas {
  */
 class NoteBase : public sigc::trackable
 {
+  private:
+	enum Flags {
+		Selected = 0x1,
+		HideSelection = 0x2,
+	};
+
   public:
-	typedef Evoral::Note<Evoral::Beats> NoteType;
+	typedef Evoral::Note<Temporal::Beats> NoteType;
 
 	NoteBase (MidiRegionView& region, bool, const boost::shared_ptr<NoteType> note = boost::shared_ptr<NoteType>());
 	virtual ~NoteBase ();
@@ -68,8 +77,9 @@ class NoteBase : public sigc::trackable
 	void invalidate ();
 	void validate ();
 
-	bool selected() const { return _selected; }
+	bool selected() const { return _flags & Selected; }
 	void set_selected(bool yn);
+	void set_hide_selection (bool yn);
 
 	virtual void move_event(double dx, double dy) = 0;
 
@@ -100,26 +110,14 @@ class NoteBase : public sigc::trackable
 	const boost::shared_ptr<NoteType> note() const { return _note; }
 	MidiRegionView& region_view() const { return _region; }
 
-	inline static uint32_t meter_style_fill_color(uint8_t vel, bool selected) {
-		if (selected) {
-			return UIConfiguration::instance().color_mod ("midi note selected", "midi note");
-		} else if (vel < 64) {
-			return UINT_INTERPOLATE(
-				UIConfiguration::instance().color_mod ("midi note min", "midi note"),
-				UIConfiguration::instance().color_mod ("midi note mid", "midi note"),
-				(vel / (double)63.0));
-		} else {
-			return UINT_INTERPOLATE(
-				UIConfiguration::instance().color_mod ("midi note mid", "midi note"),
-				UIConfiguration::instance().color_mod ("midi note max", "midi note"),
-				((vel-64) / (double)63.0));
-		}
-	}
+	static void set_colors ();
+
+	static Gtkmm2ext::Color meter_style_fill_color(uint8_t vel, bool selected);
 
 	/// calculate outline colors from fill colors of notes
-	inline static uint32_t calculate_outline(uint32_t color, bool selected=false) {
-		if (selected) {
-			return UIConfiguration::instance().color ("midi note selected outline");
+	inline static uint32_t calculate_outline(uint32_t color, bool showing_selection = false) {
+		if (showing_selection) {
+			return _selected_col;
 		} else {
 			return UINT_INTERPOLATE(color, 0x000000ff, 0.5);
 		}
@@ -141,7 +139,7 @@ protected:
 	const boost::shared_ptr<NoteType> _note;
 	bool                              _with_events;
 	bool                              _own_note;
-	bool                              _selected;
+	Flags                             _flags;
 	bool                              _valid;
 	float                             _mouse_x_fraction;
 	float                             _mouse_y_fraction;
@@ -150,6 +148,11 @@ protected:
 
 private:
 	bool event_handler (GdkEvent *);
+
+	static Gtkmm2ext::Color _selected_col;
+	static Gtkmm2ext::SVAModifier color_modifier;
+	static Gtkmm2ext::Color velocity_color_table[128];
+	static bool _color_init;
 };
 
 #endif /* __gtk_ardour_note_h__ */

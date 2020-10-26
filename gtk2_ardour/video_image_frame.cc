@@ -1,34 +1,36 @@
 /*
-    Copyright (C) 2010, 2013 Paul Davis
-    Author: Robin Gareus <robin@gareus.org>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2013-2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2013-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <sigc++/bind.h>
 #include "ardour/tempo.h"
-
-#include "video_image_frame.h"
-#include "public_editor.h"
-#include "canvas/container.h"
-#include "utils_videotl.h"
 
 #include <gtkmm2ext/utils.h>
 #include <pthread.h>
 
-#include "i18n.h"
+#include "canvas/container.h"
+
+#include "ardour_http.h"
+#include "public_editor.h"
+#include "utils_videotl.h"
+#include "video_image_frame.h"
+
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -61,7 +63,7 @@ VideoImageFrame::VideoImageFrame (PublicEditor& ed, ArdourCanvas::Container& par
 	image = new ArdourCanvas::Image (_parent, Cairo::FORMAT_ARGB32, clip_width, clip_height);
 
 	img = image->get_image();
-	fill_frame(0, 0, 0);
+	fill_frame (0, 0, 0);
 	draw_line();
 	draw_x();
 	image->put_image(img);
@@ -78,7 +80,7 @@ VideoImageFrame::~VideoImageFrame ()
 }
 
 void
-VideoImageFrame::set_position (framepos_t sample)
+VideoImageFrame::set_position (samplepos_t sample)
 {
 	double new_unit_position = editor.sample_to_pixel (sample);
 	image->move (ArdourCanvas::Duple (new_unit_position - unit_position, 0.0));
@@ -98,7 +100,7 @@ VideoImageFrame::exposeimg () {
 }
 
 void
-VideoImageFrame::set_videoframe (framepos_t videoframenumber, int re)
+VideoImageFrame::set_videoframe (samplepos_t videoframenumber, int re)
 {
 	if (video_frame_number == videoframenumber && rightend == re) return;
 
@@ -106,7 +108,7 @@ VideoImageFrame::set_videoframe (framepos_t videoframenumber, int re)
 	rightend = re;
 
 	img = image->get_image();
-	fill_frame(0, 0, 0);
+	fill_frame (0, 0, 0);
 	draw_x();
 	draw_line();
 	cut_rightend();
@@ -114,7 +116,7 @@ VideoImageFrame::set_videoframe (framepos_t videoframenumber, int re)
 	exposeimg();
 
 	/* request video-frame from decoder in background thread */
-	http_get(video_frame_number);
+	http_get (video_frame_number);
 }
 
 void
@@ -208,7 +210,7 @@ http_get_thread (void *arg) {
 	int timeout = 1000; // * 5ms -> 5sec
 	char *res = NULL;
 	do {
-		res=a3_curl_http_get(url, &status);
+		res = ArdourCurl::http_get (url, &status, false);
 		if (status == 503) Glib::usleep(5000); // try-again
 	} while (status == 503 && --timeout > 0);
 
@@ -232,7 +234,7 @@ VideoImageFrame::http_download_done (char *data){
 	if (!data) {
 		/* Image request failed (HTTP error or timeout) */
 		img = image->get_image();
-		fill_frame(128, 0, 0);
+		fill_frame (128, 0, 0);
 		draw_x();
 		cut_rightend();
 		draw_line();
@@ -259,7 +261,7 @@ VideoImageFrame::http_download_done (char *data){
 
 
 void
-VideoImageFrame::http_get(framepos_t fn) {
+VideoImageFrame::http_get (samplepos_t fn) {
 	if (pthread_mutex_trylock(&request_lock)) {
 		pthread_mutex_lock(&queue_lock);
 		queued_request=true;
@@ -282,7 +284,7 @@ VideoImageFrame::http_get(framepos_t fn) {
 }
 
 void
-VideoImageFrame::http_get_again(framepos_t /*fn*/) {
+VideoImageFrame::http_get_again(samplepos_t /*fn*/) {
 	pthread_mutex_lock(&queue_lock);
 	queued_request=false;
 	req_video_frame_number=want_video_frame_number;

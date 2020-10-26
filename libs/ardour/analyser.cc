@@ -1,30 +1,36 @@
 /*
-    Copyright (C) 2008 Paul Davis
+ * Copyright (C) 2008-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2015-2016 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
 
 #include "ardour/analyser.h"
 #include "ardour/audiofilesource.h"
+#include "ardour/rc_configuration.h"
 #include "ardour/session_event.h"
 #include "ardour/transient_detector.h"
 
 #include "pbd/compose.h"
 #include "pbd/error.h"
-#include "i18n.h"
+#include "pbd/pthread_utils.h"
+
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -48,6 +54,7 @@ Analyser::~Analyser ()
 static void
 analyser_work ()
 {
+	pthread_set_name ("Analyzer");
 	Analyser::work ();
 }
 
@@ -96,7 +103,7 @@ Analyser::work ()
 
 		boost::shared_ptr<AudioFileSource> afs = boost::dynamic_pointer_cast<AudioFileSource> (src);
 
-		if (afs && afs->length(afs->timeline_position())) {
+		if (afs && afs->length(afs->natural_position())) {
 			Glib::Threads::Mutex::Lock lm (analysis_active_lock);
 			analyse_audio_file_source (afs);
 		}
@@ -110,6 +117,7 @@ Analyser::analyse_audio_file_source (boost::shared_ptr<AudioFileSource> src)
 
 	try {
 		TransientDetector td (src->sample_rate());
+		td.set_sensitivity (3, Config->get_transient_sensitivity()); // "General purpose"
 		if (td.run (src->get_transients_path(), src.get(), 0, results) == 0) {
 			src->set_been_analysed (true);
 		} else {

@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstring>
 
@@ -25,9 +26,10 @@
 #include "pbd/debug.h"
 #include "pbd/event_loop.h"
 #include "pbd/error.h"
+#include "pbd/pthread_utils.h"
 #include "pbd/stacktrace.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 using namespace std;
@@ -45,6 +47,18 @@ EventLoop::EventLoop (string const& name)
 {
 }
 
+EventLoop::~EventLoop ()
+{
+	trash.sort();
+	trash.unique();
+	for (std::list<InvalidationRecord*>::iterator r = trash.begin(); r != trash.end(); ++r) {
+		if (!(*r)->in_use ()) {
+			delete *r;
+		}
+	}
+	trash.clear ();
+}
+
 EventLoop*
 EventLoop::get_event_loop_for_thread()
 {
@@ -60,7 +74,7 @@ EventLoop::set_event_loop_for_thread (EventLoop* loop)
 void*
 EventLoop::invalidate_request (void* data)
 {
-        InvalidationRecord* ir = (InvalidationRecord*) data;
+	InvalidationRecord* ir = (InvalidationRecord*) data;
 
 	/* Some of the requests queued with an EventLoop may involve functors
 	 * that make method calls to objects whose lifetime is shorter
@@ -86,16 +100,14 @@ EventLoop::invalidate_request (void* data)
 	 * inherit (indirectly) from sigc::trackable.
 	 */
 
-        if (ir->event_loop) {
+	if (ir->event_loop) {
+		DEBUG_TRACE (PBD::DEBUG::EventLoop, string_compose ("%1: invalidating request from %2 (%3) @ %4\n", pthread_name(), ir->event_loop, ir->event_loop->event_loop_name(), ir));
 		Glib::Threads::Mutex::Lock lm (ir->event_loop->slot_invalidation_mutex());
-		for (list<BaseRequestObject*>::iterator i = ir->requests.begin(); i != ir->requests.end(); ++i) {
-			(*i)->valid = false;
-			(*i)->invalidation = 0;
-		}
-		delete ir;
-        }
+		ir->invalidate ();
+		ir->event_loop->trash.push_back(ir);
+	}
 
-        return 0;
+	return 0;
 }
 
 vector<EventLoop::ThreadBufferMapping>

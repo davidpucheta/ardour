@@ -1,28 +1,29 @@
 /*
-    Copyright (C) 2000-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-    $Id$
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2009 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2007-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2015 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifdef WAF_BUILD
 #include "libardour-config.h"
 #endif
 
-#include "pbd/boost_debug.h"
 #include "pbd/error.h"
 #include "pbd/convert.h"
 #include "pbd/pthread_utils.h"
@@ -30,8 +31,10 @@
 
 #include "ardour/audioplaylist.h"
 #include "ardour/audio_playlist_source.h"
+#include "ardour/boost_debug.h"
 #include "ardour/midi_playlist.h"
 #include "ardour/midi_playlist_source.h"
+#include "ardour/mp3filesource.h"
 #include "ardour/source.h"
 #include "ardour/source_factory.h"
 #include "ardour/sndfilesource.h"
@@ -39,12 +42,11 @@
 #include "ardour/smf_source.h"
 #include "ardour/session.h"
 
-#ifdef  HAVE_COREAUDIO
+#ifdef HAVE_COREAUDIO
 #include "ardour/coreaudiosource.h"
 #endif
 
-
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace std;
@@ -61,6 +63,7 @@ static void
 peak_thread_work ()
 {
 	SessionEvent::create_per_thread_pool (X_("PeakFile Builder "), 64);
+	pthread_set_name ("PeakFileBuilder");
 
 	while (true) {
 
@@ -134,13 +137,11 @@ SourceFactory::setup_peakfile (boost::shared_ptr<Source> s, bool async)
 }
 
 boost::shared_ptr<Source>
-SourceFactory::createSilent (Session& s, const XMLNode& node, framecnt_t nframes, float sr)
+SourceFactory::createSilent (Session& s, const XMLNode& node, samplecnt_t nframes, float sr)
 {
 	Source* src = new SilentFileSource (s, node, nframes, sr);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-	// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
 	boost::shared_ptr<Source> ret (src);
+	BOOST_MARK_SOURCE (ret);
 	// no analysis data - the file is non-existent
 	SourceCreated (ret);
 	return ret;
@@ -150,7 +151,7 @@ boost::shared_ptr<Source>
 SourceFactory::create (Session& s, const XMLNode& node, bool defer_peaks)
 {
 	DataType type = DataType::AUDIO;
-	const XMLProperty* prop = node.property("type");
+	XMLProperty const * prop = node.property("type");
 
 	if (prop) {
 		type = DataType (prop->value());
@@ -180,32 +181,23 @@ SourceFactory::create (Session& s, const XMLNode& node, bool defer_peaks)
 
 		} else {
 
-
 			try {
 				Source* src = new SndFileSource (s, node);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-				// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
 				boost::shared_ptr<Source> ret (src);
+				BOOST_MARK_SOURCE (ret);
 				if (setup_peakfile (ret, defer_peaks)) {
 					return boost::shared_ptr<Source>();
 				}
 				ret->check_for_analysis_data_on_disk ();
 				SourceCreated (ret);
 				return ret;
-			}
-
-			catch (failed_constructor& err) {
+			} catch (failed_constructor& err) { }
 
 #ifdef HAVE_COREAUDIO
-
-				/* this is allowed to throw */
-
-				Source *src = new CoreAudioSource (s, node);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-				// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
+			try {
+				Source* src = new CoreAudioSource (s, node);
 				boost::shared_ptr<Source> ret (src);
+				BOOST_MARK_SOURCE (ret);
 
 				if (setup_peakfile (ret, defer_peaks)) {
 					return boost::shared_ptr<Source>();
@@ -214,21 +206,23 @@ SourceFactory::create (Session& s, const XMLNode& node, bool defer_peaks)
 				ret->check_for_analysis_data_on_disk ();
 				SourceCreated (ret);
 				return ret;
-#else
-				throw; // rethrow
+			} catch (...) { }
 #endif
-			}
+			/* this is allowed to throw */
+			throw failed_constructor ();
 		}
+
 	} else if (type == DataType::MIDI) {
-		boost::shared_ptr<SMFSource> src (new SMFSource (s, node));
-		Source::Lock lock(src->mutex());
-		src->load_model (lock, true);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-		// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
-		src->check_for_analysis_data_on_disk ();
-		SourceCreated (src);
-		return src;
+		try {
+			boost::shared_ptr<SMFSource> src (new SMFSource (s, node));
+			Source::Lock lock(src->mutex());
+			src->load_model (lock, true);
+			BOOST_MARK_SOURCE (src);
+			src->check_for_analysis_data_on_disk ();
+			SourceCreated (src);
+			return src;
+		} catch (...) {
+		}
 	}
 
 	return boost::shared_ptr<Source>();
@@ -240,67 +234,62 @@ SourceFactory::createExternal (DataType type, Session& s, const string& path,
 {
 	if (type == DataType::AUDIO) {
 
-		if (!(flags & Destructive)) {
-
-			try {
-
-				Source* src = new SndFileSource (s, path, chn, flags);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-				// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
-				boost::shared_ptr<Source> ret (src);
-
-				if (setup_peakfile (ret, defer_peaks)) {
-					return boost::shared_ptr<Source>();
-				}
-
-				ret->check_for_analysis_data_on_disk ();
-				if (announce) {
-					SourceCreated (ret);
-				}
-				return ret;
+		try {
+			Source* src = new SndFileSource (s, path, chn, flags);
+			boost::shared_ptr<Source> ret (src);
+			BOOST_MARK_SOURCE (ret);
+			if (setup_peakfile (ret, defer_peaks)) {
+				return boost::shared_ptr<Source>();
 			}
+			ret->check_for_analysis_data_on_disk ();
+			if (announce) {
+				SourceCreated (ret);
+			}
+			return ret;
+		} catch (failed_constructor& err) { }
 
-			catch (failed_constructor& err) {
 #ifdef HAVE_COREAUDIO
-
-				Source* src = new CoreAudioSource (s, path, chn, flags);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-				// boost_debug_shared_ptr_mark_interesting (src, "Source");
+		try {
+			Source* src = new CoreAudioSource (s, path, chn, flags);
+			boost::shared_ptr<Source> ret (src);
+			BOOST_MARK_SOURCE (ret);
+			if (setup_peakfile (ret, defer_peaks)) {
+				return boost::shared_ptr<Source>();
+			}
+			ret->check_for_analysis_data_on_disk ();
+			if (announce) {
+				SourceCreated (ret);
+			}
+			return ret;
+		} catch (...) { }
 #endif
+
+		/* only create mp3s for audition: no announce, no peaks */
+		if (!announce && (!AudioFileSource::get_build_peakfiles () || defer_peaks)) {
+			try {
+				Source* src = new Mp3FileSource (s, path, chn, flags);
 				boost::shared_ptr<Source> ret (src);
-				if (setup_peakfile (ret, defer_peaks)) {
-					return boost::shared_ptr<Source>();
-				}
-				ret->check_for_analysis_data_on_disk ();
-				if (announce) {
-					SourceCreated (ret);
-				}
+				BOOST_MARK_SOURCE (ret);
 				return ret;
 
-#else
-				throw; // rethrow
-#endif
-			}
-
-		} else {
-			// eh?
+			} catch (failed_constructor& err) { }
 		}
 
 	} else if (type == DataType::MIDI) {
 
-		boost::shared_ptr<SMFSource> src (new SMFSource (s, path));
-		Source::Lock lock(src->mutex());
-		src->load_model (lock, true);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-		// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
+		try {
+			boost::shared_ptr<SMFSource> src (new SMFSource (s, path));
+			Source::Lock lock(src->mutex());
+			src->load_model (lock, true);
+			BOOST_MARK_SOURCE (src);
 
-		if (announce) {
-			SourceCreated (src);
+			if (announce) {
+				SourceCreated (src);
+			}
+
+			return src;
+		} catch (...) {
 		}
-
-		return src;
 
 	}
 
@@ -309,7 +298,7 @@ SourceFactory::createExternal (DataType type, Session& s, const string& path,
 
 boost::shared_ptr<Source>
 SourceFactory::createWritable (DataType type, Session& s, const std::string& path,
-			       bool destructive, framecnt_t rate, bool announce, bool defer_peaks)
+			       samplecnt_t rate, bool announce, bool defer_peaks)
 {
 	/* this might throw failed_constructor(), which is OK */
 
@@ -318,13 +307,9 @@ SourceFactory::createWritable (DataType type, Session& s, const std::string& pat
 						 s.config.get_native_file_data_format(),
 						 s.config.get_native_file_header_format(),
 						 rate,
-						 (destructive
-						  ? Source::Flag (SndFileSource::default_writable_flags | Source::Destructive)
-						  : SndFileSource::default_writable_flags));
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-		// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
+		                                 SndFileSource::default_writable_flags);
 		boost::shared_ptr<Source> ret (src);
+		BOOST_MARK_SOURCE (ret);
 
 		if (setup_peakfile (ret, defer_peaks)) {
 			return boost::shared_ptr<Source>();
@@ -339,22 +324,25 @@ SourceFactory::createWritable (DataType type, Session& s, const std::string& pat
 
 	} else if (type == DataType::MIDI) {
                 // XXX writable flags should belong to MidiSource too
-		boost::shared_ptr<SMFSource> src (new SMFSource (s, path, SndFileSource::default_writable_flags));
-		assert (src->writable ());
+		try {
+			boost::shared_ptr<SMFSource> src (new SMFSource (s, path, SndFileSource::default_writable_flags));
 
-		Source::Lock lock(src->mutex());
-		src->load_model (lock, true);
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-		// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
+			assert (src->writable ());
 
-		// no analysis data - this is a new file
+			Source::Lock lock(src->mutex());
+			src->load_model (lock, true);
+			BOOST_MARK_SOURCE (src);
 
-		if (announce) {
-			SourceCreated (src);
+			// no analysis data - this is a new file
+
+			if (announce) {
+				SourceCreated (src);
+			}
+
+			return src;
+
+		} catch (...) {
 		}
-		return src;
-
 	}
 
 	return boost::shared_ptr<Source> ();
@@ -368,10 +356,8 @@ SourceFactory::createForRecovery (DataType type, Session& s, const std::string& 
 	if (type == DataType::AUDIO) {
 		Source* src = new SndFileSource (s, path, chn);
 
-#ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
-		// boost_debug_shared_ptr_mark_interesting (src, "Source");
-#endif
 		boost::shared_ptr<Source> ret (src);
+		BOOST_MARK_SOURCE (ret);
 
 		if (setup_peakfile (ret, false)) {
 			return boost::shared_ptr<Source>();
@@ -395,7 +381,7 @@ SourceFactory::createForRecovery (DataType type, Session& s, const std::string& 
 
 boost::shared_ptr<Source>
 SourceFactory::createFromPlaylist (DataType type, Session& s, boost::shared_ptr<Playlist> p, const PBD::ID& orig, const std::string& name,
-				   uint32_t chn, frameoffset_t start, framecnt_t len, bool copy, bool defer_peaks)
+				   uint32_t chn, sampleoffset_t start, samplecnt_t len, bool copy, bool defer_peaks)
 {
 	if (type == DataType::AUDIO) {
 		try {
@@ -455,4 +441,3 @@ SourceFactory::createFromPlaylist (DataType type, Session& s, boost::shared_ptr<
 
 	return boost::shared_ptr<Source>();
 }
-

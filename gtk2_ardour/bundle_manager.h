@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2010 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2014 David Robillard <d@drobilla.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_ui_bundle_manager_h__
 #define __ardour_ui_bundle_manager_h__
@@ -36,7 +37,7 @@ namespace ARDOUR {
 
 class BundleEditorMatrix : public PortMatrix
 {
-  public:
+public:
 	BundleEditorMatrix (Gtk::Window *, ARDOUR::Session *, boost::shared_ptr<ARDOUR::Bundle>);
 
 	void set_state (ARDOUR::BundleChannel c[2], bool s);
@@ -54,7 +55,7 @@ class BundleEditorMatrix : public PortMatrix
 
 	std::string disassociation_verb () const;
 
-  private:
+private:
 	enum {
 		OTHER = 0,
 		OURS = 1
@@ -66,13 +67,13 @@ class BundleEditorMatrix : public PortMatrix
 
 class BundleEditor : public ArdourDialog
 {
-  public:
+public:
 	BundleEditor (ARDOUR::Session *, boost::shared_ptr<ARDOUR::UserBundle>);
 
-  protected:
+protected:
 	void on_map ();
 
-  private:
+private:
 	void name_changed ();
 	void input_or_output_changed ();
 	void on_show ();
@@ -85,16 +86,16 @@ class BundleEditor : public ArdourDialog
 
 class BundleManager : public ArdourDialog
 {
-  public:
+public:
 	BundleManager (ARDOUR::Session *);
 
-  private:
+private:
 
 	void new_clicked ();
 	void edit_clicked ();
 	void delete_clicked ();
 	void add_bundle (boost::shared_ptr<ARDOUR::Bundle>);
-	void bundle_changed (ARDOUR::Bundle::Change, boost::shared_ptr<ARDOUR::UserBundle>);
+	void bundle_changed (ARDOUR::Bundle::Change, boost::weak_ptr<ARDOUR::UserBundle>);
 	void set_button_sensitivity ();
 	void row_activated (Gtk::TreeModel::Path const & p, Gtk::TreeViewColumn* c);
 

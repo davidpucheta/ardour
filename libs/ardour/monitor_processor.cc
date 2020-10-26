@@ -1,25 +1,26 @@
 /*
-    Copyright (C) 2010 Paul Davis
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2010-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015 Ben Loftis <ben@harrisonconsoles.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
-#include "pbd/convert.h"
 #include "pbd/error.h"
-#include "pbd/locale_guard.h"
 #include "pbd/xml++.h"
 
 #include "ardour/amp.h"
@@ -28,7 +29,7 @@
 #include "ardour/monitor_processor.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -37,322 +38,318 @@ using namespace std;
 /* specialize for bool because of set_value() semantics */
 
 namespace ARDOUR {
-	template<> void MPControl<bool>::set_value (double v, PBD::Controllable::GroupControlDisposition /*group_override*/) {
+	template<> void MPControl<bool>::set_value (double v, PBD::Controllable::GroupControlDisposition gcd) {
                 bool newval = fabs (v) >= 0.5;
                 if (newval != _value) {
                         _value = newval;
-                        Changed(); /* EMIT SIGNAL */
+                        Changed (true, gcd); /* EMIT SIGNAL */
                 }
         }
 }
 
 MonitorProcessor::MonitorProcessor (Session& s)
-        : Processor (s, X_("MonitorOut"))
-        , solo_cnt (0)
-        , _monitor_active (false)
+	: Processor (s, X_("MonitorOut"))
+	, solo_cnt (0)
+	, _monitor_active (false)
 
-        , _dim_all_ptr (new MPControl<bool> (false, _("monitor dim"), Controllable::Toggle))
-        , _cut_all_ptr (new MPControl<bool> (false, _("monitor cut"), Controllable::Toggle))
-        , _mono_ptr (new MPControl<bool> (false, _("monitor mono"), Controllable::Toggle))
-        , _dim_level_ptr (new MPControl<volatile gain_t>
-			  /* default is -12dB, range is -20dB to 0dB */
-                          (dB_to_coefficient(-12.0), _("monitor dim level"), Controllable::Flag (0),
-			   dB_to_coefficient(-20.0), dB_to_coefficient (0.0)))
-        , _solo_boost_level_ptr (new MPControl<volatile gain_t>
-				 /* default is 0dB, range is 0dB to +20dB */
-                                 (dB_to_coefficient(0.0), _("monitor solo boost level"), Controllable::Flag (0),
-				  dB_to_coefficient(0.0), dB_to_coefficient(10.0)))
-        , _dim_all_control (_dim_all_ptr)
-        , _cut_all_control (_cut_all_ptr)
-        , _mono_control (_mono_ptr)
-        , _dim_level_control (_dim_level_ptr)
-        , _solo_boost_level_control (_solo_boost_level_ptr)
+	, _dim_all_ptr (new MPControl<bool> (false, _("monitor dim"), Controllable::Toggle))
+	, _cut_all_ptr (new MPControl<bool> (false, _("monitor cut"), Controllable::Toggle))
+	, _mono_ptr (new MPControl<bool> (false, _("monitor mono"), Controllable::Toggle))
+	, _dim_level_ptr (new MPControl<volatile gain_t>
+		/* default is -12dB, range is -20dB to 0dB */
+		(dB_to_coefficient(-12.0), _("monitor dim level"), Controllable::Flag (0),
+		dB_to_coefficient(-20.0), dB_to_coefficient (0.0)))
+	, _solo_boost_level_ptr (new MPControl<volatile gain_t>
+	/* default is 0dB, range is 0dB to +20dB */
+			(dB_to_coefficient(0.0), _("monitor solo boost level"), Controllable::Flag (0),
+			 dB_to_coefficient(0.0), dB_to_coefficient(10.0)))
+	, _dim_all_control (_dim_all_ptr)
+	, _cut_all_control (_cut_all_ptr)
+	, _mono_control (_mono_ptr)
+	, _dim_level_control (_dim_level_ptr)
+	, _solo_boost_level_control (_solo_boost_level_ptr)
 
-        , _dim_all (*_dim_all_ptr)
-        , _cut_all (*_cut_all_ptr)
-        , _mono (*_mono_ptr)
-        , _dim_level (*_dim_level_ptr)
-        , _solo_boost_level (*_solo_boost_level_ptr)
+	, _dim_all (*_dim_all_ptr)
+	, _cut_all (*_cut_all_ptr)
+	, _mono (*_mono_ptr)
+	, _dim_level (*_dim_level_ptr)
+	, _solo_boost_level (*_solo_boost_level_ptr)
 
 {
 }
 
 MonitorProcessor::~MonitorProcessor ()
 {
-        allocate_channels (0);
+	allocate_channels (0);
+
+	/* special case for MPControl */
+	_dim_all_control->DropReferences (); /* EMIT SIGNAL */
+	_cut_all_control->DropReferences (); /* EMIT SIGNAL */
+	_mono_control->DropReferences (); /* EMIT SIGNAL */
+	_dim_level_control->DropReferences (); /* EMIT SIGNAL */
+	_solo_boost_level_control->DropReferences (); /* EMIT SIGNAL */
 }
 
 void
 MonitorProcessor::allocate_channels (uint32_t size)
 {
-        while (_channels.size() > size) {
-                if (_channels.back()->soloed) {
-                        if (solo_cnt > 0) {
-                                --solo_cnt;
-                        }
-                }
-                ChannelRecord* cr = _channels.back();
-                _channels.pop_back();
-                delete cr;
-        }
+	while (_channels.size() > size) {
+		if (_channels.back()->soloed) {
+			if (solo_cnt > 0) {
+				--solo_cnt;
+			}
+		}
+		ChannelRecord* cr = _channels.back();
+		_channels.pop_back();
+		delete cr;
+	}
 
-        uint32_t n = _channels.size() + 1;
+	uint32_t n = _channels.size() + 1;
 
-        while (_channels.size() < size) {
-                _channels.push_back (new ChannelRecord (n));
-        }
+	while (_channels.size() < size) {
+		_channels.push_back (new ChannelRecord (n));
+	}
 }
 
 int
 MonitorProcessor::set_state (const XMLNode& node, int version)
 {
-        int ret = Processor::set_state (node, version);
+	int ret = Processor::set_state (node, version);
 
-        if (ret != 0) {
-                return ret;
-        }
+	if (ret != 0) {
+		return ret;
+	}
 
-        const XMLProperty* prop;
+	std::string type_name;
+	if (!node.get_property (X_("type"), type_name)) {
+		error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings have no type information"))
+			<< endmsg;
+		return -1;
+	}
 
-        if ((prop = node.property (X_("type"))) == 0) {
-                error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings have no type information"))
-                      << endmsg;
-                return -1;
-        }
+	if (type_name != X_("monitor")) {
+		error << string_compose (X_("programming error: %1"), X_("MonitorProcessor given unknown XML settings"))
+			<< endmsg;
+		return -1;
+	}
 
-        if (prop->value() != X_("monitor")) {
-                error << string_compose (X_("programming error: %1"), X_("MonitorProcessor given unknown XML settings"))
-                      << endmsg;
-                return -1;
-        }
+	uint32_t channels = 0;
+	if (!node.get_property (X_("channels"), channels)) {
+		error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings are missing a channel cnt"))
+			<< endmsg;
+		return -1;
+	}
 
-        if ((prop = node.property (X_("channels"))) == 0) {
-                error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings are missing a channel cnt"))
-                      << endmsg;
-                return -1;
-        }
+	allocate_channels (channels);
 
-        allocate_channels (atoi (prop->value()));
+	// need to check that these conversions are working as expected
+	gain_t val;
+	if (node.get_property (X_("dim-level"), val)) {
+		_dim_level = val;
+	}
 
-        if ((prop = node.property (X_("dim-level"))) != 0) {
-                gain_t val = atof (prop->value());
-                _dim_level = val;
-        }
+	if (node.get_property (X_("solo-boost-level"), val)) {
+		_solo_boost_level = val;
+	}
 
-        if ((prop = node.property (X_("solo-boost-level"))) != 0) {
-                gain_t val = atof (prop->value());
-                _solo_boost_level = val;
-        }
+	bool bool_val;
+	if (node.get_property (X_("cut-all"), bool_val)) {
+		_cut_all = bool_val;
+	}
 
-        if ((prop = node.property (X_("cut-all"))) != 0) {
-                bool val = string_is_affirmative (prop->value());
-                _cut_all = val;
-        }
-        if ((prop = node.property (X_("dim-all"))) != 0) {
-                bool val = string_is_affirmative (prop->value());
-                _dim_all = val;
-        }
-        if ((prop = node.property (X_("mono"))) != 0) {
-                bool val = string_is_affirmative (prop->value());
-                _mono = val;
-        }
+	if (node.get_property (X_("dim-all"), bool_val)) {
+		_dim_all = bool_val;
+	}
 
-        for (XMLNodeList::const_iterator i = node.children().begin(); i != node.children().end(); ++i) {
+	if (node.get_property (X_("mono"), bool_val)) {
+		_mono = bool_val;
+	}
 
-                if ((*i)->name() == X_("Channel")) {
-                        if ((prop = (*i)->property (X_("id"))) == 0) {
-                                error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings are missing an ID"))
-                                      << endmsg;
-                                return -1;
-                        }
+	for (XMLNodeList::const_iterator i = node.children().begin(); i != node.children().end(); ++i) {
 
-                        uint32_t chn;
+		if ((*i)->name() == X_("Channel")) {
 
-                        if (sscanf (prop->value().c_str(), "%u", &chn) != 1) {
-                                error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings has an unreadable channel ID"))
-                                      << endmsg;
-                                return -1;
-                        }
+			uint32_t chn;
+			if (!(*i)->get_property (X_("id"), chn)) {
+				error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings are missing an ID"))
+					<< endmsg;
+				return -1;
+			}
 
-                        if (chn >= _channels.size()) {
-                                error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings has an illegal channel count"))
-                                      << endmsg;
-                                return -1;
-                        }
-                        ChannelRecord& cr (*_channels[chn]);
+			if (chn >= _channels.size()) {
+				error << string_compose (X_("programming error: %1"), X_("MonitorProcessor XML settings has an illegal channel count"))
+					<< endmsg;
+				return -1;
+			}
+			ChannelRecord& cr (*_channels[chn]);
 
-                        if ((prop = (*i)->property ("cut")) != 0) {
-                                if (string_is_affirmative (prop->value())){
-                                        cr.cut = GAIN_COEFF_ZERO;
-                                } else {
-                                        cr.cut = GAIN_COEFF_UNITY;
-                                }
-                        }
+			bool gain_coeff_zero;
+			if ((*i)->get_property ("cut", gain_coeff_zero)) {
+				if (gain_coeff_zero) {
+					cr.cut = GAIN_COEFF_ZERO;
+				} else {
+					cr.cut = GAIN_COEFF_UNITY;
+				}
+			}
 
-                        if ((prop = (*i)->property ("dim")) != 0) {
-                                bool val = string_is_affirmative (prop->value());
-                                cr.dim = val;
-                        }
+			bool dim;
+			if ((*i)->get_property ("dim", dim)) {
+				cr.dim = dim;
+			}
 
-                        if ((prop = (*i)->property ("invert")) != 0) {
-                                if (string_is_affirmative (prop->value())) {
-                                        cr.polarity = -1.0f;
-                                } else {
-                                        cr.polarity = 1.0f;
-                                }
-                        }
+			bool invert_polarity;
+			if ((*i)->get_property ("invert", invert_polarity)) {
+				if (invert_polarity) {
+					cr.polarity = -1.0f;
+				} else {
+					cr.polarity = 1.0f;
+				}
+			}
 
-                        if ((prop = (*i)->property ("solo")) != 0) {
-                                bool val = string_is_affirmative (prop->value());
-                                cr.soloed = val;
-                        }
-                }
-        }
+			bool soloed;
+			if ((*i)->get_property ("solo", soloed)) {
+				cr.soloed = soloed;
+			}
+		}
+	}
 
-        /* reset solo cnt */
+	/* reset solo cnt */
 
-        solo_cnt = 0;
+	solo_cnt = 0;
 
-        for (vector<ChannelRecord*>::const_iterator x = _channels.begin(); x != _channels.end(); ++x) {
-                if ((*x)->soloed) {
-                        solo_cnt++;
-                }
-        }
+	for (vector<ChannelRecord*>::const_iterator x = _channels.begin(); x != _channels.end(); ++x) {
+		if ((*x)->soloed) {
+			solo_cnt++;
+		}
+	}
 
 	update_monitor_state ();
 	return 0;
 }
 
 XMLNode&
-MonitorProcessor::state (bool full)
+MonitorProcessor::state ()
 {
-	LocaleGuard lg (X_("C"));
-        XMLNode& node (Processor::state (full));
-        char buf[64];
+	XMLNode& node(Processor::state ());
 
 	/* this replaces any existing "type" property */
 
-	node.add_property (X_("type"), X_("monitor"));
+	node.set_property (X_("type"), X_("monitor"));
 
-        snprintf (buf, sizeof(buf), "%.12g", _dim_level.val());
-        node.add_property (X_("dim-level"), buf);
+	node.set_property (X_ ("dim-level"), (float)_dim_level.val ());
+	node.set_property (X_ ("solo-boost-level"), (float)_solo_boost_level.val ());
 
-        snprintf (buf, sizeof(buf), "%.12g", _solo_boost_level.val());
-        node.add_property (X_("solo-boost-level"), buf);
+	node.set_property (X_("cut-all"), _cut_all.val());
+	node.set_property (X_("dim-all"), _dim_all.val());
+	node.set_property (X_("mono"), _mono.val());
 
-        node.add_property (X_("cut-all"), (_cut_all ? "yes" : "no"));
-        node.add_property (X_("dim-all"), (_dim_all ? "yes" : "no"));
-        node.add_property (X_("mono"), (_mono ? "yes" : "no"));
+	node.set_property (X_("channels"), (uint32_t)_channels.size ());
 
-        uint32_t limit = _channels.size();
+	XMLNode* chn_node;
+	uint32_t chn = 0;
 
-        snprintf (buf, sizeof (buf), "%u", limit);
-        node.add_property (X_("channels"), buf);
+	for (vector<ChannelRecord*>::const_iterator x = _channels.begin (); x != _channels.end ();
+			++x, ++chn) {
+		chn_node = new XMLNode (X_("Channel"));
 
-        XMLNode* chn_node;
-        uint32_t chn = 0;
+		chn_node->set_property ("id", chn);
 
-        for (vector<ChannelRecord*>::const_iterator x = _channels.begin(); x != _channels.end(); ++x, ++chn) {
-                chn_node = new XMLNode (X_("Channel"));
+		// implicitly cast these to bool
+		chn_node->set_property (X_("cut"), (*x)->cut != GAIN_COEFF_UNITY);
+		chn_node->set_property (X_("invert"), (*x)->polarity != GAIN_COEFF_UNITY);
+		chn_node->set_property (X_("dim"), (*x)->dim == true);
+		chn_node->set_property (X_("solo"), (*x)->soloed == true);
 
-                snprintf (buf, sizeof (buf), "%u", chn);
-                chn_node->add_property ("id", buf);
+		node.add_child_nocopy (*chn_node);
+	}
 
-                chn_node->add_property (X_("cut"), (*x)->cut == GAIN_COEFF_UNITY ? "no" : "yes");
-                chn_node->add_property (X_("invert"), (*x)->polarity == GAIN_COEFF_UNITY ? "no" : "yes");
-                chn_node->add_property (X_("dim"), (*x)->dim ? "yes" : "no");
-                chn_node->add_property (X_("solo"), (*x)->soloed ? "yes" : "no");
-
-                node.add_child_nocopy (*chn_node);
-        }
-
-        return node;
+	return node;
 }
 
 void
-MonitorProcessor::run (BufferSet& bufs, framepos_t /*start_frame*/, framepos_t /*end_frame*/, pframes_t nframes, bool /*result_required*/)
+MonitorProcessor::run (BufferSet& bufs, samplepos_t /*start_sample*/, samplepos_t /*end_sample*/, double /*speed*/, pframes_t nframes, bool /*result_required*/)
 {
-        uint32_t chn = 0;
-        gain_t target_gain;
-        gain_t dim_level_this_time = _dim_level;
-        gain_t global_cut = (_cut_all ? GAIN_COEFF_ZERO : GAIN_COEFF_UNITY);
-        gain_t global_dim = (_dim_all ? dim_level_this_time : GAIN_COEFF_UNITY);
-        gain_t solo_boost;
+	uint32_t chn = 0;
+	gain_t target_gain;
+	gain_t dim_level_this_time = _dim_level;
+	gain_t global_cut = (_cut_all ? GAIN_COEFF_ZERO : GAIN_COEFF_UNITY);
+	gain_t global_dim = (_dim_all ? dim_level_this_time : GAIN_COEFF_UNITY);
+	gain_t solo_boost;
 
-        if (_session.listening() || _session.soloing()) {
-                solo_boost = _solo_boost_level;
-        } else {
-                solo_boost = GAIN_COEFF_UNITY;
-        }
+	if (_session.listening() || _session.soloing()) {
+		solo_boost = _solo_boost_level;
+	} else {
+		solo_boost = GAIN_COEFF_UNITY;
+	}
 
-        for (BufferSet::audio_iterator b = bufs.audio_begin(); b != bufs.audio_end(); ++b) {
+	for (BufferSet::audio_iterator b = bufs.audio_begin(); b != bufs.audio_end(); ++b) {
 
-                /* don't double-scale by both track dim and global dim coefficients */
+		/* don't double-scale by both track dim and global dim coefficients */
 
-                gain_t dim_level = (global_dim == GAIN_COEFF_UNITY ? (_channels[chn]->dim ? dim_level_this_time : GAIN_COEFF_UNITY) : GAIN_COEFF_UNITY);
+		gain_t dim_level = (global_dim == GAIN_COEFF_UNITY ? (_channels[chn]->dim ? dim_level_this_time : GAIN_COEFF_UNITY) : GAIN_COEFF_UNITY);
 
-                if (_channels[chn]->soloed) {
-                        target_gain = _channels[chn]->polarity * _channels[chn]->cut * dim_level * global_cut * global_dim * solo_boost;
-                } else {
-                        if (solo_cnt == 0) {
-                                target_gain = _channels[chn]->polarity * _channels[chn]->cut * dim_level * global_cut * global_dim * solo_boost;
-                        } else {
-                                target_gain = GAIN_COEFF_ZERO;
-                        }
-                }
+		if (_channels[chn]->soloed) {
+			target_gain = _channels[chn]->polarity * _channels[chn]->cut * dim_level * global_cut * global_dim * solo_boost;
+		} else {
+			if (solo_cnt == 0) {
+				target_gain = _channels[chn]->polarity * _channels[chn]->cut * dim_level * global_cut * global_dim * solo_boost;
+			} else {
+				target_gain = GAIN_COEFF_ZERO;
+			}
+		}
 
-                if (target_gain != _channels[chn]->current_gain || target_gain != GAIN_COEFF_UNITY) {
+		if (target_gain != _channels[chn]->current_gain || target_gain != GAIN_COEFF_UNITY) {
 
-                        _channels[chn]->current_gain = Amp::apply_gain (*b, _session.nominal_frame_rate(), nframes, _channels[chn]->current_gain, target_gain);
-                }
+			_channels[chn]->current_gain = Amp::apply_gain (*b, _session.nominal_sample_rate(), nframes, _channels[chn]->current_gain, target_gain);
+		}
 
-                ++chn;
-        }
+		++chn;
+	}
 
-        if (_mono) {
-                DEBUG_TRACE (DEBUG::Monitor, "mono-izing\n");
+	if (_mono) {
+		DEBUG_TRACE (DEBUG::Monitor, "mono-izing\n");
 
-                /* chn is now the number of channels, use as a scaling factor when mixing
-                 */
-                gain_t scale = 1.f / (float)chn;
-                BufferSet::audio_iterator b = bufs.audio_begin();
-                AudioBuffer& ab (*b);
-                Sample* buf = ab.data();
+		/* chn is now the number of channels, use as a scaling factor when mixing
+		*/
+		gain_t scale = 1.f / (float)chn;
+		BufferSet::audio_iterator b = bufs.audio_begin();
+		AudioBuffer& ab (*b);
+		Sample* buf = ab.data();
 
-                /* scale the first channel */
+		/* scale the first channel */
 
-                for (pframes_t n = 0; n < nframes; ++n) {
-                        buf[n] *= scale;
-                }
+		for (pframes_t n = 0; n < nframes; ++n) {
+			buf[n] *= scale;
+		}
 
-                /* add every other channel into the first channel's buffer */
+		/* add every other channel into the first channel's buffer */
 
-                ++b;
-                for (; b != bufs.audio_end(); ++b) {
-                        AudioBuffer& ob (*b);
-                        Sample* obuf = ob.data ();
-                        for (pframes_t n = 0; n < nframes; ++n) {
-                                buf[n] += obuf[n] * scale;
-                        }
-                }
+		++b;
+		for (; b != bufs.audio_end(); ++b) {
+			AudioBuffer& ob (*b);
+			Sample* obuf = ob.data ();
+			for (pframes_t n = 0; n < nframes; ++n) {
+				buf[n] += obuf[n] * scale;
+			}
+		}
 
-                /* copy the first channel to every other channel's buffer */
+		/* copy the first channel to every other channel's buffer */
 
-                b = bufs.audio_begin();
-                ++b;
-                for (; b != bufs.audio_end(); ++b) {
-                        AudioBuffer& ob (*b);
-                        Sample* obuf = ob.data ();
-                        memcpy (obuf, buf, sizeof (Sample) * nframes);
-                }
-        }
+		b = bufs.audio_begin();
+		++b;
+		for (; b != bufs.audio_end(); ++b) {
+			AudioBuffer& ob (*b);
+			Sample* obuf = ob.data ();
+			memcpy (obuf, buf, sizeof (Sample) * nframes);
+		}
+	}
 }
 
 bool
 MonitorProcessor::configure_io (ChanCount in, ChanCount out)
 {
-        allocate_channels (in.n_audio());
-        return Processor::configure_io (in, out);
+	allocate_channels (in.n_audio());
+	return Processor::configure_io (in, out);
 }
 
 bool
@@ -432,51 +429,49 @@ MonitorProcessor::set_dim_all (bool yn)
 bool
 MonitorProcessor::display_to_user () const
 {
-        return false;
+	return false;
 }
 
 bool
 MonitorProcessor::soloed (uint32_t chn) const
 {
-        return _channels[chn]->soloed;
+	return _channels[chn]->soloed;
 }
-
 
 bool
 MonitorProcessor::inverted (uint32_t chn) const
 {
-        return _channels[chn]->polarity < 0.0f;
+	return _channels[chn]->polarity < 0.0f;
 }
-
 
 bool
 MonitorProcessor::cut (uint32_t chn) const
 {
-        return _channels[chn]->cut == GAIN_COEFF_ZERO;
+	return _channels[chn]->cut == GAIN_COEFF_ZERO;
 }
 
 bool
 MonitorProcessor::dimmed (uint32_t chn) const
 {
-        return _channels[chn]->dim;
+	return _channels[chn]->dim;
 }
 
 bool
 MonitorProcessor::mono () const
 {
-        return _mono;
+	return _mono;
 }
 
 bool
 MonitorProcessor::dim_all () const
 {
-        return _dim_all;
+	return _dim_all;
 }
 
 bool
 MonitorProcessor::cut_all () const
 {
-        return _cut_all;
+	return _cut_all;
 }
 
 void
@@ -505,37 +500,37 @@ MonitorProcessor::update_monitor_state ()
 boost::shared_ptr<Controllable>
 MonitorProcessor::channel_cut_control (uint32_t chn) const
 {
-        if (chn < _channels.size()) {
-                return _channels[chn]->cut_control;
-        }
-        return boost::shared_ptr<Controllable>();
+	if (chn < _channels.size()) {
+		return _channels[chn]->cut_control;
+	}
+	return boost::shared_ptr<Controllable>();
 }
 
 boost::shared_ptr<Controllable>
 MonitorProcessor::channel_dim_control (uint32_t chn) const
 {
-        if (chn < _channels.size()) {
-                return _channels[chn]->dim_control;
-        }
-        return boost::shared_ptr<Controllable>();
+	if (chn < _channels.size()) {
+		return _channels[chn]->dim_control;
+	}
+	return boost::shared_ptr<Controllable>();
 }
 
 boost::shared_ptr<Controllable>
 MonitorProcessor::channel_polarity_control (uint32_t chn) const
 {
-        if (chn < _channels.size()) {
-                return _channels[chn]->polarity_control;
-        }
-        return boost::shared_ptr<Controllable>();
+	if (chn < _channels.size()) {
+		return _channels[chn]->polarity_control;
+	}
+	return boost::shared_ptr<Controllable>();
 }
 
 boost::shared_ptr<Controllable>
 MonitorProcessor::channel_solo_control (uint32_t chn) const
 {
-        if (chn < _channels.size()) {
-                return _channels[chn]->soloed_control;
-        }
-        return boost::shared_ptr<Controllable>();
+	if (chn < _channels.size()) {
+		return _channels[chn]->soloed_control;
+	}
+	return boost::shared_ptr<Controllable>();
 }
 
 MonitorProcessor::ChannelRecord::ChannelRecord (uint32_t chn)
@@ -555,5 +550,13 @@ MonitorProcessor::ChannelRecord::ChannelRecord (uint32_t chn)
 	, polarity (*polarity_ptr)
 	, soloed (*soloed_ptr)
 {
+}
 
+MonitorProcessor::ChannelRecord::~ChannelRecord ()
+{
+	/* special case for MPControl */
+	cut_control->DropReferences(); /* EMIT SIGNAL */
+	dim_control->DropReferences(); /* EMIT SIGNAL */
+	polarity_control->DropReferences(); /* EMIT SIGNAL */
+	soloed_control->DropReferences(); /* EMIT SIGNAL */
 }

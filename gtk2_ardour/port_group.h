@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2002-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef  __gtk_ardour_port_group_h__
 #define  __gtk_ardour_port_group_h__
@@ -99,7 +100,7 @@ private:
 /// A list of PortGroups
 class PortGroupList : public sigc::trackable
 {
-  public:
+public:
 	PortGroupList ();
 	~PortGroupList();
 
@@ -136,16 +137,14 @@ class PortGroupList : public sigc::trackable
 	/** A bundle in one of our groups has changed */
 	PBD::Signal1<void,ARDOUR::Bundle::Change> BundleChanged;
 
-  private:
+private:
 	bool port_has_prefix (std::string const &, std::string const &) const;
 	std::string common_prefix (std::vector<std::string> const &) const;
 	std::string common_prefix_before (std::vector<std::string> const &, std::string const &) const;
 	void emit_changed ();
 	void emit_bundle_changed (ARDOUR::Bundle::Change);
 	boost::shared_ptr<ARDOUR::Bundle> make_bundle_from_ports (std::vector<std::string> const &, ARDOUR::DataType, bool, std::string const& bundle_name = std::string()) const;
-	void maybe_add_processor_to_list (
-		boost::weak_ptr<ARDOUR::Processor>, std::list<boost::shared_ptr<ARDOUR::IO> > *, bool, std::set<boost::shared_ptr<ARDOUR::IO> > &
-		);
+	void maybe_add_processor_to_list (boost::weak_ptr<ARDOUR::Processor>, std::list<boost::shared_ptr<ARDOUR::IO> > *, bool, std::set<boost::shared_ptr<ARDOUR::IO> > &);
 
 	mutable PortGroup::BundleList _bundles;
 	List _groups;

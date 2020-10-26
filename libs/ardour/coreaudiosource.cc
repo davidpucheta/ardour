@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2006 Paul Davis
-    Written by Taybin Rutkin
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2009 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <algorithm>
 #include <inttypes.h>
@@ -34,7 +36,7 @@
 
 #include <glibmm/fileutils.h>
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include <AudioToolbox/AudioFormat.h>
 
@@ -97,9 +99,6 @@ CoreAudioSource::init_cafile ()
 		af.SetClientFormat (client_format);
 
 	} catch (CAXException& cax) {
-
-		error << string_compose(_("CoreAudioSource: cannot open file \"%1\" for %2"),
-					_path, (writable() ? "read+write" : "reading")) << endmsg;
 		throw failed_constructor ();
 	}
 }
@@ -115,16 +114,16 @@ CoreAudioSource::close ()
 }
 
 int
-CoreAudioSource::safe_read (Sample* dst, framepos_t start, framecnt_t cnt, AudioBufferList& abl) const
+CoreAudioSource::safe_read (Sample* dst, samplepos_t start, samplecnt_t cnt, AudioBufferList& abl) const
 {
-	framecnt_t nread = 0;
+	samplecnt_t nread = 0;
 
 	while (nread < cnt) {
 
 		try {
 			af.Seek (start+nread);
 		} catch (CAXException& cax) {
-			error << string_compose("CoreAudioSource: %1 to %2 (%3)", cax.mOperation, start+nread, _name.val().substr (1)) << endmsg;
+			error << string_compose("CoreAudioSource: %1 to %2 [%3] (%3)", cax.mOperation, start+nread, cax.mError, _name.val().substr (1)) << endmsg;
 			return -1;
 		}
 
@@ -136,7 +135,7 @@ CoreAudioSource::safe_read (Sample* dst, framepos_t start, framecnt_t cnt, Audio
 		try {
 			af.Read (new_cnt, &abl);
 		} catch (CAXException& cax) {
-			error << string_compose("CoreAudioSource: %1 (%2)", cax.mOperation, _name);
+			error << string_compose("CoreAudioSource: %1 [%2] (%3)", cax.mOperation, cax.mError, _name);
 			return -1;
 		}
 
@@ -160,10 +159,10 @@ CoreAudioSource::safe_read (Sample* dst, framepos_t start, framecnt_t cnt, Audio
 }
 
 
-framecnt_t
-CoreAudioSource::read_unlocked (Sample *dst, framepos_t start, framecnt_t cnt) const
+samplecnt_t
+CoreAudioSource::read_unlocked (Sample *dst, samplepos_t start, samplecnt_t cnt) const
 {
-	framecnt_t file_cnt;
+	samplecnt_t file_cnt;
 	AudioBufferList abl;
 
 	abl.mNumberBuffers = 1;
@@ -189,7 +188,7 @@ CoreAudioSource::read_unlocked (Sample *dst, framepos_t start, framecnt_t cnt) c
 	}
 
 	if (file_cnt != cnt) {
-		frameoffset_t delta = cnt - file_cnt;
+		sampleoffset_t delta = cnt - file_cnt;
 		memset (dst+file_cnt, 0, sizeof (Sample) * delta);
 	}
 
@@ -213,7 +212,7 @@ CoreAudioSource::read_unlocked (Sample *dst, framepos_t start, framecnt_t cnt) c
 
 	/* stride through the interleaved data */
 
-	for (framecnt_t n = 0; n < file_cnt; ++n) {
+	for (samplecnt_t n = 0; n < file_cnt; ++n) {
 		dst[n] = *ptr;
 		ptr += n_channels;
 	}
@@ -237,7 +236,7 @@ CoreAudioSource::sample_rate() const
 }
 
 int
-CoreAudioSource::update_header (framepos_t, struct tm&, time_t)
+CoreAudioSource::update_header (samplepos_t, struct tm&, time_t)
 {
 	return 0;
 }
@@ -280,6 +279,7 @@ CoreAudioSource::get_soundfile_info (string path, SoundFileInfo& _info, string&)
 
 	_info.samplerate = absd.mSampleRate;
 	_info.channels   = absd.mChannelsPerFrame;
+	_info.seekable   = true;
 
 	size = sizeof(_info.length);
 	if (ExtAudioFileGetProperty(af, kExtAudioFileProperty_FileLengthFrames, &size, &_info.length) != noErr) {

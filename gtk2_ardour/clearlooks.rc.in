@@ -1,4 +1,5 @@
 gtk-button-images = 0							      # [ Default value: 1 ] Show stock icons on buttons.
+gtk-theme-name = Ardour # override default gtk-default theme, "MS-Windows" vs "Raleigh" (Linux, Mac)
 
 style "default" = "medium_text"
 {
@@ -11,7 +12,7 @@ style "default" = "medium_text"
   GtkTreeView         :: focus-line-width                 = 0
   GtkTreeView         :: tree-line-width                  = 1
   GtkTreeView         :: row-ending-details               = 0
-  
+
   GtkWidget           :: focus-line-pattern               = "\001\001"        #                              Dash pattern used to draw the focus indicator.
   GtkWidget           :: focus-line-width                 = 1                 # [               1 ] ( >= 0 ) Width, in pixels, of the focus indicator line.
   GtkWidget           :: focus-padding                    = 1                 # [               1 ] ( >= 0 ) Width, in pixels, between focus indicator and the widget box.
@@ -20,12 +21,11 @@ style "default" = "medium_text"
   GtkWidget           :: scroll-arrow-vlength             = 16                # [              16 ] ( >= 1 ) Length of vertical scroll arrows.
   GtkWidget           :: link-color                       = shade(1.25, @bright_color)
   GtkWidget           :: visited-link-color               = @bright_color
-  
+
   GtkDialog           :: action-area-border               = 4                 # [               5 ] ( >= 0 ) Width of border around the button area at the bottom of the dialog.
   GtkDialog           :: button-spacing                   = 4                 # [               6 ] ( >= 0 ) Spacing between buttons.
   GtkDialog           :: content-area-border              = 2                 # [               2 ] ( >= 0 ) Width of border around the main dialog area.
   GtkDialog           :: content-area-spacing             = 0                 # [               0 ] ( >= 0 ) The default spacing used between elements of the content area of the dialog.
-  
 
   GtkButton           :: default-border = { 0, 0, 0, 0 }
   GtkButton           :: default-outside_border = { 0, 0, 0, 0 }
@@ -50,7 +50,7 @@ style "default" = "medium_text"
   GtkPaned            :: handle-size                      = 4                 # [               5 ] ( >= 0 ) Width of handle.
 
   GtkScale            :: activate-slider                  = 1                 # [               0 ] ( bool ) With this option set to TRUE, sliders will be drawn ACTIVE and with shadow IN while they are dragged.
-  GtkScale            :: slider-length                    = 23                # [              31 ] ( >= 0 ) Length of scale's slider.	
+  GtkScale            :: slider-length                    = 23                # [              31 ] ( >= 0 ) Length of scale's slider.
   GtkScale            :: slider-width                     = 14                # [              14 ] ( >= 0 ) Width of scrollbar or scale thumb.
   GtkScale            :: trough-side-details              = 1                 # [               0 ] ( bool ) When TRUE, the parts of the trough on the two sides of the slider are drawn with different details.
 
@@ -58,10 +58,10 @@ style "default" = "medium_text"
   GtkScrollbar        :: arrow-scaling                    = 0.4               # [             0.5 ] ( 0.1  ) The arrow size proportion relative to the scroll button size.
   GtkScrollbar        :: fixed-slider-length              = 0                 # [               0 ] ( bool ) Don't change slider size, just lock it to the minimum length.
   GtkScrollbar        :: min-slider-length                = 50                # [              21 ] ( >= 0 ) Minimum length of scrollbar slider.
-  GtkScrollbar        :: slider-width                     = 15                # [              14 ] ( >= 0 ) Width of scrollbar or scale thumb.    
+  GtkScrollbar        :: slider-width                     = 15                # [              14 ] ( >= 0 ) Width of scrollbar or scale thumb.
   GtkScrollbar        :: stepper-spacing                  = 0                 # [               0 ] ( >= 0 ) The spacing between the stepper buttons and thumb. Note that setting this value to anything > 0 will automatically set the trough-under-steppers style property to TRUE as well. Also, stepper-spacing won't have any effect if there are no steppers.
   GtkScrollbar        :: trough-border                    = 0                 # [               1 ] ( >= 0 ) Spacing between thumb/steppers and outer trough bevel.
-  GtkScrollbar        :: trough-side-details              = 0                 # [               0 ] ( bool ) When TRUE, the parts of the trough on the two sides of the slider are drawn with different details.    
+  GtkScrollbar        :: trough-side-details              = 0                 # [               0 ] ( bool ) When TRUE, the parts of the trough on the two sides of the slider are drawn with different details.
   GtkScrollbar        :: trough-under-steppers            = 1                 # [               1 ] ( bool ) Whether to draw the trough across the full length of the range or to exclude the steppers and their spacing. Note that setting the "stepper-spacing" style property to any value > 0 will automatically enable trough-under-steppers too.
 
   GtkScrollbar        :: has-backward-stepper             = 1                 # [               1 ] ( bool ) Display the standard backward arrow button.
@@ -76,7 +76,7 @@ style "default" = "medium_text"
 
 #Menu Properties
   GtkMenuBar          :: internal-padding                 = 1                 # [               1 ] ( >= 0 ) Amount of border space between the menubar shadow and the menu items.
-  GtkMenuBar          :: shadow-type                      = GTK_SHADOW_OUT    # [  GTK_SHADOW_OUT ]          Style of bevel around the menubar. 
+  GtkMenuBar          :: shadow-type                      = GTK_SHADOW_OUT    # [  GTK_SHADOW_OUT ]          Style of bevel around the menubar.
 
   GtkMenu             :: arrow-placement                  = GTK_ARROWS_BOTH   # [ GTK_ARROWS_BOTH ]          Indicates where scroll arrows should be placed.
   GtkMenu             :: arrow-scaling                    = 0.5               # [             0.7 ] ( 0.1  ) Arbitrary constant to scale down the size of the scroll arrow.
@@ -103,15 +103,9 @@ style "default" = "medium_text"
   GtkTreeView         :: horizontal-separator             = 8                 # [               2 ] ( >= 0 ) Horizontal space between cells. Must be an even number.
   GtkTreeView         :: vertical-separator               = 2                 # [               2 ] ( >= 0 ) Vertical space between cells. Must be an even number.
 
-  GtkEntry            :: honors-transparent-bg-hint       = 1                 # [               0 ] ( bool ) (Clearlooks) Without this, gecko will fill in the background of the entry.
-  GtkEntry            :: cursor-color = @bg_selected
+  GtkEntry::cursor_color = @entry_cursor
+  GtkEntry::state-hint = 0
 
-  #GtkToolbar::shadow_type = GTK_SHADOW_ETCHED_IN
-
-  #xthickness = 0
-  #ythickness = 0
-
-#Base Colors
   bg[NORMAL]          = @background
   bg[PRELIGHT]        = shade(1.1, @background)
   bg[ACTIVE]          = shade(0.9, @background)
@@ -124,33 +118,95 @@ style "default" = "medium_text"
   fg[INSENSITIVE]     = shade(0.7, @background)
   fg[SELECTED]        = @fg_selected
 
+  # These base and text colors will be used by treeviews and some other widgets.
+
   base[NORMAL]        = @bases
   base[PRELIGHT]      = @bases
   base[INSENSITIVE]   = shade(1.0, @background)
-  base[ACTIVE]        = shade(0.9, @bg_selected)
-  base[SELECTED]      = @bg_selected
+  base[ACTIVE]        = shade(0.9, @bg_selected) /* base for focused, selected text */
+  base[SELECTED]      = @bg_selected /* base for non-focused, selected text */
 
   text[NORMAL]        = @texts
   text[PRELIGHT]      = @texts
-  text[ACTIVE]        = @fg_selected
   text[INSENSITIVE]   = shade(0.7, @lightest)
-  text[SELECTED]      = @fg_selected
+  text[ACTIVE]        = @fg_selected          /* text color for focused selected text */
+  text[SELECTED]      = @fg_selected          /* text color for non-focused selected text */
 
-#engine specific tweaks
+  #engine specific tweaks
 
-  engine "clearlooks" 
+  engine "clearlooks"
   {
-    #style              = GLOSSY
-    #colorize_scrollbar = TRUE
     menubarstyle       = 2 # 0 = flat, 1 = sunken, 2 = flat gradient
-    #toolbarstyle       = 0 # 0 = flat, 1 = enable effects
   }
+}
+
+style "entry"
+{
+  GtkEntry::cursor_color = @entry_cursor
+  GtkEntry::inner-border = { 2, 2, 2, 2 }
+
+  xthickness = 0
+  ythickness = 0
+
+  # special base + text for GtkEntry to aid with visibility during text entry
+
+  base[NORMAL]      = @bases
+  base[PRELIGHT]    = @bases
+  base[INSENSITIVE] = shade(1.0, @background)
+  base[ACTIVE]      = @bases
+  base[SELECTED]    = @bg_selected
+
+  text[NORMAL]      = @texts
+  text[PRELIGHT]    = @texts
+  text[INSENSITIVE] = shade(0.7, @lightest)
+  text[ACTIVE]      = @texts
+  text[SELECTED]    = @fg_selected
+}
+
+style "spin_button" = "entry"
+{
+  engine "clearlooks"
+  {
+	# without this empty declaration, SpinButtons draw their arrows oddly
+  }
+
+}
+
+style "mixer_strip_entry" = "small_text"
+{
+        xthickness = 3
+        ythickness = 3
+
+	bg[NORMAL] = @bases
+	bg[ACTIVE] = @bases
+	bg[SELECTED] = @bases
+
+	text[NORMAL] = @texts
+	text[ACTIVE] = @texts
+	text[SELECTED] = @texts
+
+	base[NORMAL] = @bases
+	base[ACTIVE] = @bases
+	base[SELECTED] = @bases
+}
+
+style "peak_display_peaked_entry" = "mixer_strip_entry"
+{
+	fg[ACTIVE] = @texts
+	fg[SELECTED] = @texts
+	text[SELECTED] = @texts
+
+	base[NORMAL] = @clip_indicator
+	base[ACTIVE] = @clip_indicator
+	base[PRELIGHT] = @clip_indicator
+	base[INSENSITIVE] = @clip_indicator
+	base[SELECTED] = @clip_indicator
 }
 
 style "treeview_parent_node"
 {
 	# specifies *just* the color used for whole file rows when not selected
-	
+
 	fg[NORMAL] = { 0.0, 0.6, 0.85 }
 }
 
@@ -159,7 +215,7 @@ style "treeview_display" = "small_bold_text"
 	GtkWidget::focus-line-width = 0
 
 	# expander arrow border and DnD "icon" text
-	fg[NORMAL] = { 0.8, 0.8, 0.8 } 
+	fg[NORMAL] = { 0.8, 0.8, 0.8 }
 
 	bg[NORMAL] = { 0.8, 0.8, 0.8 }
 
@@ -168,7 +224,7 @@ style "treeview_display" = "small_bold_text"
 	base[NORMAL] = { 0.20, 0.20, 0.25 }
 
 	# selected row bg when window does not have focus (including during DnD)
-	base[ACTIVE] = { 0.0, 0.75, 0.75 }    
+	base[ACTIVE] = { 0.0, 0.75, 0.75 }
 
 	# selected row bg when window has focus
 	base[SELECTED] = { 0, 0.75, 0.75 }
@@ -177,14 +233,14 @@ style "treeview_display" = "small_bold_text"
 	text[NORMAL] = { 0.80, 0.80, 0.80 }
 
 	# selected row text with window focus
-	text[SELECTED] = { 1.0, 1.0, 1.0 }  
+	text[SELECTED] = { 1.0, 1.0, 1.0 }
 
 	# selected row text without window focus (including during DnD)
-	text[ACTIVE] = { 1.0, 1.0, 1.0 }  
+	text[ACTIVE] = { 1.0, 1.0, 1.0 }
 }
 
 style "track_header_inactive"  = "larger_text"
-{     
+{
         bg[NORMAL] =      @track_header_inactive
 	bg[ACTIVE] =      @track_header_inactive
 	bg[INSENSITIVE] = @track_header_inactive
@@ -210,30 +266,29 @@ style "automation_track_header"
 	bg[PRELIGHT] = @automation_track_header
 }
 
-
 style "inspector_processor_list" = "processor_list"
 {
- 	base[SELECTED] = { 0.3, 0.3, 0.3 }
+	base[SELECTED] = { 0.3, 0.3, 0.3 }
 }
 
-style "time_info_box" 
+style "time_info_box"
 {
-        bg[NORMAL] = { 0.05, 0.05, 0.05 }
+        bg[NORMAL] = { 0.00, 0.00, 0.00 }
 }
 
-style "status_bar_box" 
+style "status_bar_box"
 {
-        bg[NORMAL] = { 0.149, 0.149, 0.149 }
+        bg[NORMAL] = @background
 }
 
 style "very_small_text"
 {
- 	font_name = "@FONT_SMALLER@"
+	font_name = "@FONTFAMILY@ @FONT_SMALLER@"
 }
 
 style "small_text"
 {
- 	font_name = "@FONT_SMALL@"
+	font_name = "@FONTFAMILY@ @FONT_SMALL@"
 }
 
 style "small_clock"
@@ -243,22 +298,22 @@ style "small_clock"
 
 style "small_italic_text"
 {
-	font_name = "italic @FONT_SMALL@"
+	font_name = "@FONTFAMILY@ italic @FONT_SMALL@"
 }
 
 style "small_bold_text"
 {
- 	font_name = "bold @FONT_SMALL@"
+	font_name = "@FONTFAMILY@ bold @FONT_SMALL@"
 }
 
 style "medium_bold_text"
 {
- 	font_name = "bold @FONT_NORMAL@"
+	font_name = "@FONTFAMILY@ bold @FONT_NORMAL@"
 }
 
 style "medium_text"
 {
- 	font_name = "@FONT_NORMAL@"
+	font_name = "@FONTFAMILY@ @FONT_NORMAL@"
 }
 
 style "medium_monospace_text"
@@ -267,7 +322,7 @@ style "medium_monospace_text"
 }
 
 style "red_medium_text" = "medium_text"
-{	
+{
 	fg[NORMAL] = @bright_indicator
 	fg[ACTIVE] = @bright_indicator
 	fg[SELECTED] = @bright_indicator
@@ -275,12 +330,12 @@ style "red_medium_text" = "medium_text"
 
 style "large_bold_text"
 {
- 	font_name = "bold @FONT_LARGE@"
+	font_name = "@FONTFAMILY@ bold @FONT_LARGE@"
 }
 
 style "big_text"
 {
-        font_name = "@FONT_BIG@"
+        font_name = "@FONTFAMILY@ @FONT_BIG@"
 }
 
 style "bigger_clock"
@@ -290,7 +345,7 @@ style "bigger_clock"
 
 style "larger_text"
 {
- 	font_name = "@FONT_LARGE@"
+	font_name = "@FONTFAMILY@ @FONT_LARGE@"
 }
 
 style "massive_clock"
@@ -300,7 +355,7 @@ style "massive_clock"
 
 style "big_bold_text"
 {
-	font_name = "bold @FONT_LARGER@"
+	font_name = "@FONTFAMILY@ bold @FONT_LARGER@"
 }
 
 style "plugin_name_text" = "big_bold_text"
@@ -321,19 +376,23 @@ style "marker_text" = "small text"
 {
 }
 
+style "text_on_bg" = "medium_text"
+{
+	base[NORMAL] = @background
+}
+
 style "midi_tracer_textview" = "medium_monospace_text"
 {
-	
+
 }
 
 style "time_axis_view_item_name" = "very small text"
 {
 }
 
-
 style "midi_tracer_textview" = "medium_monospace_text"
 {
-	
+
 }
 
 style "time_axis_view_item_name" = "very small text"
@@ -353,6 +412,20 @@ style "base_frame"
 {
 	fg[NORMAL] = @background
 	bg[NORMAL] = @background
+}
+
+style "text_highlight_frame"
+{
+	fg[NORMAL] = shade (0.4, @texts)
+	bg[NORMAL] = shade (0.4, @texts)
+}
+
+style "transport_frame"
+{
+}
+
+style "editor_window"
+{
 }
 
 style "transport_base" = "medium_bold_text"
@@ -442,7 +515,7 @@ style "processor" = "small_text"
 {
 }
 
-style "ruler_label" = "small_bold_text"
+style "ruler_label" = "small_text"
 {
 	fg[NORMAL] = @light_text_on_dark
 }
@@ -555,7 +628,6 @@ style "fatal_message" = "medium_text"
 	bg[ACTIVE]   = @bases
 	bg[NORMAL]   = @bases
 	base[NORMAL] = @bases
-	base[NORMAL] = @bases
 }
 
 style "error_message" = "medium_text"
@@ -564,17 +636,6 @@ style "error_message" = "medium_text"
 	fg[NORMAL] = @bright_indicator
 	bg[ACTIVE]   = @bases
 	bg[NORMAL]   = @bases
-	base[NORMAL] = @bases
-	base[NORMAL] = @bases
-}
-
-style "info_message" = "medium_text"
-{
-	fg[ACTIVE]   = @contrasting_indicator
-	fg[NORMAL]   = @contrasting_indicator
-	bg[ACTIVE]   = @bases
-	bg[NORMAL]   = @bases
-	base[NORMAL] = @bases
 	base[NORMAL] = @bases
 }
 
@@ -585,6 +646,23 @@ style "warning_message" = "medium_text"
 	bg[ACTIVE]   = @bases
 	bg[NORMAL]   = @bases
 	base[NORMAL] = @bases
+}
+
+style "info_message" = "medium_text"
+{
+	fg[ACTIVE]   = @contrasting_indicator
+	fg[NORMAL]   = @contrasting_indicator
+	bg[ACTIVE]   = @bases
+	bg[NORMAL]   = @bases
+	base[NORMAL] = @bases
+}
+
+style "debug_message" = "medium_text"
+{
+	fg[ACTIVE]   = @texts
+	fg[NORMAL]   = @texts
+	bg[ACTIVE]   = @bases
+	bg[NORMAL]   = @bases
 	base[NORMAL] = @bases
 }
 
@@ -624,39 +702,17 @@ style "medium_bold_entry"  = "medium_bold_text"
 	fg[NORMAL] = @texts
 	fg[ACTIVE] = @contrasting_indicator
 	fg[SELECTED] = @fg_selected
-	
+
 	text[NORMAL] = @texts
 	text[ACTIVE] = @texts
 	text[SELECTED] = @fg_selected
 
 	bg[NORMAL] = @bases
 	bg[SELECTED] = @bases
-	bg[SELECTED] = @bases
-	
+
 	base[NORMAL] = @bases
 	base[ACTIVE] = @bases
 	base[SELECTED] = @bg_selected
-}
-
-style "small_entry" = "small_text"
-{
-	xthickness = 3
-	ythickness = 3
-	fg[NORMAL] = @texts
-	fg[ACTIVE] = @contrasting_indicator
-	fg[SELECTED] = @fg_selected
-
-	text[NORMAL] = @texts
-	text[ACTIVE] = @texts
-	text[SELECTED] = @texts
-
-	bg[NORMAL] = @bases
-	bg[ACTIVE] = @bases
-	bg[SELECTED] = @bases
-
-	base[NORMAL] = @bases
-	base[ACTIVE] = @bases
-	base[SELECTED] = @bases
 }
 
 style "small_spinner" = "small_text"
@@ -676,13 +732,6 @@ style "small_spinner" = "small_text"
 	base[SELECTED] = @background
 }
 
-style "red_active_small_entry" = "small_entry"
-{
-	fg[ACTIVE] = @texts
-	fg[SELECTED] = @texts
-	text[SELECTED] = @texts
-}
-
 style "small_red_on_black_entry"  = "small_bold_text"
 {
 	fg[NORMAL] = @bright_indicator
@@ -697,6 +746,13 @@ style "audio_bus_base" = "very_small_text"
 {
 	fg[NORMAL] = @foreground
 	bg[NORMAL] = @audio_bus
+	bg[ACTIVE] = @background
+}
+
+style "foldback_bus_base" = "very_small_text"
+{
+	fg[NORMAL] = @foreground
+	bg[NORMAL] = @foldback_bg
 	bg[ACTIVE] = @background
 }
 
@@ -724,6 +780,21 @@ style "audio_track_base" = "default"
 	fg[ACTIVE] = darker(@foreground)
 
 	bg[NORMAL] = @audio_track
+	bg[ACTIVE] = @background
+	bg[PRELIGHT] = @background
+	bg[INSENSITIVE] = @background
+	bg[SELECTED] = @background
+}
+
+style "control_master_base" = "default"
+{
+	font_name = " 8"
+	# NORMAL is used for single-data type labels, or Audio
+	# ACTIVE is used for MIDI in the presence of multiple data type
+	fg[NORMAL] = @foreground
+	fg[ACTIVE] = darker(@foreground)
+
+	bg[NORMAL] = @control_master
 	bg[ACTIVE] = @background
 	bg[PRELIGHT] = @background
 	bg[INSENSITIVE] = @background
@@ -798,25 +869,10 @@ style "audio_bus_metrics_inactive" = "track_controls_inactive"
 	font_name = ""
 }
 
-style "track_name_display" = "medium_text"
+style "track_name_editor" = "medium_text"
 {
 	xthickness = 0
 	ythickness = 0
-	fg[NORMAL] = @foreground
-	fg[ACTIVE] = @foreground
-	fg[SELECTED] = @foreground
-
-	text[NORMAL] = @foreground
-	text[ACTIVE] = @foreground
-	text[SELECTED] = @foreground
-
-	base[NORMAL] = @bases
-	base[ACTIVE] = @bg_selected
-	base[SELECTED] = @bg_selected
-
-	bg[NORMAL] = lighter(@bases)
-	bg[ACTIVE] = lighter(@bases)
-	bg[SELECTED] = lighter(@bases)
 }
 
 style "track_separator"
@@ -887,9 +943,9 @@ style "inspector_track_list_display" = "track_list_display"
 
 style "processor_list" = "very_small_text"
 {
-	bg[NORMAL] = @darkest
+	bg[NORMAL] = @bases
 	bg[ACTIVE] = shade (1.8, @fg_selected)
-	fg[ACTIVE] = @darkest
+	fg[ACTIVE] = @bases
 }
 
 # MixerPanZone:
@@ -912,19 +968,6 @@ style "paler_bright_when_active" = "medium_text"
 
 	fg[ACTIVE] = @foreground
 	bg[ACTIVE] = lighter(@bright_indicator)
-}
-
-style "peak_display_peaked_entry" = "small_entry"
-{
-	fg[ACTIVE] = @texts
-	fg[SELECTED] = @texts
-	text[SELECTED] = @texts
-
-	base[NORMAL] = @bright_indicator
-	base[ACTIVE] = @bright_indicator
-	base[PRELIGHT] = @bright_indicator
-	base[INSENSITIVE] = @bright_indicator
-	base[SELECTED] = @bright_indicator
 }
 
 style "selected_strip_frame"
@@ -958,7 +1001,7 @@ style "sync_alert"
 	bg[PRELIGHT] = @somewhat_bright_indicator
 	bg[SELECTED] = @somewhat_bright_indicator
 	bg[NORMAL] = @somewhat_bright_indicator
-	
+
 	fg[NORMAL] = @darkest
 	fg[PRELIGHT] = @darkest
 	fg[SELECTED] = @darkest
@@ -977,7 +1020,6 @@ style "location_row_button" = "default_button"
 {
 	font_name = " 10"
 }
-
 
 style "ardour_button" ="default_button"
 {
@@ -1019,7 +1061,23 @@ style "settings_notebook" = "big_text"
 {
 
 }
+
+style "pane"
+{
+      fg[NORMAL] = lighter(@background)
+      fg[SELECTED] = @foreground
+      fg[ACTIVE] = @somewhat_bright_indicator
+}
+
+style "vca_label_bar" = "medium_bold_text"
+{
+	bg[NORMAL] = @darkest
+	fg[NORMAL] = @lightest
+}
+
 class "GtkWidget" style:highest "default"
+class "GtkSpinButton" style:highest "spin_button"
+class "GtkEntry" style "entry"                          # not :highest to allow instances to override this
 class "GtkScrollbar" style:highest "ardour_adjusters"
 class "GtkLabel" style:highest "default_generic"
 class "GtkButton" style:highest "ardour_button"
@@ -1045,11 +1103,11 @@ widget "*MixerAutomationModeButton.*" style:highest "very_small_button"
 widget "*MixerAutomationPlaybackButton*" style:highest "very_small_button"
 widget "*MixerAutomationPlaybackButton.*" style:highest "very_small_button"
 widget "*ShuttleControl" style:highest "shuttle_control"
-#widget "*MainMenuBar" style:highest "menu_bar_base"
-widget "*ErrorMessage" style:highest "error_message"
 widget "*FatalMessage" style:highest "fatal_message"
-widget "*InfoMessage" style:highest "info_message"
+widget "*ErrorMessage" style:highest "error_message"
 widget "*WarningMessage" style:highest "warning_message"
+widget "*InfoMessage" style:highest "info_message"
+widget "*DebugMessage" style:highest "debug_message"
 
 widget "*big clock" style:highest "massive_clock"
 widget "*selection clock" style:highest "small_clock"
@@ -1067,10 +1125,16 @@ widget "*zoomrange clock" style:highest "medium_text"
 widget "*timecodeoffset clock" style:highest "medium_text"
 
 widget "*BaseFrame" style:highest "base_frame"
+widget "*TextHighlightFrame" style:highest "text_highlight_frame"
+widget "*TransportFrame" style:highest "transport_frame"
+widget "*TransportFrame*" style:highest  "transport_frame"
+widget "*EditorWindow*" style:highest  "editor_window"
+widget "*EditorWindow" style:highest  "editor_window"
 
 widget "*SendStripBase" style:highest "send_strip_base"
 widget "*AudioTrackStripBase" style:highest "audio_track_base"
 widget "*AudioBusStripBase" style:highest "audio_bus_base"
+widget "*FoldbackBusStripBase" style:highest "foldback_bus_base"
 widget "*MidiTrackStripBase" style:highest "midi_track_base"
 widget "*AudioTrackStripBaseInactive" style:highest "track_header_inactive"
 widget "*AudioBusStripBaseInactive" style:highest "track_header_inactive"
@@ -1095,6 +1159,7 @@ widget "*AudioMidiTrackMetricsInactive" style:highest "midi_track_metrics_inacti
 widget "*TimeAxisViewControlsBaseUnselected" style:highest "audio_track_base"
 widget "*AudioTrackControlsBaseUnselected" style:highest "audio_track_base"
 widget "*MidiTrackControlsBaseUnselected" style:highest "midi_track_base"
+widget "*ControlMasterBaseUnselected" style:highest "control_master_base"
 
 widget "*SendUIFader" style:highest "plugin_slider"
 widget "*ReturnUIFader" style:highest "plugin_slider"
@@ -1105,11 +1170,8 @@ widget "*AudioBusFader" style:highest "audio_bus_fader"
 
 widget "*BusControlsBaseUnselected" style:highest "audio_bus_base"
 widget "*TrackSeparator" style:highest "track_separator"
-widget "*EditorTrackNameDisplay" style:highest "track_name_display"
-widget "*EditorTrackNameDisplay*" style:highest "track_name_display"
-widget "*CrossfadeEditAuditionButton" style:highest "bright_when_active"
+widget "*TrackNameEditor*" style:highest "track_name_editor"
 widget "*CrossfadeEditAuditionButton*" style:highest "bright_when_active"
-widget "*CrossfadeEditCurveButton" style:highest "bright_when_active"
 widget "*CrossfadeEditCurveButton*" style:highest "bright_when_active"
 widget "*CrossfadeEditFrame" style:highest "base_frame"
 widget "*AudioTrackControlsBaseInactiveUnselected" style:highest "track_header_inactive"
@@ -1121,11 +1183,9 @@ widget "*MidiTrackControlsBaseSelected" style:highest "track_header_selected"
 widget "*BusControlsBaseSelected" style:highest "track_header_selected"
 widget "*AutomationTrackControlsBase" style:highest "automation_track_header"
 widget "*AutomationTrackControlsBaseSelected" style:highest "track_header_selected"
+widget "*ControlMasterBaseSelected" style:highest "track_header_selected"
 widget "*PluginParameterLabel" style:highest "medium_text"
-widget "*MotionControllerValue" style:highest "small_entry"
-widget "*MotionControllerValue*" style:highest "small_entry"
 widget "*ParameterValueDisplay" style:highest "medium_bold_entry"
-widget "*PluginUIClickBox" style:highest "medium_bold_entry"
 widget "*PluginUIClickBox*" style:highest "medium_bold_entry"
 widget "*ProcessorControlSlider" style:highest "processor_control_slider"
 widget "*processor control button" style:highest "processor_control_button"
@@ -1135,36 +1195,29 @@ widget "*MixerTrackCommentArea" style:highest "option_entry"
 widget "*MixerPanZone" style:highest "pan_zone"
 widget "*RegionEditorLabel" style:highest "medium_text"
 widget "*RegionEditorEntry" style:highest "medium_entry"
-widget "*MixerStripGainDisplay" style:highest "small_entry"
-widget "*MixerStripGainDisplay*" style:highest "small_entry"
-widget "*MixerStripPeakDisplay" style:highest "red_active_small_entry"
-widget "*MixerStripPeakDisplay*" style:highest "red_active_small_entry"
-widget "*MixerStripPeakDisplayPeak*" style:highest "peak_display_peaked_entry"
+widget "*MixerStripGainDisplay" style:highest "mixer_strip_entry"
+widget "*MixerStripPeakDisplay" style:highest "mixer_strip_entry"
+widget "*MixerStripPeakDisplayPeak" style:highest "peak_display_peaked_entry"
 widget "*MixerStripSelectedFrame" style:highest "selected_strip_frame"
 widget "*MixerStripFrame" style:highest "base_frame"
-widget "*FadeCurve" style:highest "medium_bold_entry"
 widget "*FadeCurve*" style:highest "medium_bold_entry"
 widget "*RouteParamsListDisplay" style:highest "inspector_track_list_display"
 widget "*TearOffArrow" style:highest "tearoff_arrow"
 widget "*RouteParamsTitleLabel" style:highest "medium_text"
-widget "*PluginAutomateButton" style:highest "small_button"
-widget "*PluginAutomateButton*" style:highest "small_button"
-widget "*PluginSaveButton" style:highest "small_button"
+widget "*plugin automation state button*" style:highest "small_button"
 widget "*PluginSaveButton*" style:highest "small_button"
 widget "*PluginEditorButton*" style:highest "default_toggle_button"
 widget "*PluginEditorButton-active" style:highest "default_toggle_button_active"
+widget "*PluginAnalysisInfoLabel" style:highest "medium_monospace_text"
 
-widget "*BarControlSpinner" style:highest "small_spinner"
 widget "*BarControlSpinner*" style:highest "small_spinner"
 
 widget "*BlackSeparator" style:highest "black_separator"
 
 widget "*MetricLabel" style:highest "medium_text"
 widget "*ChoiceWindow" style:highest "default_generic"
-widget "*TrackLabel" style:highest "medium_text"
 widget "*TrackParameterName" style:highest "small_italic_text"
 widget "*AddRouteDialog*" style:highest "medium_text"
-widget "*AddRouteDialogSpinner" style:highest "medium_bold_entry"
 widget "*AddRouteDialogSpinner*" style:highest "medium_bold_entry"
 widget "*AddRouteDialogNameTemplateEntry" style:highest "medium_bold_entry"
 widget "*NewSessionSR1Label" style:highest "red_medium_text"
@@ -1172,28 +1225,23 @@ widget "*NewSessionSR2Label" style:highest "medium_text"
 widget "*location edit row clock" style:highest "medium_text"
 widget "*ArdourLuaEntry" style:highest "medium_monospace_text"
 widget "*LocationEditNameLabel" style:highest "medium_text"
-widget "*LocationEditCdButton" style:highest "small_red_active_and_selected_button"
 widget "*LocationEditCdButton*" style:highest "small_red_active_and_selected_button"
-widget "*LocationEditHideButton" style:highest "small_red_active_and_selected_button"
 widget "*LocationEditHideButton*" style:highest "small_red_active_and_selected_button"
 widget "*LocationEditLockButton*" style:highest "small_red_active_and_selected_button"
 widget "*LocationEditGlueButton*" style:highest "small_red_active_and_selected_button"
 widget "*LocationEditNumberLabel" style:highest "small_text"
 widget "*LocationEditNameEntry" style:highest "option_entry"
-widget "*LocationAddLocationButton" style:highest "default_button"
 widget "*LocationAddLocationButton*" style:highest "default_button"
-widget "*LocationAddRangeButton" style:highest "default_button"
 widget "*LocationAddRangeButton*" style:highest "default_button"
-widget "*LocationEditRemoveButton" style:highest "location_row_button"
 widget "*LocationEditRemoveButton*" style:highest "location_row_button"
 widget "*ChannelCountSelector" style:highest "medium_bold_entry"
 widget "*RegionListWholeFile" style:highest "treeview_parent_node"
 widget "*ProcessorList*" style:highest "processor_list"
 widget "*PortMatrixLabel*" style:highest "small_text"
+widget "*MainMenuBar" style:highest "status_bar_box"
 widget "*midi device" style:highest "midi_device"
 widget "*MidiTracerTextView" style:highest "midi_tracer_textview"
 widget "*meterbridge label" style:highest "meterbridge_label"
-widget "*ContrastingPopup" style:highest "contrasting_popup"
 widget "*ContrastingPopup*" style:highest "contrasting_popup"
 widget "*MidiChannelSelectorButton" style:highest "midi_channel_selector_button"
 widget "*TimeInfoSelectionTitle" style:highest "small_text"
@@ -1209,3 +1257,7 @@ widget "*processor fader" style:highest "processor"
 widget "*processor postfader" style:highest "processor"
 widget "*MonitorSectionLabel" style:highest "small_text"
 widget "*ooltip*" style:highest "tooltip"
+widget "*Pane" style:highest "pane"
+widget "*Pane.Divider" style:highest "pane"
+widget "*VCALabelBar*" style:highest "vca_label_bar"
+widget "*TextOnBackground" style:highest "text_on_bg"

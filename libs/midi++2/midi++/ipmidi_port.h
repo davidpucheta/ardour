@@ -1,20 +1,22 @@
 /*
-    Copyright (C) 1998-2010 Paul Barton-Davis
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1998-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 John Emmas <john@creativepost.co.uk>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef  __libmidi_ipmidi_port_h__
 #define  __libmidi_ipmidi_port_h__
@@ -23,10 +25,12 @@
 #include <iostream>
 #if defined(PLATFORM_WINDOWS)
 #include <winsock.h>
-#elif defined(__FREE_BSD__)
+#elif defined(__FreeBSD__) || defined(__OpenBSD__)
 #include <netinet/in.h>
 #include <sys/socket.h>
+#if defined(__FreeBSD__)
 #include <sys/_sockaddr_storage.h>
+#endif
 #include <arpa/inet.h>
 #include <netinet/ip_carp.h>
 #include <sys/types.h>
@@ -64,7 +68,7 @@ class LIBMIDIPP_API IPMIDIPort : public Port {
 
     int write (const byte *msg, size_t msglen, timestamp_t timestamp);
     int read (byte *buf, size_t bufsize);
-    void parse (framecnt_t timestamp);
+    void parse (samplecnt_t timestamp);
     int selectable () const;
 
     static const int lowest_ipmidi_port_default = 21928;

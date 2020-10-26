@@ -1,25 +1,21 @@
 /*
-    Copyright (C) 1998 Paul Barton-Davis
-
-    This file was inspired by the MIDI parser for KeyKit by
-    Tim Thompson.
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-    $Id$
-*/
+ * Copyright (C) 1998-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstring>
 #include <cstdlib>
@@ -136,7 +132,7 @@ Parser::~Parser ()
 }
 
 void
-Parser::trace_event (Parser &, MIDI::byte *msg, size_t len)
+Parser::trace_event (Parser &, MIDI::byte *msg, size_t len, samplecnt_t /*when*/)
 {
 	eventType type;
 	ostream *o;
@@ -313,7 +309,7 @@ Parser::trace (bool onoff, ostream *o, const string &prefix)
 	if (onoff) {
 		trace_stream = o;
 		trace_prefix = prefix;
-		any.connect_same_thread (trace_connection, boost::bind (&Parser::trace_event, this, _1, _2, _3));
+		any.connect_same_thread (trace_connection, boost::bind (&Parser::trace_event, this, _1, _2, _3, _4));
 	} else {
 		trace_prefix = "";
 		trace_stream = 0;
@@ -343,6 +339,13 @@ Parser::scanner (unsigned char inbyte)
 		if (!_offline) {
 			active_sense (*this);
 		}
+		return;
+	}
+
+	/* ditto for system reset, except do even less */
+
+	if (inbyte == 0xff) {
+		message_counter[inbyte]++;
 		return;
 	}
 
@@ -387,7 +390,7 @@ Parser::scanner (unsigned char inbyte)
 	if (rtmsg) {
 		boost::optional<int> res = edit (&inbyte, 1);
 
-		if (res.get_value_or (1) >= 0 && !_offline) {
+		if (res.value_or (1) >= 0 && !_offline) {
 			realtime_msg (inbyte);
 		}
 
@@ -424,7 +427,7 @@ Parser::scanner (unsigned char inbyte)
 
 			boost::optional<int> res = edit (msgbuf, msgindex);
 
-			if (res.get_value_or (1) >= 0) {
+			if (res.value_or (1) >= 0) {
 				if (!possible_mmc (msgbuf, msgindex) || _mmc_forward) {
 					if (!possible_mtc (msgbuf, msgindex) || _mtc_forward) {
 						if (!_offline) {
@@ -433,7 +436,7 @@ Parser::scanner (unsigned char inbyte)
 					}
 				}
 				if (!_offline) {
-					any (*this, msgbuf, msgindex);
+					any (*this, msgbuf, msgindex, _timestamp);
 				}
 			}
 		}
@@ -490,16 +493,17 @@ Parser::scanner (unsigned char inbyte)
 
 	case NEEDTWOBYTES:
 		/* wait for the second byte */
-		if (msgindex < 3)
+		if (msgindex < 3) {
 			return;
-		/*FALLTHRU*/
+		}
+		/* fallthrough */
 
 	case NEEDONEBYTE:
 		/* We've completed a 1 or 2 byte message. */
 
                 edit_result = edit (msgbuf, msgindex);
 
-		if (edit_result.get_value_or (1)) {
+		if (edit_result.value_or (1)) {
 
 			/* message not cancelled by an editor */
 
@@ -565,7 +569,7 @@ Parser::realtime_msg(unsigned char inbyte)
 		break;
 	}
 
-	any (*this, &inbyte, 1);
+	any (*this, &inbyte, 1, _timestamp);
 }
 
 
@@ -654,7 +658,7 @@ Parser::system_msg (unsigned char inbyte)
 
 	// all these messages will be sent via any()
 	// when they are complete.
-	// any (*this, &inbyte, 1);
+	// any (*this, &inbyte, 1, _timestamp);
 }
 
 void
@@ -742,7 +746,7 @@ Parser::signal (MIDI::byte *msg, size_t len)
 		break;
 
 	case MIDI::position:
-		position (*this, msg, len);
+		position (*this, msg, len, _timestamp);
 		break;
 
 	case MIDI::song:
@@ -757,7 +761,7 @@ Parser::signal (MIDI::byte *msg, size_t len)
 		break;
 	}
 
-	any (*this, msg, len);
+	any (*this, msg, len, _timestamp);
 }
 
 bool
@@ -793,4 +797,3 @@ Parser::set_offline (bool yn)
 		state = NEEDSTATUS;
 	}
 }
-

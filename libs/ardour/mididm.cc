@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2014 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,9 +11,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "ardour/mididm.h"
@@ -21,7 +21,7 @@
 
 using namespace ARDOUR;
 
-MIDIDM::MIDIDM (framecnt_t sample_rate)
+MIDIDM::MIDIDM (samplecnt_t sample_rate)
   : _sample_rate (sample_rate)
   , _monotonic_cnt (sample_rate)
   , _last_signal_tme (0)
@@ -37,7 +37,7 @@ MIDIDM::MIDIDM (framecnt_t sample_rate)
 }
 
 int64_t
-MIDIDM::parse_mclk (uint8_t* buf, pframes_t timestamp) const
+MIDIDM::parse_mclk (uint8_t const * const buf, pframes_t timestamp) const
 {
 	/* calculate time difference */
 #define MODCLK (16384)  // 1<<(2*7)
@@ -52,7 +52,7 @@ MIDIDM::parse_mclk (uint8_t* buf, pframes_t timestamp) const
 }
 
 int64_t
-MIDIDM::parse_mtc (uint8_t* buf, pframes_t timestamp) const
+MIDIDM::parse_mtc (uint8_t const * const buf, pframes_t timestamp) const
 {
 #define MODTC (2097152)  // 1<<(3*7)
 	const int64_t tc = (_monotonic_cnt + timestamp) & 0x001FFFFF;
@@ -101,7 +101,7 @@ int MIDIDM::process (pframes_t nframes, PortEngine &pe, void *midi_in, void *mid
 	for (pframes_t n = 0; n < nevents; ++n) {
 		pframes_t timestamp;
 		size_t size;
-		uint8_t* buf;
+		uint8_t const* buf;
 		int64_t tdiff;
 		pe.midi_event_get (timestamp, size, &buf, midi_in, n);
 

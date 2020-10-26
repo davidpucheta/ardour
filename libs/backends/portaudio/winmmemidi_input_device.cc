@@ -1,4 +1,6 @@
 /*
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Paul Davis <paul@linuxaudiosystems.com>
  * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -11,9 +13,9 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "winmmemidi_input_device.h"
@@ -37,7 +39,7 @@ namespace ARDOUR {
 WinMMEMidiInputDevice::WinMMEMidiInputDevice (int index)
 	: m_handle(0)
 	, m_started(false)
-	, m_midi_buffer(new RingBuffer<uint8_t>(MIDI_BUFFER_SIZE))
+	, m_midi_buffer(new PBD::RingBuffer<uint8_t>(MIDI_BUFFER_SIZE))
 	, m_sysex_buffer(new uint8_t[SYSEX_BUFFER_SIZE])
 {
 	DEBUG_MIDI (string_compose ("Creating midi input device index: %1\n", index));
@@ -315,7 +317,7 @@ WinMMEMidiInputDevice::dequeue_midi_event (uint64_t timestamp_start,
 		return false;
 	}
 
-	RingBuffer<uint8_t>::rw_vector vector;
+	PBD::RingBuffer<uint8_t>::rw_vector vector;
 	m_midi_buffer->get_read_vector (&vector);
 	if (vector.len[0] >= sizeof(MidiEventHeader)) {
 		memcpy ((uint8_t*)&h, vector.buf[0], sizeof(MidiEventHeader));

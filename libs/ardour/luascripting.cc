@@ -1,20 +1,19 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2019 Robin Gareus <robin@gareus.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include <cstring>
 #include <glibmm.h>
@@ -28,11 +27,12 @@
 #include "ardour/luascripting.h"
 #include "ardour/lua_script_params.h"
 #include "ardour/search_paths.h"
+#include "ardour/utils.h"
 
 #include "lua/luastate.h"
 #include "LuaBridge/LuaBridge.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 #include "sha1.c"
 
 using namespace ARDOUR;
@@ -56,6 +56,8 @@ LuaScripting::LuaScripting ()
 	, _sl_hook (0)
 	, _sl_action (0)
 	, _sl_snippet (0)
+	, _sl_setup (0)
+	, _sl_tracks (0)
 {
 	;
 }
@@ -69,6 +71,8 @@ LuaScripting::~LuaScripting ()
 		delete _sl_hook;
 		delete _sl_action;
 		delete _sl_snippet;
+		delete _sl_setup;
+		delete _sl_tracks;
 	}
 }
 
@@ -83,12 +87,16 @@ LuaScripting::refresh (bool run_scan)
 	delete _sl_hook;
 	delete _sl_action;
 	delete _sl_snippet;
+	delete _sl_setup;
+	delete _sl_tracks;
 
 	_sl_dsp = 0;
 	_sl_session = 0;
 	_sl_hook = 0;
 	_sl_action = 0;
 	_sl_snippet = 0;
+	_sl_setup = 0;
+	_sl_tracks = 0;
 
 	if (run_scan) {
 		lm.release ();
@@ -96,11 +104,10 @@ LuaScripting::refresh (bool run_scan)
 	}
 }
 
-struct ScriptSorter {
-	bool operator () (LuaScriptInfoPtr a, LuaScriptInfoPtr b) {
-		return a->name < b->name;
-	}
-};
+bool
+LuaScripting::Sorter::operator() (LuaScriptInfoPtr const a, LuaScriptInfoPtr const b) const {
+	return ARDOUR::cmp_nocase_utf8 (a->name, b->name) < 0;
+}
 
 LuaScriptInfoPtr
 LuaScripting::script_info (const std::string &script) {
@@ -120,6 +127,8 @@ LuaScripting::scan ()
 	CLEAR_OR_NEW (_sl_hook)
 	CLEAR_OR_NEW (_sl_action)
 	CLEAR_OR_NEW (_sl_snippet)
+	CLEAR_OR_NEW (_sl_setup)
+	CLEAR_OR_NEW (_sl_tracks)
 
 #undef CLEAR_OR_NEW
 
@@ -148,16 +157,21 @@ LuaScripting::scan ()
 			case LuaScriptInfo::Snippet:
 				_sl_snippet->push_back(lsi);
 				break;
+			case LuaScriptInfo::SessionInit:
+				_sl_setup->push_back(lsi);
+				break;
 			default:
 				break;
 		}
 	}
 
-	std::sort (_sl_dsp->begin(), _sl_dsp->end(), ScriptSorter());
-	std::sort (_sl_session->begin(), _sl_session->end(), ScriptSorter());
-	std::sort (_sl_hook->begin(), _sl_hook->end(), ScriptSorter());
-	std::sort (_sl_action->begin(), _sl_action->end(), ScriptSorter());
-	std::sort (_sl_snippet->begin(), _sl_snippet->end(), ScriptSorter());
+	std::sort (_sl_dsp->begin(), _sl_dsp->end(), Sorter());
+	std::sort (_sl_session->begin(), _sl_session->end(), Sorter());
+	std::sort (_sl_hook->begin(), _sl_hook->end(), Sorter());
+	std::sort (_sl_action->begin(), _sl_action->end(), Sorter());
+	std::sort (_sl_snippet->begin(), _sl_snippet->end(), Sorter());
+	std::sort (_sl_setup->begin(), _sl_setup->end(), Sorter());
+	std::sort (_sl_tracks->begin(), _sl_tracks->end(), Sorter());
 
 	scripts_changed (); /* EMIT SIGNAL */
 }
@@ -179,8 +193,7 @@ LuaScripting::scan_script (const std::string &fn, const std::string &sc)
 
 	lua_State* L = lua.getState();
 	lua.Print.connect (&LuaScripting::lua_print);
-
-	lua.do_command ("io = nil;");
+	lua.sandbox (true);
 
 	lua.do_command (
 			"ardourluainfo = {}"
@@ -203,16 +216,24 @@ LuaScripting::scan_script (const std::string &fn, const std::string &sc)
 		}
 		if (err) {
 #ifndef NDEBUG
-		cerr << "failed to load lua script\n";
+		cerr << "failed to load lua script fn: '"<< fn << "'\n";
 #endif
 			return LuaScriptInfoPtr();
 		}
-	} catch (...) { // luabridge::LuaException
+	} catch (luabridge::LuaException const& e) {
 #ifndef NDEBUG
-		cerr << "failed to parse lua script\n";
+		cerr << "Exception: Failed to parse lua script fn: '"<< fn << "' " << e.what () << "\n";
 #endif
+		PBD::warning << "Exception: Failed to parse lua script fn: '"<< fn << "' " << e.what () << "\n";
+		return LuaScriptInfoPtr();
+	} catch (...) {
+#ifndef NDEBUG
+		cerr << "Exception: Failed to parse lua script fn: '"<< fn << "'\n";
+#endif
+		PBD::warning << "Exception: Failed to parse lua script fn: '"<< fn << "'\n";
 		return LuaScriptInfoPtr();
 	}
+
 	luabridge::LuaRef nfo = luabridge::getGlobal (L, "ardourluainfo");
 	if (nfo.type() != LUA_TTABLE) {
 #ifndef NDEBUG
@@ -248,7 +269,7 @@ LuaScripting::scan_script (const std::string &fn, const std::string &sc)
 		try {
 			std::string script = Glib::file_get_contents (fn);
 			sha1_write (&s, (const uint8_t *) script.c_str(), script.size ());
-		} catch (Glib::FileError err) {
+		} catch (Glib::FileError const& err) {
 			return LuaScriptInfoPtr();
 		}
 	}
@@ -269,13 +290,33 @@ LuaScripting::scan_script (const std::string &fn, const std::string &sc)
 		if (key == "description") { lsi->description = val; }
 		if (key == "category") { lsi->category = val; }
 	}
+
+
+	if (type == LuaScriptInfo::EditorAction) {
+
+		luabridge::LuaRef lua_rs = luabridge::getGlobal (L, "route_setup");
+		if (lua_rs.isFunction ()) {
+			lsi->subtype |= LuaScriptInfo::RouteSetup;
+		}
+
+		luabridge::LuaRef lua_ss = luabridge::getGlobal (L, "session_setup");
+		if (lua_ss.isFunction ()) {
+			try {
+				if (lua_ss () == true) {
+					lsi->subtype |= LuaScriptInfo::SessionSetup;
+				}
+			} catch (...) { }
+		}
+
+	}
+
 	return lsi;
 }
 
 LuaScriptList &
 LuaScripting::scripts (LuaScriptInfo::ScriptType type) {
 
-	if (!_sl_dsp || !_sl_session || !_sl_hook || !_sl_action || !_sl_snippet) {
+	if (!_sl_dsp || !_sl_session || !_sl_hook || !_sl_action || !_sl_snippet || ! _sl_setup || ! _sl_tracks) {
 		scan ();
 	}
 
@@ -295,12 +336,26 @@ LuaScripting::scripts (LuaScriptInfo::ScriptType type) {
 		case LuaScriptInfo::Snippet:
 			return *_sl_snippet;
 			break;
+		case LuaScriptInfo::SessionInit:
+			return *_sl_setup;
+			break;
 		default:
 			break;
 	}
 	return _empty_script_info; // make some compilers happy
 }
 
+LuaScriptInfoPtr
+LuaScripting::by_name (const std::string& name, LuaScriptInfo::ScriptType type)
+{
+	LuaScriptList lsl (scripts (type));
+	for (LuaScriptList::const_iterator s = lsl.begin(); s != lsl.end(); ++s) {
+		if ((*s)->name == name) {
+			return (*s);
+		}
+	}
+	return LuaScriptInfoPtr();
+}
 
 std::string
 LuaScriptInfo::type2str (const ScriptType t) {
@@ -310,6 +365,7 @@ LuaScriptInfo::type2str (const ScriptType t) {
 		case LuaScriptInfo::EditorHook: return "EditorHook";
 		case LuaScriptInfo::EditorAction: return "EditorAction";
 		case LuaScriptInfo::Snippet: return "Snippet";
+		case LuaScriptInfo::SessionInit: return "SessionInit";
 		default: return "Invalid";
 	}
 }
@@ -322,11 +378,12 @@ LuaScriptInfo::str2type (const std::string& str) {
 	if (!strcasecmp (type, "EditorHook")) {return LuaScriptInfo::EditorHook;}
 	if (!strcasecmp (type, "EditorAction")) {return LuaScriptInfo::EditorAction;}
 	if (!strcasecmp (type, "Snippet")) {return LuaScriptInfo::Snippet;}
+	if (!strcasecmp (type, "SessionInit")) {return LuaScriptInfo::SessionInit;}
 	return LuaScriptInfo::Invalid;
 }
 
 LuaScriptParamList
-LuaScriptParams::script_params (LuaScriptInfoPtr lsi, const std::string &pname)
+LuaScriptParams::script_params (const LuaScriptInfoPtr& lsi, const std::string &pname)
 {
 	assert (lsi);
 	return LuaScriptParams::script_params (lsi->path, pname);
@@ -335,11 +392,17 @@ LuaScriptParams::script_params (LuaScriptInfoPtr lsi, const std::string &pname)
 LuaScriptParamList
 LuaScriptParams::script_params (const std::string& s, const std::string &pname, bool file)
 {
+	LuaState lua;
+	return LuaScriptParams::script_params (lua, s, pname, file);
+}
+
+LuaScriptParamList
+LuaScriptParams::script_params (LuaState& lua, const std::string& s, const std::string &pname, bool file)
+{
 	LuaScriptParamList rv;
 
-	LuaState lua;
 	lua_State* L = lua.getState();
-	lua.do_command ("io = nil;");
+	lua.sandbox (true);
 	lua.do_command ("function ardour () end");
 
 	try {
@@ -348,7 +411,7 @@ LuaScriptParams::script_params (const std::string& s, const std::string &pname, 
 		} else {
 			lua.do_command (s);
 		}
-	} catch (luabridge::LuaException const& e) {
+	} catch (...) {
 		return rv;
 	}
 
@@ -365,6 +428,7 @@ LuaScriptParams::script_params (const std::string& s, const std::string &pname, 
 				std::string title = i.value ()["title"].cast<std::string> ();
 				std::string dflt;
 				bool optional = false;
+				bool preseeded = false;
 
 				if (i.value ()["default"].isString ()) {
 					dflt = i.value ()["default"].cast<std::string> ();
@@ -372,7 +436,10 @@ LuaScriptParams::script_params (const std::string& s, const std::string &pname, 
 				if (i.value ()["optional"].isBoolean ()) {
 					optional = i.value ()["optional"].cast<bool> ();
 				}
-				LuaScriptParamPtr lsspp (new LuaScriptParam(name, title, dflt, optional));
+				if (i.value ()["preseeded"].isBoolean ()) {
+					preseeded = i.value ()["preseeded"].cast<bool> ();
+				}
+				LuaScriptParamPtr lsspp (new LuaScriptParam(name, title, dflt, optional, preseeded));
 				rv.push_back (lsspp);
 			}
 		}
@@ -416,6 +483,7 @@ LuaScripting::try_compile (const std::string& script, const LuaScriptParamList& 
 	}
 	LuaState l;
 	l.Print.connect (&LuaScripting::lua_print);
+	l.sandbox (true);
 	lua_State* L = l.getState();
 
 	l.do_command (""
@@ -425,7 +493,7 @@ LuaScripting::try_compile (const std::string& script, const LuaScriptParamList& 
 			"  assert(type(f) == 'string', 'Assigned ByteCode must be string')"
 			"  local factory = load(f)"
 			"  assert(type(factory) == 'function', 'Factory is a not a function')"
-			"  local env = _ENV;  env.f = nil env.debug = nil os.exit = nil"
+			"  local env = _ENV; env.f = nil env.os = nil env.io = nil"
 			"  load (string.dump(factory, true), nil, nil, env)(a)"
 			" end"
 			);
@@ -444,16 +512,17 @@ LuaScripting::try_compile (const std::string& script, const LuaScriptParamList& 
 		cerr << e.what() << "\n";
 #endif
 		lua_print (e.what());
-	}
+	} catch (...) { }
 
 	return false;
 }
 
 std::string
-LuaScripting::get_factory_bytecode (const std::string& script)
+LuaScripting::get_factory_bytecode (const std::string& script, const std::string& ffn, const std::string& fp)
 {
 	LuaState l;
 	l.Print.connect (&LuaScripting::lua_print);
+	l.sandbox (true);
 	lua_State* L = l.getState();
 
 	l.do_command (
@@ -461,7 +530,7 @@ LuaScripting::get_factory_bytecode (const std::string& script)
 			""
 			" function dump_function (f)"
 			"  assert(type(f) == 'function', 'Factory is a not a function')"
-			"  return string.format(\"f = %q\", string.dump(f, true))"
+			"  return string.format(\"" + fp + " = %q\", string.dump(f, true))"
 			" end"
 			);
 
@@ -469,12 +538,12 @@ LuaScripting::get_factory_bytecode (const std::string& script)
 		luabridge::LuaRef lua_dump = luabridge::getGlobal (L, "dump_function");
 		l.do_command ("dump_function = nil"); // hide it
 		l.do_command (script); // register "factory"
-		luabridge::LuaRef lua_factory = luabridge::getGlobal (L, "factory");
+		luabridge::LuaRef lua_factory = luabridge::getGlobal (L, ffn.c_str());
 
 		if (lua_factory.isFunction()) {
 			return (lua_dump(lua_factory)).cast<std::string> ();
 		}
-	} catch (luabridge::LuaException const& e) { }
+	} catch (...) { }
 	return "";
 }
 

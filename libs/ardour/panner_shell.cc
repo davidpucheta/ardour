@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2004-2011 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <inttypes.h>
 
@@ -32,17 +36,18 @@
 #include <glibmm.h>
 
 #include "pbd/cartesian.h"
-#include "pbd/boost_debug.h"
 #include "pbd/convert.h"
+#include "pbd/enumwriter.h"
 #include "pbd/error.h"
 #include "pbd/failed_constructor.h"
+#include "pbd/stateful.h"
 #include "pbd/xml++.h"
-#include "pbd/enumwriter.h"
 
-#include "evoral/Curve.hpp"
+#include "evoral/Curve.h"
 
 #include "ardour/audio_buffer.h"
 #include "ardour/audioengine.h"
+#include "ardour/boost_debug.h"
 #include "ardour/buffer_set.h"
 #include "ardour/debug.h"
 #include "ardour/pannable.h"
@@ -53,7 +58,7 @@
 #include "ardour/session.h"
 #include "ardour/speakers.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #include "pbd/mathfix.h"
 
@@ -74,7 +79,7 @@ PannerShell::PannerShell (string name, Session& s, boost::shared_ptr<Pannable> p
 {
 	if (is_send) {
 		_pannable_internal.reset(new Pannable (s));
-		if (Config->get_link_send_and_route_panner() && !ARDOUR::Profile->get_mixbus()) {
+		if (Config->get_link_send_and_route_panner()) {
 			_panlinked = true;
 		} else {
 			_panlinked = false;
@@ -122,6 +127,9 @@ PannerShell::configure_io (ChanCount in, ChanCount out)
 		fatal << _("No panner found: check that panners are being discovered correctly during startup.") << endmsg;
 		abort(); /*NOTREACHED*/
 	}
+	if (Stateful::loading_state_version < 6000 && pi->descriptor.in == 2) {
+		_user_selected_panner_uri = pi->descriptor.panner_uri;
+	}
 
 	DEBUG_TRACE (DEBUG::Panning, string_compose (_("select panner: %1\n"), pi->descriptor.name.c_str()));
 
@@ -155,9 +163,9 @@ PannerShell::get_state ()
 {
 	XMLNode* node = new XMLNode ("PannerShell");
 
-	node->add_property (X_("bypassed"), _bypassed ? X_("yes") : X_("no"));
-	node->add_property (X_("user-panner"), _user_selected_panner_uri);
-	node->add_property (X_("linked-to-route"), _panlinked ? X_("yes") : X_("no"));
+	node->set_property (X_("bypassed"), _bypassed);
+	node->set_property (X_("user-panner"), _user_selected_panner_uri);
+	node->set_property (X_("linked-to-route"), _panlinked);
 
 	if (_panner && _is_send) {
 		node->add_child_nocopy (_panner->get_state ());
@@ -171,31 +179,26 @@ PannerShell::set_state (const XMLNode& node, int version)
 {
 	XMLNodeList nlist = node.children ();
 	XMLNodeConstIterator niter;
-	const XMLProperty *prop;
-	LocaleGuard lg (X_("C"));
+	bool yn;
+	std::string str;
 
-	if ((prop = node.property (X_("bypassed"))) != 0) {
-		set_bypassed (string_is_affirmative (prop->value ()));
+	if (node.get_property (X_("bypassed"), yn)) {
+		set_bypassed (yn);
 	}
 
-	if ((prop = node.property (X_("linked-to-route"))) != 0) {
-		if (!ARDOUR::Profile->get_mixbus()) {
-			_panlinked = string_is_affirmative (prop->value ());
-		}
+	if (node.get_property (X_("linked-to-route"), yn)) {
+		_panlinked = yn;
 	}
 
-	if ((prop = node.property (X_("user-panner"))) != 0) {
-		_user_selected_panner_uri = prop->value ();
-	}
+	node.get_property (X_("user-panner"), _user_selected_panner_uri);
 
 	_panner.reset ();
 
 	for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
 
 		if ((*niter)->name() == X_("Panner")) {
-
-			if ((prop = (*niter)->property (X_("uri")))) {
-				PannerInfo* p = PannerManager::instance().get_by_uri(prop->value());
+			if ((*niter)->get_property (X_("uri"), str)) {
+				PannerInfo* p = PannerManager::instance().get_by_uri(str);
 				if (p) {
 					_panner.reset (p->descriptor.factory (
 								_is_send ? _pannable_internal : _pannable_route, _session.get_speakers ()));
@@ -217,13 +220,13 @@ PannerShell::set_state (const XMLNode& node, int version)
 			}
 
 			else /* backwards compatibility */
-			if ((prop = (*niter)->property (X_("type")))) {
+			if ((*niter)->get_property (X_("type"), str)) {
 
 				list<PannerInfo*>::iterator p;
 				PannerManager& pm (PannerManager::instance());
 
 				for (p = pm.panner_info.begin(); p != pm.panner_info.end(); ++p) {
-					if (prop->value() == (*p)->descriptor.name) {
+					if (str == (*p)->descriptor.name) {
 
 						/* note that we assume that all the stream panners
 						   are of the same type. pretty good
@@ -255,7 +258,7 @@ PannerShell::set_state (const XMLNode& node, int version)
 
 				if (p == pm.panner_info.end()) {
 					error << string_compose (_("Unknown panner plugin \"%1\" found in pan state - ignored"),
-					                         prop->value())
+					                         str)
 					      << endmsg;
 				}
 
@@ -343,7 +346,7 @@ PannerShell::distribute_no_automation (BufferSet& inbufs, BufferSet& outbufs, pf
 }
 
 void
-PannerShell::run (BufferSet& inbufs, BufferSet& outbufs, framepos_t start_frame, framepos_t end_frame, pframes_t nframes)
+PannerShell::run (BufferSet& inbufs, BufferSet& outbufs, samplepos_t start_sample, samplepos_t end_sample, pframes_t nframes)
 {
 	if (inbufs.count().n_audio() == 0) {
 		/* Input has no audio buffers (e.g. Aux Send in a MIDI track at a
@@ -381,11 +384,11 @@ PannerShell::run (BufferSet& inbufs, BufferSet& outbufs, framepos_t start_frame,
 
 	// More than 1 output
 
-	AutoState as = _panner->automation_state ();
+	AutoState as = pannable ()->automation_state ();
 
 	// If we shouldn't play automation defer to distribute_no_automation
 
-	if (!(as & Play || ((as & Touch) && !_panner->touching()))) {
+	if (!((as & Play) || ((as & (Touch | Latch)) && !pannable ()->touching ()))) {
 
 		distribute_no_automation (inbufs, outbufs, nframes, 1.0);
 
@@ -398,7 +401,7 @@ PannerShell::run (BufferSet& inbufs, BufferSet& outbufs, framepos_t start_frame,
 			i->silence(nframes);
 		}
 
-		_panner->distribute_automated (inbufs, outbufs, start_frame, end_frame, nframes, _session.pan_automation_buffer());
+		_panner->distribute_automated (inbufs, outbufs, start_sample, end_sample, nframes, _session.pan_automation_buffer());
 	}
 }
 
@@ -470,7 +473,7 @@ PannerShell::set_linked_to_route (bool onoff)
 	 */
 	if (pannable()) {
 		XMLNode state = pannable()->get_state();
-		pannable()->set_state(state, 3000);
+		pannable()->set_state(state, Stateful::loading_state_version);
 	}
 
 	_panlinked = onoff;

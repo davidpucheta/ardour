@@ -1,25 +1,24 @@
 /*
-    Copyright (C) 1999-2014 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
-
-#if !defined USE_CAIRO_IMAGE_SURFACE && !defined NDEBUG
-#define OPTIONAL_CAIRO_IMAGE_SURFACE
-#endif
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 #include <sstream>
@@ -32,43 +31,47 @@
 #include <pango/pangoft2.h> // for fontmap resolution control for GnomeCanvas
 #include <pango/pangocairo.h> // for fontmap resolution control for GnomeCanvas
 
-#include "pbd/gstdio_compat.h"
 #include <glibmm/miscutils.h>
 
 #include <gtkmm/settings.h>
 
 #include "pbd/convert.h"
-#include "pbd/failed_constructor.h"
-#include "pbd/xml++.h"
-#include "pbd/file_utils.h"
-#include "pbd/locale_guard.h"
 #include "pbd/error.h"
-#include "pbd/stacktrace.h"
+#include "pbd/failed_constructor.h"
+#include "pbd/file_utils.h"
+#include "pbd/gstdio_compat.h"
+#include "pbd/unwind.h"
+#include "pbd/xml++.h"
+
+#include "ardour/filesystem_paths.h"
+#include "ardour/search_paths.h"
+#include "ardour/revision.h"
+#include "ardour/utils.h"
+#include "ardour/types_convert.h"
 
 #include "gtkmm2ext/rgb_macros.h"
 #include "gtkmm2ext/gtk_ui.h"
 
-#include "ardour/filesystem_paths.h"
-#include "ardour/utils.h"
-
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
 using namespace ARDOUR;
-using namespace ArdourCanvas;
+using namespace Gtkmm2ext;
 
 static const char* ui_config_file_name = "ui_config";
 static const char* default_ui_config_file_name = "default_ui_config";
 
 static const double hue_width = 18.0;
+std::string UIConfiguration::color_file_suffix = X_(".colors");
 
 UIConfiguration&
 UIConfiguration::instance ()
 {
 	static UIConfiguration s_instance;
+	_instance = &s_instance;
 	return s_instance;
 }
 
@@ -124,7 +127,7 @@ UIConfiguration::parameter_changed (string param)
 	if (param == "ui-rc-file") {
 		load_rc_file (true);
 	} else if (param == "color-file") {
-		load_color_theme ();
+		load_color_theme (true);
 	}
 
 	save_state ();
@@ -133,51 +136,45 @@ UIConfiguration::parameter_changed (string param)
 void
 UIConfiguration::reset_gtk_theme ()
 {
-	stringstream ss;
-
-	ss << "gtk_color_scheme = \"" << hex;
+	std::string color_scheme_string("gtk_color_scheme = \"");
 
 	for (ColorAliases::iterator g = color_aliases.begin(); g != color_aliases.end(); ++g) {
 
 		if (g->first.find ("gtk_") == 0) {
 			const string gtk_name = g->first.substr (4);
-			ss << gtk_name << ":#" << std::setw (6) << setfill ('0') << (color (g->second) >> 8) << ';';
+			Gtkmm2ext::Color a_color = color (g->second);
+
+			color_scheme_string += gtk_name + ":#" + color_to_hex_string_no_alpha (a_color) + ';';
 		}
 	}
 
-	ss << '"' << dec << endl;
+	color_scheme_string += '"';
 
 	/* reset GTK color scheme */
 
-	Gtk::Settings::get_default()->property_gtk_color_scheme() = ss.str();
+	Gtk::Settings::get_default()->property_gtk_color_scheme() = color_scheme_string;
 }
 
 void
 UIConfiguration::reset_dpi ()
 {
 	long val = get_font_scale();
-	set_pango_fontsize ();
-	/* Xft rendering */
-
-	gtk_settings_set_long_property (gtk_settings_get_default(),
-					"gtk-xft-dpi", val, "ardour");
-	DPIReset(); //Emit Signal
-}
-
-void
-UIConfiguration::set_pango_fontsize ()
-{
-	long val = get_font_scale();
 
 	/* FT2 rendering - used by GnomeCanvas, sigh */
 
 #ifndef PLATFORM_WINDOWS
-	pango_ft2_font_map_set_resolution ((PangoFT2FontMap*) pango_ft2_font_map_new(), val/1024, val/1024);
+	pango_ft2_font_map_set_resolution ((PangoFT2FontMap*) pango_ft2_font_map_new(), val/1024, val/1024); // XXX pango_ft2_font_map_new leaks
 #endif
 
 	/* Cairo rendering, in case there is any */
 
 	pango_cairo_font_map_set_resolution ((PangoCairoFontMap*) pango_cairo_font_map_get_default(), val/1024);
+
+	/* Xft rendering */
+
+	gtk_settings_set_long_property (gtk_settings_get_default(),
+					"gtk-xft-dpi", val, "ardour");
+	DPIReset(); //Emit Signal
 }
 
 float
@@ -203,7 +200,7 @@ UIConfiguration::pre_gui_init ()
 		g_setenv ("FORCE_BUGGY_GRADIENTS", "1", 1);
 	}
 #endif
-#ifdef OPTIONAL_CAIRO_IMAGE_SURFACE
+#ifndef USE_CAIRO_IMAGE_SURFACE
 	if (get_cairo_image_surface()) {
 		g_setenv ("ARDOUR_IMAGE_SURFACE", "1", 1);
 	}
@@ -214,14 +211,14 @@ UIConfiguration::pre_gui_init ()
 UIConfiguration*
 UIConfiguration::post_gui_init ()
 {
-	load_color_theme ();
+	load_color_theme (true);
 	return this;
 }
 
 int
 UIConfiguration::load_defaults ()
 {
-        std::string rcfile;
+	std::string rcfile;
 	int ret = -1;
 
 	if (find_file (ardour_config_search_path(), default_ui_config_file_name, rcfile) ) {
@@ -244,62 +241,117 @@ UIConfiguration::load_defaults ()
 		warning << string_compose (_("Could not find default UI configuration file %1"), default_ui_config_file_name) << endmsg;
 	}
 
-
 	if (ret == 0) {
 		/* reload color theme */
 		load_color_theme (false);
-		ColorsChanged (); /* EMIT SIGNAL */
 	}
 
 	return ret;
+}
+
+std::string
+UIConfiguration::color_file_name (bool use_my, bool with_version) const
+{
+	string basename;
+
+	if (use_my) {
+		basename += "my-";
+	}
+
+	std::string color_name = color_file.get();
+	size_t sep = color_name.find_first_of("-");
+	if (sep != string::npos) {
+		color_name = color_name.substr (0, sep);
+	}
+
+	basename += color_name;
+	basename += "-";
+	basename += downcase(std::string(PROGRAM_NAME));
+
+	std::string rev (revision);
+	std::size_t pos = rev.find_first_of("-");
+
+	if (with_version && pos != string::npos && pos > 0) {
+		basename += "-";
+		basename += rev.substr (0, pos); // COLORFILE_VERSION - program major.minor
+	}
+
+	basename += color_file_suffix;
+	return basename;
+}
+
+int
+UIConfiguration::load_color_file (string const & path)
+{
+	XMLTree tree;
+
+	info << string_compose (_("Loading color file %1"), path) << endmsg;
+
+	if (!tree.read (path.c_str())) {
+		error << string_compose(_("cannot read color file \"%1\""), path) << endmsg;
+		return -1;
+	}
+
+	if (set_state (*tree.root(), Stateful::loading_state_version)) {
+		error << string_compose(_("color file \"%1\" not loaded successfully."), path) << endmsg;
+		return -1;
+	}
+
+	return 0;
 }
 
 int
 UIConfiguration::load_color_theme (bool allow_own)
 {
 	std::string cfile;
-	string basename;
 	bool found = false;
+	/* ColorsChanged() will trigger a  parameter_changed () which
+	 * in turn calls save_state()
+	 */
+	PBD::Unwinder<uint32_t> uw (block_save, block_save + 1);
 
-	if (allow_own) {
-		basename = "my-";
-		basename += color_file.get();
-		basename += ".colors";
+	if (find_file (theme_search_path(), color_file_name (false, true), cfile)) {
+		found = true;
+	}
 
-		if (find_file (ardour_config_search_path(), basename, cfile)) {
+	if (!found) {
+		if (find_file (theme_search_path(), color_file_name (false, false), cfile)) {
 			found = true;
 		}
 	}
 
 	if (!found) {
-		basename = color_file.get();
-		basename += ".colors";
+		warning << string_compose (_("Color file for %1 not found along %2"), color_file.get(), theme_search_path().to_string()) << endmsg;
+		return -1;
+	}
 
-		if (find_file (ardour_config_search_path(), basename, cfile)) {
+	(void) load_color_file (cfile);
+
+	if (allow_own) {
+
+		found = false;
+
+		PBD::Searchpath sp (user_config_directory());
+
+		/* user's own color files never have the program name in them */
+
+		if (find_file (sp, color_file_name (true, true), cfile)) {
 			found = true;
 		}
-	}
 
-	if (found) {
-
-		XMLTree tree;
-
-		info << string_compose (_("Loading color file %1"), cfile) << endmsg;
-
-		if (!tree.read (cfile.c_str())) {
-			error << string_compose(_("cannot read color file \"%1\""), cfile) << endmsg;
-			return -1;
+		if (!found) {
+			if (find_file (sp, color_file_name (true, false), cfile)) {
+				found = true;
+			}
 		}
 
-		if (set_state (*tree.root(), Stateful::loading_state_version)) {
-			error << string_compose(_("color file \"%1\" not loaded successfully."), cfile) << endmsg;
-			return -1;
+		if (found) {
+			(void) load_color_file (cfile);
 		}
 
-		ColorsChanged ();
-	} else {
-		warning << string_compose (_("Color file %1 not found"), basename) << endmsg;
 	}
+
+	ColorsChanged ();
 
 	return 0;
 }
@@ -308,17 +360,14 @@ int
 UIConfiguration::store_color_theme ()
 {
 	XMLNode* root;
-	LocaleGuard lg (X_("C"));
 
 	root = new XMLNode("Ardour");
 
 	XMLNode* parent = new XMLNode (X_("Colors"));
 	for (Colors::const_iterator i = colors.begin(); i != colors.end(); ++i) {
 		XMLNode* node = new XMLNode (X_("Color"));
-		node->add_property (X_("name"), i->first);
-		stringstream ss;
-		ss << "0x" << setw (8) << setfill ('0') << hex << i->second;
-		node->add_property (X_("value"), ss.str());
+		node->set_property (X_("name"), i->first);
+		node->set_property (X_("value"), color_to_hex_string (i->second));
 		parent->add_child_nocopy (*node);
 	}
 	root->add_child_nocopy (*parent);
@@ -326,8 +375,8 @@ UIConfiguration::store_color_theme ()
 	parent = new XMLNode (X_("ColorAliases"));
 	for (ColorAliases::const_iterator i = color_aliases.begin(); i != color_aliases.end(); ++i) {
 		XMLNode* node = new XMLNode (X_("ColorAlias"));
-		node->add_property (X_("name"), i->first);
-		node->add_property (X_("alias"), i->second);
+		node->set_property (X_("name"), i->first);
+		node->set_property (X_("alias"), i->second);
 		parent->add_child_nocopy (*node);
 	}
 	root->add_child_nocopy (*parent);
@@ -335,14 +384,14 @@ UIConfiguration::store_color_theme ()
 	parent = new XMLNode (X_("Modifiers"));
 	for (Modifiers::const_iterator i = modifiers.begin(); i != modifiers.end(); ++i) {
 		XMLNode* node = new XMLNode (X_("Modifier"));
-		node->add_property (X_("name"), i->first);
-		node->add_property (X_("modifier"), i->second.to_string());
+		node->set_property (X_("name"), i->first);
+		node->set_property (X_("modifier"), i->second.to_string());
 		parent->add_child_nocopy (*node);
 	}
 	root->add_child_nocopy (*parent);
 
 	XMLTree tree;
-	std::string colorfile = Glib::build_filename (user_config_directory(), (string ("my-") + color_file.get() + ".colors"));
+	std::string colorfile = Glib::build_filename (user_config_directory(), color_file_name (true, true));;
 
 	tree.set_root (root);
 
@@ -407,6 +456,9 @@ UIConfiguration::load_state ()
 int
 UIConfiguration::save_state()
 {
+	if (block_save != 0) {
+		return -1;
+	}
 
 	if (_dirty) {
 		std::string rcfile = Glib::build_filename (user_config_directory(), ui_config_file_name);
@@ -443,7 +495,6 @@ XMLNode&
 UIConfiguration::get_state ()
 {
 	XMLNode* root;
-	LocaleGuard lg (X_("C"));
 
 	root = new XMLNode("Ardour");
 
@@ -461,7 +512,6 @@ XMLNode&
 UIConfiguration::get_variables (std::string which_node)
 {
 	XMLNode* node;
-	LocaleGuard lg (X_("C"));
 
 	node = new XMLNode (which_node);
 
@@ -531,17 +581,16 @@ UIConfiguration::load_color_aliases (XMLNode const & node)
 	XMLProperty const *name;
 	XMLProperty const *alias;
 
-	color_aliases.clear ();
-
 	for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
-		if ((*niter)->name() != X_("ColorAlias")) {
+		XMLNode const * child = *niter;
+		if (child->name() != X_("ColorAlias")) {
 			continue;
 		}
-		name = (*niter)->property (X_("name"));
-		alias = (*niter)->property (X_("alias"));
+		name = child->property (X_("name"));
+		alias = child->property (X_("alias"));
 
 		if (name && alias) {
-			color_aliases.insert (make_pair (name->value(), alias->value()));
+			color_aliases[name->value()] = alias->value();
 		}
 	}
 }
@@ -554,19 +603,23 @@ UIConfiguration::load_colors (XMLNode const & node)
 	XMLProperty const *name;
 	XMLProperty const *color;
 
-	colors.clear ();
+	/* don't clear colors, so that we can load > 1 color file and have
+	   the subsequent ones overwrite the later ones.
+	*/
 
 	for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
-		if ((*niter)->name() != X_("Color")) {
+		XMLNode const * child = *niter;
+		if (child->name() != X_("Color")) {
 			continue;
 		}
-		name = (*niter)->property (X_("name"));
-		color = (*niter)->property (X_("value"));
+		name = child->property (X_("name"));
+		color = child->property (X_("value"));
 
 		if (name && color) {
-			ArdourCanvas::Color c;
+			Gtkmm2ext::Color c;
 			c = strtoul (color->value().c_str(), 0, 16);
-			colors.insert (make_pair (name->value(), c));
+			/* insert or replace color name definition */
+			colors[name->value()] =  c;
 		}
 	}
 }
@@ -574,25 +627,23 @@ UIConfiguration::load_colors (XMLNode const & node)
 void
 UIConfiguration::load_modifiers (XMLNode const & node)
 {
-	PBD::LocaleGuard lg ("C");
 	XMLNodeList const nlist = node.children();
 	XMLNodeConstIterator niter;
 	XMLProperty const *name;
 	XMLProperty const *mod;
 
-	modifiers.clear ();
-
 	for (niter = nlist.begin(); niter != nlist.end(); ++niter) {
-		if ((*niter)->name() != X_("Modifier")) {
+		XMLNode const * child = *niter;
+		if (child->name() != X_("Modifier")) {
 			continue;
 		}
 
-		name = (*niter)->property (X_("name"));
-		mod = (*niter)->property (X_("modifier"));
+		name = child->property (X_("name"));
+		mod = child->property (X_("modifier"));
 
 		if (name && mod) {
 			SVAModifier svam (mod->value());
-			modifiers.insert (make_pair (name->value(), svam));
+			modifiers[name->value()] = svam;
 		}
 	}
 }
@@ -609,7 +660,7 @@ UIConfiguration::set_variables (const XMLNode& node)
 #undef  CANVAS_FONT_VARIABLE
 }
 
-ArdourCanvas::SVAModifier
+Gtkmm2ext::SVAModifier
 UIConfiguration::modifier (string const & name) const
 {
 	Modifiers::const_iterator m = modifiers.find (name);
@@ -619,19 +670,19 @@ UIConfiguration::modifier (string const & name) const
 	return SVAModifier ();
 }
 
-ArdourCanvas::Color
+Gtkmm2ext::Color
 UIConfiguration::color_mod (std::string const & colorname, std::string const & modifiername) const
 {
 	return HSV (color (colorname)).mod (modifier (modifiername)).color ();
 }
 
-ArdourCanvas::Color
-UIConfiguration::color_mod (const ArdourCanvas::Color& color, std::string const & modifiername) const
+Gtkmm2ext::Color
+UIConfiguration::color_mod (const Gtkmm2ext::Color& color, std::string const & modifiername) const
 {
 	return HSV (color).mod (modifier (modifiername)).color ();
 }
 
-ArdourCanvas::Color
+Gtkmm2ext::Color
 UIConfiguration::color (const std::string& name, bool* failed) const
 {
 	ColorAliases::const_iterator e = color_aliases.find (name);
@@ -679,7 +730,7 @@ UIConfiguration::quantized (Color c) const
 }
 
 void
-UIConfiguration::set_color (string const& name, ArdourCanvas::Color color)
+UIConfiguration::set_color (string const& name, Gtkmm2ext::Color color)
 {
 	Colors::iterator i = colors.find (name);
 	if (i == colors.end()) {
@@ -733,9 +784,32 @@ UIConfiguration::load_rc_file (bool themechange, bool allow_own)
 		return;
 	}
 
-	info << "Loading ui configuration file " << rc_file_path << endmsg;
+	info << string_compose (_("Loading ui configuration file %1"), rc_file_path) << endmsg;
 
 	Gtkmm2ext::UI::instance()->load_rcfile (rc_file_path, themechange);
 }
 
+std::string
+UIConfiguration::color_to_hex_string (Gtkmm2ext::Color c)
+{
+	char buf[16];
+	int retval = g_snprintf (buf, sizeof(buf), "%08x", c);
 
+	if (retval < 0 || retval >= (int)sizeof(buf)) {
+		assert(false);
+	}
+	return buf;
+}
+
+std::string
+UIConfiguration::color_to_hex_string_no_alpha (Gtkmm2ext::Color c)
+{
+	c >>= 8; // shift/remove alpha
+	char buf[16];
+	int retval = g_snprintf (buf, sizeof(buf), "%06x", c);
+
+	if (retval < 0 || retval >= (int)sizeof(buf)) {
+		assert(false);
+	}
+	return buf;
+}

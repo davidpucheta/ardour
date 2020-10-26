@@ -23,8 +23,8 @@ $group_number = 0;
 
 $platform = linux;
 $winkey = 'Win';
-$make_cheatsheet = 1;
-$make_accelmap = 0;
+$make_cheatsheet = 0;
+$make_accelmap = 1;
 $merge_from = "";
 $html = 0;
 
@@ -264,7 +264,7 @@ while (<SOURCE>) {
 	    }
 	} 
 
-	# print the accelmap output
+	# store the accelmap output
 
 	if ($key =~ /^\+/) {
 	    # remove + and don't print it in the accelmap
@@ -280,9 +280,12 @@ while (<SOURCE>) {
 		$b =~ s/SECONDARY/Secondary-/;
 		$b =~ s/TERTIARY/Tertiary-/;
 		$b =~ s/LEVEL4/Level4-/;
-		
+
+		$g = $group_names{$gkey};
+		$g =~ s/\\&/&amp;/g;
+
 		$bref = $owner_bindings{$owner};
-		push (@$bref, [ $action, $b ]);
+		push (@$bref, [ $action, $b, $g]);
 	    }
 	}
 
@@ -294,6 +297,9 @@ while (<SOURCE>) {
 	$bref = $group_bindings{$key};
 	push (@$bref, [$binding, $text]);
 
+	$sref = $section_text{$key};
+	push (@$sref, [$owner]);
+	
 	next;
     }
 
@@ -303,18 +309,18 @@ while (<SOURCE>) {
 if ($make_accelmap) {
     print "<BindingSet name=\"" . $bindings_name . "\">\n";
     
-    foreach $owner (keys %owner_bindings) {
+    foreach $owner (sort keys %owner_bindings) {
 	print " <Bindings name=\"$owner\">\n  <Press>\n";
 	$bindings = $owner_bindings{$owner};
 	shift (@$bindings); # remove initial empty element
 	for my $binding (@$bindings) {
-	    print '   <Binding key="' . @$binding[1] . '" action="' . @$binding[0] . "\"/>\n";
+	    print '   <Binding key="' . @$binding[1] . '" action="' . @$binding[0] . '" group="' . @$binding[2] . "\"/>\n";
 	}
         print "  </Press>\n </Bindings>\n";
     }
 
     # merge in the "fixed" bindings that are not defined by the argument given to this program
-    # namely, the step editor and the mixer windows
+    # this covers things like the step editor, monitor and processor box bindings
 
     foreach $hardcoded_bindings ("mixer.bindings", "step_editing.bindings", "monitor.bindings", "processor_box.bindings") {
 	$path = File::Spec->catfile (dirname ($ARGV[0]), $hardcoded_bindings);

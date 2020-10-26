@@ -1,38 +1,43 @@
 /*
-    Copyright (C) 2002-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <iostream>
 #include <boost/weak_ptr.hpp>
 #include <cairo.h>
 #include "gtkmm2ext/keyboard.h"
 #include "ardour/bundle.h"
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 #include "utils.h"
 #include "port_matrix_row_labels.h"
+#include "port_matrix_column_labels.h"
 #include "port_matrix.h"
 #include "port_matrix_body.h"
-#include "i18n.h"
+#include "ui_config.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 
-PortMatrixRowLabels::PortMatrixRowLabels (PortMatrix* m, PortMatrixBody* b)
+PortMatrixRowLabels::PortMatrixRowLabels (PortMatrix* m, PortMatrixBody* b, PortMatrixColumnLabels& cols)
 	: PortMatrixLabels (m, b)
+	, _column_labels (cols)
 {
 
 }
@@ -42,6 +47,7 @@ PortMatrixRowLabels::compute_dimensions ()
 {
 	cairo_surface_t* surface = cairo_image_surface_create (CAIRO_FORMAT_RGB24, 200, 200);
 	cairo_t* cr = cairo_create (surface);
+	cairo_set_font_size (cr, UIConfiguration::instance().get_ui_scale() * 10);
 
 	_longest_port_name = 0;
 	_longest_bundle_name = 0;
@@ -92,6 +98,13 @@ PortMatrixRowLabels::compute_dimensions ()
 	if (!_matrix->show_only_bundles()) {
 		_width += _longest_port_name;
 		_width += name_pad() * 2;
+	}
+
+	uint32_t needed_by_columns = _column_labels.dimensions().second * tan (angle());
+
+	if (_width < needed_by_columns) {
+		_longest_bundle_name += (needed_by_columns - _width);
+		_width = needed_by_columns;
 	}
 }
 
@@ -236,10 +249,10 @@ PortMatrixRowLabels::render_bundle_name (
 	double const off = (grid_spacing() - ext.height) / 2;
 
 	Gdk::Color textcolor;
-	ARDOUR_UI_UTILS::set_color_from_rgba(textcolor, ArdourCanvas::contrasting_text_color(ARDOUR_UI_UTILS::gdk_color_to_rgba(bg_colour)));
+	ARDOUR_UI_UTILS::set_color_from_rgba(textcolor, Gtkmm2ext::contrasting_text_color(ARDOUR_UI_UTILS::gdk_color_to_rgba(bg_colour)));
 	set_source_rgb (cr, textcolor);
- 	cairo_move_to (cr, xoff + x + name_pad(), yoff + name_pad() + off);
- 	cairo_show_text (cr, b->name().c_str());
+	cairo_move_to (cr, xoff + x + name_pad(), yoff + name_pad() + off);
+	cairo_show_text (cr, b->name().c_str());
 }
 
 void
@@ -264,7 +277,7 @@ PortMatrixRowLabels::render_channel_name (
 		double const off = (grid_spacing() - ext.height) / 2;
 
 		Gdk::Color textcolor;
-		ARDOUR_UI_UTILS::set_color_from_rgba(textcolor, ArdourCanvas::contrasting_text_color(ARDOUR_UI_UTILS::gdk_color_to_rgba(bg_colour)));
+		ARDOUR_UI_UTILS::set_color_from_rgba(textcolor, Gtkmm2ext::contrasting_text_color(ARDOUR_UI_UTILS::gdk_color_to_rgba(bg_colour)));
 		set_source_rgb (cr, textcolor);
 		cairo_move_to (cr, port_name_x() + xoff + name_pad(), yoff + name_pad() + off);
 		cairo_show_text (cr, bc.bundle->channel_name(bc.channel).c_str());

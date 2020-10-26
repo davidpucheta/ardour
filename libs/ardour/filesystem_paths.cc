@@ -1,27 +1,31 @@
 /*
-    Copyright (C) 2007 Tim Mayberry
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2008-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2014 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 #include <cstdlib>
 #include <iostream>
 
 #include "pbd/compose.h"
-#include "pbd/convert.h"
 #include "pbd/error.h"
+#include "pbd/string_convert.h"
 
 #include <glibmm/miscutils.h>
 #include <glibmm/fileutils.h>
@@ -29,7 +33,7 @@
 #include "ardour/directory_names.h"
 #include "ardour/filesystem_paths.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #ifdef PLATFORM_WINDOWS
 #include "shlobj.h"
@@ -46,7 +50,7 @@ static std::string
 user_config_directory_name (int version = -1)
 {
 	if (version < 0) {
-		version = atoi (X_(PROGRAM_VERSION));
+		version = string_to<int32_t>(X_(PROGRAM_VERSION));
 	}
 
 	/* ARDOUR::Profile may not be available when this is
@@ -54,13 +58,6 @@ user_config_directory_name (int version = -1)
 	   product name etc.
 	*/
 
-#ifdef USE_TRACKS_CODE_FEATURES
-	/* Tracks does not use versioned configuration folders, which may or
-	   may not be problematic in the future.
-	*/
-	return X_(PROGRAM_NAME);
-
-#else
 	const string config_dir_name = string_compose ("%1%2", X_(PROGRAM_NAME), version);
 
 #if defined (__APPLE__) || defined (PLATFORM_WINDOWS)
@@ -69,7 +66,6 @@ user_config_directory_name (int version = -1)
 #else
 	/* use lower case folder name on Linux */
 	return downcase (config_dir_name);
-#endif
 #endif
 }
 
@@ -98,7 +94,7 @@ user_config_directory (int version)
 #endif
 		if (home_dir.empty ()) {
 			error << "Unable to determine home directory" << endmsg;
-			exit (1);
+			exit (EXIT_FAILURE);
 		}
 		p = home_dir;
 
@@ -119,7 +115,7 @@ user_config_directory (int version)
 			if (g_mkdir_with_parents (p.c_str(), 0755)) {
 				error << string_compose (_("Cannot create Configuration directory %1 - cannot run"),
 				                         p) << endmsg;
-				exit (1);
+				exit (EXIT_FAILURE);
 			}
 			} else if (!Glib::file_test (p, Glib::FILE_TEST_IS_DIR)) {
 			fatal << string_compose (_("Configuration directory %1 already exists and is not a directory/folder - cannot run"),
@@ -132,11 +128,9 @@ user_config_directory (int version)
 }
 
 std::string
-user_cache_directory ()
+user_cache_directory (std::string cachename)
 {
-	static std::string p;
-
-	if (!p.empty()) return p;
+	std::string p;
 
 #ifdef __APPLE__
 	p = Glib::build_filename (Glib::get_home_dir(), "Library/Caches");
@@ -158,7 +152,7 @@ user_cache_directory ()
 #endif
 		if (home_dir.empty ()) {
 			error << "Unable to determine home directory" << endmsg;
-			exit (1);
+			exit (EXIT_FAILURE);
 		}
 		p = home_dir;
 
@@ -169,7 +163,11 @@ user_cache_directory ()
 	}
 #endif // end not __APPLE__
 
-	p = Glib::build_filename (p, user_config_directory_name ());
+	if (cachename.empty ()) {
+		p = Glib::build_filename (p, user_config_directory_name ());
+	} else {
+		p = Glib::build_filename (p, cachename);
+	}
 
 #ifdef PLATFORM_WINDOWS
 	 /* On Windows Glib::get_user_data_dir is the folder to use for local
@@ -185,7 +183,7 @@ user_cache_directory ()
 		if (g_mkdir_with_parents (p.c_str(), 0755)) {
 			error << string_compose (_("Cannot create cache directory %1 - cannot run"),
 						   p) << endmsg;
-			exit (1);
+			exit (EXIT_FAILURE);
 		}
 	} else if (!Glib::file_test (p, Glib::FILE_TEST_IS_DIR)) {
 		fatal << string_compose (_("Cache directory %1 already exists and is not a directory/folder - cannot run"),
@@ -207,7 +205,7 @@ ardour_dll_directory ()
 	std::string s = Glib::getenv("ARDOUR_DLL_PATH");
 	if (s.empty()) {
 		std::cerr << _("ARDOUR_DLL_PATH not set in environment - exiting\n");
-		::exit (1);
+		::exit (EXIT_FAILURE);
 	}
 	return s;
 #endif
@@ -311,7 +309,7 @@ been_here_before_path (int version)
 		version = atoi (PROGRAM_VERSION);
 	}
 
-	return Glib::build_filename (user_config_directory (version), string (".a") + to_string (version, std::dec));
+	return Glib::build_filename (user_config_directory (version), string (".a") + to_string (version));
 }
 
 

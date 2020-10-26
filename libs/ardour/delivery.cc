@@ -1,26 +1,30 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2018 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <algorithm>
 
 #include "pbd/enumwriter.h"
-#include "pbd/convert.h"
+#include "pbd/enum_convert.h"
 
 #include "ardour/amp.h"
 #include "ardour/audioengine.h"
@@ -34,7 +38,11 @@
 #include "ardour/port.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
+
+namespace PBD {
+	DEFINE_ENUM_CONVERT(ARDOUR::Delivery::Role);
+}
 
 namespace ARDOUR { class Panner; }
 
@@ -49,17 +57,17 @@ bool                          Delivery::panners_legal = false;
 
 Delivery::Delivery (Session& s, boost::shared_ptr<IO> io, boost::shared_ptr<Pannable> pannable,
                     boost::shared_ptr<MuteMaster> mm, const string& name, Role r)
-	: IOProcessor(s, boost::shared_ptr<IO>(), (role_requires_output_ports (r) ? io : boost::shared_ptr<IO>()), name)
+	: IOProcessor(s, boost::shared_ptr<IO>(), (role_requires_output_ports (r) ? io : boost::shared_ptr<IO>()), name, (r == Send || r == Aux || r == Foldback))
 	, _role (r)
 	, _output_buffers (new BufferSet())
-	, _current_gain (GAIN_COEFF_UNITY)
+	, _current_gain (GAIN_COEFF_ZERO)
 	, _no_outs_cuz_we_no_monitor (false)
 	, _mute_master (mm)
 	, _no_panner_reset (false)
 {
 	if (pannable) {
 		bool is_send = false;
-		if (r & (Delivery::Send|Delivery::Aux)) is_send = true;
+		if (r & (Delivery::Send|Delivery::Aux|Delivery::Foldback)) is_send = true;
 		_panshell = boost::shared_ptr<PannerShell>(new PannerShell (_name, _session, pannable, is_send));
 	}
 
@@ -73,17 +81,17 @@ Delivery::Delivery (Session& s, boost::shared_ptr<IO> io, boost::shared_ptr<Pann
 /* deliver to a new IO object */
 
 Delivery::Delivery (Session& s, boost::shared_ptr<Pannable> pannable, boost::shared_ptr<MuteMaster> mm, const string& name, Role r)
-	: IOProcessor(s, false, (role_requires_output_ports (r) ? true : false), name, "", DataType::AUDIO, (r == Send))
+	: IOProcessor(s, false, (role_requires_output_ports (r) ? true : false), name, "", DataType::AUDIO, (r == Send || r == Aux || r == Foldback))
 	, _role (r)
 	, _output_buffers (new BufferSet())
-	, _current_gain (GAIN_COEFF_UNITY)
+	, _current_gain (GAIN_COEFF_ZERO)
 	, _no_outs_cuz_we_no_monitor (false)
 	, _mute_master (mm)
 	, _no_panner_reset (false)
 {
 	if (pannable) {
 		bool is_send = false;
-		if (r & (Delivery::Send|Delivery::Aux)) is_send = true;
+		if (r & (Delivery::Send|Delivery::Aux|Delivery::Foldback)) is_send = true;
 		_panshell = boost::shared_ptr<PannerShell>(new PannerShell (_name, _session, pannable, is_send));
 	}
 
@@ -229,7 +237,7 @@ Delivery::configure_io (ChanCount in, ChanCount out)
 }
 
 void
-Delivery::run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pframes_t nframes, bool result_required)
+Delivery::run (BufferSet& bufs, samplepos_t start_sample, samplepos_t end_sample, double /*speed*/, pframes_t nframes, bool result_required)
 {
 	assert (_output);
 
@@ -262,7 +270,7 @@ Delivery::run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pf
 	if (tgain != _current_gain) {
 		/* target gain has changed */
 
-		_current_gain = Amp::apply_gain (bufs, _session.nominal_frame_rate(), nframes, _current_gain, tgain);
+		_current_gain = Amp::apply_gain (bufs, _session.nominal_sample_rate(), nframes, _current_gain, tgain);
 
 	} else if (tgain < GAIN_COEFF_SMALL) {
 
@@ -295,29 +303,55 @@ Delivery::run (BufferSet& bufs, framepos_t start_frame, framepos_t end_frame, pf
 
 		// Use the panner to distribute audio to output port buffers
 
-		_panshell->run (bufs, output_buffers(), start_frame, end_frame, nframes);
+		_panshell->run (bufs, output_buffers(), start_sample, end_sample, nframes);
 
-		// MIDI data will not have been delivered by the panner
+		// non-audio data will not have been delivered by the panner
 
-		if (bufs.count().n_midi() > 0 && ports.count().n_midi () > 0) {
-			_output->copy_to_outputs (bufs, DataType::MIDI, nframes, ports.port(0)->port_offset());
+		for (DataType::iterator t = DataType::begin(); t != DataType::end(); ++t) {
+			if (*t != DataType::AUDIO && bufs.count().get(*t) > 0) {
+				_output->copy_to_outputs (bufs, *t, nframes, 0);
+			}
 		}
 
 	} else {
 
-		// Do a 1:1 copy of data to output ports
+		/* Do a 1:1 copy of data to output ports
 
-		if (bufs.count().n_audio() > 0 && ports.count().n_audio () > 0) {
+		   Audio is handled separately because we use 0 for the offset,
+		   since the port offset is only used for timestamped events
+		   (i.e. MIDI).
+		*/
+
+		if (bufs.count().n_audio() > 0) {
 			_output->copy_to_outputs (bufs, DataType::AUDIO, nframes, 0);
 		}
 
-		if (bufs.count().n_midi() > 0 && ports.count().n_midi () > 0) {
-			_output->copy_to_outputs (bufs, DataType::MIDI, nframes, ports.port(0)->port_offset());
+		for (DataType::iterator t = DataType::begin(); t != DataType::end(); ++t) {
+			if (*t != DataType::AUDIO && bufs.count().get(*t) > 0) {
+				_output->copy_to_outputs (bufs, *t, nframes, 0);
+			}
 		}
 	}
 
 	if (result_required) {
-		bufs.read_from (output_buffers (), nframes);
+		/* "bufs" are internal, meaning they should never reflect
+		   split-cycle offsets. So shift events back in time from where
+		   they were for the external buffers associated with Ports.
+		*/
+
+		const BufferSet& outs (output_buffers());
+		bufs.set_count (output_buffers().count ());
+
+		for (DataType::iterator t = DataType::begin(); t != DataType::end(); ++t) {
+
+			uint32_t n = 0;
+			for (BufferSet::iterator b = bufs.begin (*t); b != bufs.end (*t); ++b) {
+				if (outs.count ().get (*t) <= n) {
+					continue;
+				}
+				b->read_from (outs.get_available (*t, n++), nframes, 0);
+			}
+		}
 	}
 
 out:
@@ -325,19 +359,19 @@ out:
 }
 
 XMLNode&
-Delivery::state (bool full_state)
+Delivery::state ()
 {
-	XMLNode& node (IOProcessor::state (full_state));
+	XMLNode& node (IOProcessor::state ());
 
 	if (_role & Main) {
-		node.add_property("type", "main-outs");
+		node.set_property("type", "main-outs");
 	} else if (_role & Listen) {
-		node.add_property("type", "listen");
+		node.set_property("type", "listen");
 	} else {
-		node.add_property("type", "delivery");
+		node.set_property("type", "delivery");
 	}
 
-	node.add_property("role", enum_2_string(_role));
+	node.set_property("role", _role);
 
 	if (_panshell) {
 		node.add_child_nocopy (_panshell->get_state ());
@@ -352,14 +386,11 @@ Delivery::state (bool full_state)
 int
 Delivery::set_state (const XMLNode& node, int version)
 {
-	const XMLProperty* prop;
-
 	if (IOProcessor::set_state (node, version)) {
 		return -1;
 	}
 
-	if ((prop = node.property ("role")) != 0) {
-		_role = Role (string_2_enum (prop->value(), _role));
+	if (node.get_property ("role", _role)) {
 		// std::cerr << this << ' ' << _name << " set role to " << enum_2_string (_role) << std::endl;
 	} else {
 		// std::cerr << this << ' ' << _name << " NO ROLE INFO\n";
@@ -455,7 +486,7 @@ Delivery::reset_panners ()
 }
 
 void
-Delivery::flush_buffers (framecnt_t nframes)
+Delivery::flush_buffers (samplecnt_t nframes)
 {
 	/* io_lock, not taken: function must be called from Session::process() calltree */
 
@@ -471,33 +502,33 @@ Delivery::flush_buffers (framecnt_t nframes)
 }
 
 void
-Delivery::transport_stopped (framepos_t now)
+Delivery::non_realtime_transport_stop (samplepos_t now, bool flush)
 {
-        Processor::transport_stopped (now);
+	Processor::non_realtime_transport_stop (now, flush);
 
 	if (_panshell) {
-		_panshell->pannable()->transport_stopped (now);
+		_panshell->pannable()->non_realtime_transport_stop (now, flush);
 	}
 
-        if (_output) {
-                PortSet& ports (_output->ports());
+	if (_output) {
+		PortSet& ports (_output->ports());
 
-                for (PortSet::iterator i = ports.begin(); i != ports.end(); ++i) {
-                        i->transport_stopped ();
-                }
-        }
+		for (PortSet::iterator i = ports.begin(); i != ports.end(); ++i) {
+			i->transport_stopped ();
+		}
+	}
 }
 
 void
-Delivery::realtime_locate ()
+Delivery::realtime_locate (bool for_loop_end)
 {
-        if (_output) {
-                PortSet& ports (_output->ports());
+	if (_output) {
+		PortSet& ports (_output->ports());
 
-                for (PortSet::iterator i = ports.begin(); i != ports.end(); ++i) {
-                        i->realtime_locate ();
-                }
-        }
+		for (PortSet::iterator i = ports.begin(); i != ports.end(); ++i) {
+			i->realtime_locate (for_loop_end);
+		}
+	}
 }
 
 gain_t
@@ -517,38 +548,42 @@ Delivery::target_gain ()
 		return GAIN_COEFF_ZERO;
 	}
 
-        MuteMaster::MutePoint mp = MuteMaster::Main; // stupid gcc uninit warning
+	MuteMaster::MutePoint mp = MuteMaster::Main; // stupid gcc uninit warning
 
-        switch (_role) {
-        case Main:
-                mp = MuteMaster::Main;
-                break;
-        case Listen:
-                mp = MuteMaster::Listen;
-                break;
-        case Send:
-        case Insert:
-        case Aux:
-		if (_pre_fader) {
-			mp = MuteMaster::PreFader;
-		} else {
-			mp = MuteMaster::PostFader;
-		}
-                break;
-        }
+	switch (_role) {
+		case Main:
+			mp = MuteMaster::Main;
+			break;
+		case Listen:
+			mp = MuteMaster::Listen;
+			break;
+		case Send:
+		case Insert:
+		case Aux:
+		case Foldback:
+			if (_pre_fader) {
+				mp = MuteMaster::PreFader;
+			} else {
+				mp = MuteMaster::PostFader;
+			}
+			break;
+	}
 
-        gain_t desired_gain = _mute_master->mute_gain_at (mp);
+	gain_t desired_gain = _mute_master->mute_gain_at (mp);
 
-        if (_role == Listen && _session.monitor_out() && !_session.listening()) {
+	if (_gain_control) {
+		desired_gain *= _gain_control->get_value();
+	}
 
-                /* nobody is soloed, and this delivery is a listen-send to the
-                   control/monitor/listen bus, we should be silent since
-                   it gets its signal from the master out.
-                */
+	if (_role == Listen && _session.monitor_out() && !_session.listening()) {
 
-                desired_gain = GAIN_COEFF_ZERO;
+		/* nobody is soloed, and this delivery is a listen-send to the
+		 * control/monitor/listen bus, we should be silent since
+		 * it gets its signal from the master out.
+		 */
 
-        }
+		desired_gain = GAIN_COEFF_ZERO;
+	}
 
 	return desired_gain;
 }

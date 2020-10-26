@@ -1,21 +1,28 @@
 /*
-    Copyright (C) 2000-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2008-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2015 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2017 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2015-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstdio> // for snprintf, grrr
 
@@ -26,7 +33,7 @@
 #include "tempo_dialog.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -34,45 +41,64 @@ using namespace Gtkmm2ext;
 using namespace ARDOUR;
 using namespace PBD;
 
-TempoDialog::TempoDialog (TempoMap& map, framepos_t frame, const string&)
+TempoDialog::TempoDialog (TempoMap& map, samplepos_t sample, const string&)
 	: ArdourDialog (_("New Tempo"))
+	, _map (&map)
+	, _section (0)
 	, bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
 	, bpm_spinner (bpm_adjustment)
-	, when_bar_label (_("bar:"), ALIGN_LEFT, ALIGN_CENTER)
-	, when_beat_label (_("beat:"), ALIGN_LEFT, ALIGN_CENTER)
-	, pulse_selector_label (_("Pulse note"), ALIGN_LEFT, ALIGN_CENTER)
+	, end_bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
+	, end_bpm_spinner (end_bpm_adjustment)
+	, _end_bpm_label (_("End Beats per Minute:"), ALIGN_LEFT, ALIGN_CENTER)
+	, when_bar_label (_("bar:"), ALIGN_RIGHT, ALIGN_CENTER)
+	, when_beat_label (_("beat:"), ALIGN_RIGHT, ALIGN_CENTER)
+	, pulse_selector_label (_("Pulse:"), ALIGN_LEFT, ALIGN_CENTER)
 	, tap_tempo_button (_("Tap tempo"))
 {
-	Timecode::BBT_Time when;
-	Tempo tempo (map.tempo_at (frame));
-	map.bbt_time (frame, when);
+	Tempo tempo (map.tempo_at_sample (sample));
+	Timecode::BBT_Time when (map.bbt_at_sample (sample));
 
-	init (when, tempo.beats_per_minute(), tempo.note_type(), true);
+	init (when, tempo.note_types_per_minute(), tempo.end_note_types_per_minute(), tempo.note_type(), TempoSection::Constant, true, MusicTime);
 }
 
-TempoDialog::TempoDialog (TempoSection& section, const string&)
+TempoDialog::TempoDialog (TempoMap& map, TempoSection& section, const string&)
 	: ArdourDialog (_("Edit Tempo"))
+	, _map (&map)
+	, _section (&section)
 	, bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
 	, bpm_spinner (bpm_adjustment)
-	, when_bar_label (_("bar:"), ALIGN_LEFT, ALIGN_CENTER)
-	, when_beat_label (_("beat:"), ALIGN_LEFT, ALIGN_CENTER)
-	, pulse_selector_label (_("Pulse note"), ALIGN_LEFT, ALIGN_CENTER)
+	, end_bpm_adjustment (60.0, 1.0, 999.9, 0.1, 1.0)
+	, end_bpm_spinner (end_bpm_adjustment)
+	, _end_bpm_label (_("End Beats per Minute:"), ALIGN_LEFT, ALIGN_CENTER)
+	, when_bar_label (_("bar:"), ALIGN_RIGHT, ALIGN_CENTER)
+	, when_beat_label (_("beat:"), ALIGN_RIGHT, ALIGN_CENTER)
+	, pulse_selector_label (_("Pulse:"), ALIGN_LEFT, ALIGN_CENTER)
 	, tap_tempo_button (_("Tap tempo"))
 {
-	init (section.start(), section.beats_per_minute(), section.note_type(), section.movable());
+	Timecode::BBT_Time when (map.bbt_at_sample (section.sample()));
+	init (when, section.note_types_per_minute(), section.end_note_types_per_minute(), section.note_type(), section.type()
+	      , section.initial() || section.locked_to_meter(), section.position_lock_style());
 }
 
 void
-TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double note_type, bool movable)
+TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double end_bpm, double note_type, TempoSection::Type type, bool initial, PositionLockStyle style)
 {
 	vector<string> strings;
 	NoteTypes::iterator x;
 
 	bpm_spinner.set_numeric (true);
-	bpm_spinner.set_digits (2);
+	bpm_spinner.set_digits (3);
 	bpm_spinner.set_wrap (true);
 	bpm_spinner.set_value (bpm);
 	bpm_spinner.set_alignment (1.0);
+
+	end_bpm_spinner.set_numeric (true);
+	end_bpm_spinner.set_digits (3);
+	end_bpm_spinner.set_wrap (true);
+	end_bpm_spinner.set_value (end_bpm);
+	end_bpm_spinner.set_alignment (1.0);
+
+	Gtkmm2ext::set_size_request_to_display_given_text (pulse_selector, _("one-hundred-twenty-eighth"), 3, 6);
 
 	note_types.insert (make_pair (_("whole"), 1.0));
 	strings.push_back (_("whole"));
@@ -106,29 +132,76 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double note_type,
 		pulse_selector.set_active_text (strings[3]); // "quarter"
 	}
 
+	strings.clear();
+
+	tempo_types.insert (make_pair (_("ramped"), TempoSection::Ramp));
+	strings.push_back (_("ramped"));
+	tempo_types.insert (make_pair (_("constant"), TempoSection::Constant));
+	strings.push_back (_("constant"));
+	set_popdown_strings (tempo_type, strings);
+	TempoTypes::iterator tt;
+	for (tt = tempo_types.begin(); tt != tempo_types.end(); ++tt) {
+		if (tt->second == type) {
+			tempo_type.set_active_text (tt->first);
+			break;
+		}
+	}
+	if (tt == tempo_types.end()) {
+		tempo_type.set_active_text (strings[1]); // "constant"
+	}
+
+	strings.clear();
+
+	lock_styles.insert (make_pair (_("music"), MusicTime));
+	strings.push_back (_("music"));
+	lock_styles.insert (make_pair (_("audio"), AudioTime));
+	strings.push_back (_("audio"));
+	set_popdown_strings (lock_style, strings);
+	LockStyles::iterator ls;
+	for (ls = lock_styles.begin(); ls != lock_styles.end(); ++ls) {
+		if (ls->second == style) {
+			lock_style.set_active_text (ls->first);
+			break;
+		}
+	}
+	if (ls == lock_styles.end()) {
+		lock_style.set_active_text (strings[0]); // "music"
+	}
+
 	Table* table;
 
 	if (UIConfiguration::instance().get_allow_non_quarter_pulse()) {
-		table = manage (new Table (5, 5));
+		table = manage (new Table (5, 7));
 	} else {
-		table = manage (new Table (5, 4));
+		table = manage (new Table (5, 6));
 	}
 
 	table->set_spacings (6);
 	table->set_homogeneous (false);
 
-	int row;
-	Label* bpm_label = manage (new Label(_("Beats per minute:"), ALIGN_LEFT, ALIGN_CENTER));
-	table->attach (*bpm_label, 0, 1, 0, 1);
-	table->attach (bpm_spinner, 1, 5, 0, 1);
+	int row = 0;
 
 	if (UIConfiguration::instance().get_allow_non_quarter_pulse()) {
-		table->attach (pulse_selector_label, 0, 1, 1, 2);
-		table->attach (pulse_selector, 1, 5, 1, 2);
-		row = 2;
-	} else {
-		row = 1;
+		table->attach (pulse_selector_label, 0, 1, row, row + 1);
+		table->attach (pulse_selector, 1, 5, row, row + 1);
+
+		++row;
 	}
+
+	Label* bpm_label = manage (new Label(_("Start Beats per Minute:"), ALIGN_LEFT, ALIGN_CENTER));
+	table->attach (*bpm_label, 0, 1, row, row + 1);
+	table->attach (bpm_spinner, 1, 5, row, row + 1);
+	++row;
+
+	table->attach (_end_bpm_label, 0, 1, row, row + 1);
+	table->attach (end_bpm_spinner, 1, 5, row, row + 1);
+	++row;
+
+	Label* tempo_type_label = manage (new Label(_("Tempo Type:"), ALIGN_LEFT, ALIGN_CENTER));
+	table->attach (*tempo_type_label, 0, 1, row, row + 1);
+	table->attach (tempo_type, 1, 5, row, row + 1);
+
+	++row;
 
 	char buf[64];
 
@@ -137,7 +210,7 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double note_type,
 	snprintf (buf, sizeof (buf), "%" PRIu32, when.beats);
 	when_beat_entry.set_text (buf);
 
-	if (movable) {
+	if (!initial) {
 		when_bar_entry.set_width_chars(4);
 		when_beat_entry.set_width_chars (4);
 		when_bar_entry.set_alignment (1.0);
@@ -154,10 +227,20 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double note_type,
 
 		Label* when_label = manage (new Label(_("Tempo begins at"), ALIGN_LEFT, ALIGN_CENTER));
 		table->attach (*when_label, 0, 1, row, row+1);
+
+		++row;
+		++row;
+
+		Label* lock_style_label = manage (new Label(_("Lock Style:"), ALIGN_LEFT, ALIGN_CENTER));
+		table->attach (*lock_style_label, 0, 1, row, row + 1);
+		table->attach (lock_style, 1, 5, row, row + 1);
+
+		--row;
 	}
 
 	get_vbox()->set_border_width (12);
 	get_vbox()->pack_end (*table);
+
 	table->show_all ();
 
 	add_button (Stock::CANCEL, RESPONSE_CANCEL);
@@ -166,9 +249,12 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double note_type,
 	set_default_response (RESPONSE_ACCEPT);
 
 	bpm_spinner.show ();
+	end_bpm_spinner.show ();
 	tap_tempo_button.show ();
+	get_vbox()->set_spacing (6);
 	get_vbox()->pack_end (tap_tempo_button);
-	bpm_spinner.grab_focus ();
+	tap_tempo_button.can_focus ();
+	tap_tempo_button.grab_focus ();
 
 	set_name ("MetricDialog");
 
@@ -176,13 +262,19 @@ TempoDialog::init (const Timecode::BBT_Time& when, double bpm, double note_type,
 	bpm_spinner.signal_button_press_event().connect (sigc::mem_fun (*this, &TempoDialog::bpm_button_press), false);
 	bpm_spinner.signal_button_release_event().connect (sigc::mem_fun (*this, &TempoDialog::bpm_button_release), false);
 	bpm_spinner.signal_changed().connect (sigc::mem_fun (*this, &TempoDialog::bpm_changed));
+	end_bpm_spinner.signal_changed().connect (sigc::mem_fun (*this, &TempoDialog::bpm_changed));
 	when_bar_entry.signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &TempoDialog::response), RESPONSE_ACCEPT));
 	when_bar_entry.signal_key_release_event().connect (sigc::mem_fun (*this, &TempoDialog::entry_key_release), false);
 	when_beat_entry.signal_activate().connect (sigc::bind (sigc::mem_fun (*this, &TempoDialog::response), RESPONSE_ACCEPT));
 	when_beat_entry.signal_key_release_event().connect (sigc::mem_fun (*this, &TempoDialog::entry_key_release), false);
 	pulse_selector.signal_changed().connect (sigc::mem_fun (*this, &TempoDialog::pulse_change));
+	tempo_type.signal_changed().connect (sigc::mem_fun (*this, &TempoDialog::tempo_type_change));
+	lock_style.signal_changed().connect (sigc::mem_fun (*this, &TempoDialog::lock_style_change));
 	tap_tempo_button.signal_button_press_event().connect (sigc::mem_fun (*this, &TempoDialog::tap_tempo_button_press), false);
+	tap_tempo_button.signal_key_press_event().connect (sigc::mem_fun (*this, &TempoDialog::tap_tempo_key_press), false);
 	tap_tempo_button.signal_focus_out_event().connect (sigc::mem_fun (*this, &TempoDialog::tap_tempo_focus_out));
+
+	tempo_type_change();
 
 	tapped = false;
 }
@@ -219,7 +311,15 @@ TempoDialog::bpm_button_release (GdkEventButton*)
 bool
 TempoDialog::entry_key_release (GdkEventKey*)
 {
-	set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+	Timecode::BBT_Time bbt;
+	get_bbt_time (bbt);
+
+	if (_section && is_user_input_valid()) {
+		set_response_sensitive (RESPONSE_ACCEPT, _map->can_solve_bbt (_section, bbt));
+	} else {
+		set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+	}
+
 	return false;
 }
 
@@ -227,6 +327,16 @@ double
 TempoDialog::get_bpm ()
 {
 	return bpm_spinner.get_value ();
+}
+
+double
+TempoDialog::get_end_bpm ()
+{
+	if (get_tempo_type() == TempoSection::Constant) {
+		return bpm_spinner.get_value ();
+	}
+
+	return end_bpm_spinner.get_value ();
 }
 
 bool
@@ -258,14 +368,80 @@ TempoDialog::get_note_type ()
 	return x->second;
 }
 
+TempoSection::Type
+TempoDialog::get_tempo_type ()
+{
+	TempoTypes::iterator x = tempo_types.find (tempo_type.get_active_text());
+
+	if (x == tempo_types.end()) {
+		error << string_compose(_("incomprehensible tempo type (%1)"), tempo_type.get_active_text()) << endmsg;
+		return TempoSection::Constant;
+	}
+
+	return x->second;
+}
+
+PositionLockStyle
+TempoDialog::get_lock_style ()
+{
+	LockStyles::iterator x = lock_styles.find (lock_style.get_active_text());
+
+	if (x == lock_styles.end()) {
+		error << string_compose(_("incomprehensible lock style (%1)"), lock_style.get_active_text()) << endmsg;
+		return MusicTime;
+	}
+
+	return x->second;
+}
+
 void
 TempoDialog::pulse_change ()
 {
 	set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
 }
 
+void
+TempoDialog::tempo_type_change ()
+{
+	if (get_tempo_type() == TempoSection::Constant) {
+		end_bpm_spinner.hide ();
+		_end_bpm_label.hide();
+	} else {
+		end_bpm_spinner.show ();
+		_end_bpm_label.show();
+	}
+
+	set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+}
+
+void
+TempoDialog::lock_style_change ()
+{
+	set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+}
+
 bool
-TempoDialog::tap_tempo_button_press (GdkEventButton *ev)
+TempoDialog::tap_tempo_key_press (GdkEventKey*)
+{
+	tap_tempo ();
+	return false;
+}
+
+bool
+TempoDialog::tap_tempo_button_press (GdkEventButton* ev)
+{
+	if (ev->type == GDK_2BUTTON_PRESS || ev->type == GDK_3BUTTON_PRESS) {
+		return true;
+	}
+	if (ev->button != 1) {
+		return true;
+	}
+	tap_tempo ();
+	return false; // grab focus
+}
+
+void
+TempoDialog::tap_tempo ()
 {
 	double t;
 
@@ -299,8 +475,6 @@ TempoDialog::tap_tempo_button_press (GdkEventButton *ev)
 	}
 	tap_count++;
 	last_t = t;
-
-	return true;
 }
 
 bool
@@ -310,25 +484,26 @@ TempoDialog::tap_tempo_focus_out (GdkEventFocus* )
 	return false;
 }
 
-MeterDialog::MeterDialog (TempoMap& map, framepos_t frame, const string&)
+MeterDialog::MeterDialog (TempoMap& map, samplepos_t sample, const string&)
 	: ArdourDialog (_("New Meter"))
 {
-	Timecode::BBT_Time when;
-	frame = map.round_to_bar(frame, RoundNearest);
-	Meter meter (map.meter_at(frame));
+	sample = map.round_to_bar(sample, RoundNearest).sample;
+	Timecode::BBT_Time when (map.bbt_at_sample (sample));
+	Meter meter (map.meter_at_sample (sample));
 
-	map.bbt_time (frame, when);
-	init (when, meter.divisions_per_bar(), meter.note_divisor(), true);
+	init (when, meter.divisions_per_bar(), meter.note_divisor(), false, MusicTime);
 }
 
-MeterDialog::MeterDialog (MeterSection& section, const string&)
+MeterDialog::MeterDialog (TempoMap& map, MeterSection& section, const string&)
 	: ArdourDialog (_("Edit Meter"))
 {
-	init (section.start(), section.divisions_per_bar(), section.note_divisor(), section.movable());
+	Timecode::BBT_Time when (map.bbt_at_sample (section.sample()));
+
+	init (when, section.divisions_per_bar(), section.note_divisor(), section.initial(), section.position_lock_style());
 }
 
 void
-MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, bool movable)
+MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, bool initial, PositionLockStyle style)
 {
 	char buf[64];
 	vector<string> strings;
@@ -371,25 +546,47 @@ MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, b
 		note_type.set_active_text (strings[3]); // "quarter"
 	}
 
-	Label* note_label = manage (new Label (_("Note value:"), ALIGN_LEFT, ALIGN_CENTER));
-	Label* bpb_label = manage (new Label (_("Beats per bar:"), ALIGN_LEFT, ALIGN_CENTER));
-	Table* table = manage (new Table (3, 2));
+	strings.clear();
+
+	lock_styles.insert (make_pair (_("music"), MusicTime));
+	strings.push_back (_("music"));
+	lock_styles.insert (make_pair (_("audio"), AudioTime));
+	strings.push_back (_("audio"));
+	set_popdown_strings (lock_style, strings);
+	LockStyles::iterator ls;
+	for (ls = lock_styles.begin(); ls != lock_styles.end(); ++ls) {
+		if (ls->second == style) {
+			lock_style.set_active_text (ls->first);
+			break;
+		}
+	}
+	if (ls == lock_styles.end()) {
+		lock_style.set_active_text (strings[0]); // "music"
+	}
+
+	Label* note_label = manage (new Label (_("Note value:"), ALIGN_RIGHT, ALIGN_CENTER));
+	Label* lock_label = manage (new Label (_("Lock style:"), ALIGN_RIGHT, ALIGN_CENTER));
+	Label* bpb_label = manage (new Label (_("Beats per bar:"), ALIGN_RIGHT, ALIGN_CENTER));
+	Table* table = manage (new Table (3, 3));
 	table->set_spacings (6);
 
 	table->attach (*bpb_label, 0, 1, 0, 1, FILL|EXPAND, FILL|EXPAND);
 	table->attach (bpb_entry, 1, 2, 0, 1, FILL|EXPAND, FILL|EXPAND);
 	table->attach (*note_label, 0, 1, 1, 2, FILL|EXPAND, FILL|EXPAND);
-	table->attach (note_type, 1, 2, 1, 2, FILL|EXPAND, SHRINK);
+	table->attach (note_type, 1, 2, 1, 2, FILL|EXPAND, FILL|EXPAND);
 
 	snprintf (buf, sizeof (buf), "%" PRIu32, when.bars);
 	when_bar_entry.set_text (buf);
 	when_bar_entry.set_alignment (1.0);
 
-	if (movable) {
+	if (!initial) {
 		Label* when_label = manage (new Label(_("Meter begins at bar:"), ALIGN_LEFT, ALIGN_CENTER));
 
 		table->attach (*when_label, 0, 1, 2, 3, FILL | EXPAND, FILL | EXPAND);
 		table->attach (when_bar_entry, 1, 2, 2, 3, FILL | EXPAND, FILL | EXPAND);
+
+		table->attach (*lock_label, 0, 1, 3, 4, FILL|EXPAND, FILL|EXPAND);
+		table->attach (lock_style, 1, 2, 3, 4, FILL|EXPAND, SHRINK);
 	}
 
 	get_vbox()->set_border_width (12);
@@ -410,6 +607,8 @@ MeterDialog::init (const Timecode::BBT_Time& when, double bpb, double divisor, b
 	when_bar_entry.signal_key_press_event().connect (sigc::mem_fun (*this, &MeterDialog::entry_key_press), false);
 	when_bar_entry.signal_key_release_event().connect (sigc::mem_fun (*this, &MeterDialog::entry_key_release));
 	note_type.signal_changed().connect (sigc::mem_fun (*this, &MeterDialog::note_type_change));
+	lock_style.signal_changed().connect (sigc::mem_fun (*this, &MeterDialog::lock_style_change));
+
 }
 
 bool
@@ -478,7 +677,13 @@ MeterDialog::entry_key_release (GdkEventKey*)
 void
 MeterDialog::note_type_change ()
 {
-        set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+	set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
+}
+
+void
+MeterDialog::lock_style_change ()
+{
+	set_response_sensitive (RESPONSE_ACCEPT, is_user_input_valid());
 }
 
 double
@@ -501,6 +706,19 @@ MeterDialog::get_note_type ()
 	if (x == note_types.end()) {
 		error << string_compose(_("incomprehensible meter note type (%1)"), note_type.get_active_text()) << endmsg;
 		return 0;
+	}
+
+	return x->second;
+}
+
+PositionLockStyle
+MeterDialog::get_lock_style ()
+{
+	LockStyles::iterator x = lock_styles.find (lock_style.get_active_text());
+
+	if (x == lock_styles.end()) {
+		error << string_compose(_("incomprehensible meter lock style (%1)"), lock_style.get_active_text()) << endmsg;
+		return MusicTime;
 	}
 
 	return x->second;

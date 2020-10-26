@@ -1,22 +1,23 @@
 /*
-    Copyright (C) 2010 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2011-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2011-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <gtkmm/stock.h>
 #include <gtkmm/table.h>
@@ -27,13 +28,13 @@
 
 #include "midi++/midnam_patch.h"
 
-#include "ardour/beats_frames_converter.h"
+#include "ardour/beats_samples_converter.h"
 #include "ardour/instrument_info.h"
 
 #include "patch_change_dialog.h"
 #include "gui_thread.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -41,20 +42,23 @@ using namespace Gtkmm2ext;
 
 /** @param tc If non-0, a time converter for this patch change.  If 0, time control will be desensitized */
 PatchChangeDialog::PatchChangeDialog (
-	const ARDOUR::BeatsFramesConverter*        tc,
-	ARDOUR::Session*                           session,
-	Evoral::PatchChange<Evoral::Beats> const & patch,
-	ARDOUR::InstrumentInfo&                    info,
-	const Gtk::BuiltinStockID&                 ok,
-	bool                                       allow_delete)
-	: ArdourDialog (_("Patch Change"), true)
+	const ARDOUR::BeatsSamplesConverter*        tc,
+	ARDOUR::Session*                            session,
+	Evoral::PatchChange<Temporal::Beats> const& patch,
+	ARDOUR::InstrumentInfo&                     info,
+	const Gtk::BuiltinStockID&                  ok,
+	bool                                        allow_delete,
+	bool                                        modal)
+	: ArdourDialog (_("Patch Change"), modal)
 	, _time_converter (tc)
 	, _info (info)
 	, _time (X_("patchchangetime"), true, "", true, false)
 	, _channel (*manage (new Adjustment (1, 1, 16, 1, 4)))
 	, _program (*manage (new Adjustment (1, 1, 128, 1, 16)))
-	, _bank (*manage (new Adjustment (1, 1, 16384, 1, 64)))
+	, _bank_msb (*manage (new Adjustment (0, 0, 127, 1, 16)))
+	, _bank_lsb (*manage (new Adjustment (0, 0, 127, 1, 16)))
 	, _ignore_signals (false)
+	, _keep_open (!modal)
 {
 	Table* t = manage (new Table (4, 2));
 	Label* l;
@@ -103,17 +107,28 @@ PatchChangeDialog::PatchChangeDialog (
 	_program.set_value (patch.program () + 1);
 	_program.signal_changed().connect (sigc::mem_fun (*this, &PatchChangeDialog::program_changed));
 
-	l = manage (left_aligned_label (_("Bank")));
+	l = manage (left_aligned_label (_("Bank MSB")));
 	t->attach (*l, 0, 1, r, r + 1);
-	t->attach (_bank, 1, 2, r, r + 1);
+	t->attach (_bank_msb, 1, 2, r, r + 1);
 	++r;
 
-	_bank.set_value (patch.bank() + 1);
-	_bank.signal_changed().connect (sigc::mem_fun (*this, &PatchChangeDialog::bank_changed));
+	l = manage (left_aligned_label (_("Bank LSB")));
+	t->attach (*l, 0, 1, r, r + 1);
+	t->attach (_bank_lsb, 1, 2, r, r + 1);
+	++r;
+
+	assert (patch.bank() != UINT16_MAX);
+
+	_bank_msb.set_value ((patch.bank() >> 7));
+	_bank_msb.signal_changed().connect (sigc::mem_fun (*this, &PatchChangeDialog::bank_changed));
+	_bank_lsb.set_value ((patch.bank() & 127));
+	_bank_lsb.signal_changed().connect (sigc::mem_fun (*this, &PatchChangeDialog::bank_changed));
 
 	get_vbox()->add (*t);
 
-	add_button (Stock::CANCEL, RESPONSE_CANCEL);
+	if (modal) {
+		add_button (Stock::CANCEL, RESPONSE_CANCEL);
+	}
 	add_button (ok, RESPONSE_ACCEPT);
 	if (allow_delete) {
 		add_button (Gtk::StockID(GTK_STOCK_DELETE), RESPONSE_REJECT);
@@ -131,6 +146,22 @@ PatchChangeDialog::PatchChangeDialog (
 }
 
 void
+PatchChangeDialog::on_response (int response_id)
+{
+	if (_keep_open) {
+		Gtk::Dialog::on_response (response_id);
+	} else {
+		ArdourDialog::on_response (response_id);
+	}
+}
+
+int
+PatchChangeDialog::get_14bit_bank () const
+{
+	return (_bank_msb.get_value_as_int() << 7) + _bank_lsb.get_value_as_int();
+}
+
+void
 PatchChangeDialog::instrument_info_changed ()
 {
 	_bank_combo.clear ();
@@ -139,20 +170,20 @@ PatchChangeDialog::instrument_info_changed ()
 	fill_patch_combo ();
 }
 
-Evoral::PatchChange<Evoral::Beats>
+Evoral::PatchChange<Temporal::Beats>
 PatchChangeDialog::patch () const
 {
-	Evoral::Beats t = Evoral::Beats();
+	Temporal::Beats t = Temporal::Beats();
 
 	if (_time_converter) {
 		t = _time_converter->from (_time.current_time ());
 	}
 
-	return Evoral::PatchChange<Evoral::Beats> (
+	return Evoral::PatchChange<Temporal::Beats> (
 		t,
 		_channel.get_value_as_int() - 1,
 		_program.get_value_as_int() - 1,
-		_bank.get_value_as_int() - 1
+		get_14bit_bank ()
 		);
 }
 
@@ -192,7 +223,7 @@ PatchChangeDialog::set_active_bank_combo ()
 		string n = (*i)->name ();
 		boost::replace_all (n, "_", " ");
 
-		if ((*i)->number() == _bank.get_value () - 1) {
+		if ((*i)->number() == get_14bit_bank()) {
 			_current_patch_bank = *i;
 			_ignore_signals = true;
 			_bank_combo.set_active_text (n);
@@ -241,9 +272,12 @@ PatchChangeDialog::bank_combo_changed ()
 	fill_patch_combo ();
 	set_active_patch_combo ();
 
-	_ignore_signals = true;
-	_bank.set_value (_current_patch_bank->number() + 1);
-	_ignore_signals = false;
+	if (_current_patch_bank->number() != UINT16_MAX) {
+		_ignore_signals = true;
+		_bank_msb.set_value (_current_patch_bank->number() >> 7);
+		_bank_lsb.set_value (_current_patch_bank->number() & 127);
+		_ignore_signals = false;
+	}
 }
 
 /** Fill the contents of the patch combo */
@@ -315,6 +349,8 @@ PatchChangeDialog::patch_combo_changed ()
 		if (n == _patch_combo.get_active_text ()) {
 			_ignore_signals = true;
 			_program.set_value ((*j)->program_number() + 1);
+			_bank_msb.set_value ((*j)->bank_number() >> 7);
+			_bank_lsb.set_value ((*j)->bank_number() & 127);
 			_ignore_signals = false;
 			break;
 		}

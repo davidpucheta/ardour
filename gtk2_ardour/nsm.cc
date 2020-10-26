@@ -17,14 +17,14 @@
 /* Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.  */
 /*******************************************************************************/
 
+#include <stdio.h>
+#include <unistd.h>
+
+#include "gtkmm2ext/application.h"
 
 #include "nsm.h"
 #include "opts.h"
 #include "ardour_ui.h"
-
-#include <stdio.h>
-#include <unistd.h>
-
 
 NSM_Client::NSM_Client()
 {
@@ -33,12 +33,12 @@ NSM_Client::NSM_Client()
 int
 NSM_Client::command_save(char **out_msg)
 {
-    (void) out_msg;
+	(void) out_msg;
 
-    ARDOUR_UI::instance()->save_state();
-    int r = ERR_OK;
+	ARDOUR_UI::instance()->save_state();
+	int r = ERR_OK;
 
-    return r;
+	return r;
 }
 
 int
@@ -47,13 +47,15 @@ NSM_Client::command_open(const char* name,
                          const char* client_id,
                          char** /*out_msg*/)
 {
-    int r = ERR_OK;
+	int r = ERR_OK;
 
-    ARDOUR_COMMAND_LINE::session_name = name;
-    ARDOUR_COMMAND_LINE::backend_client_name = client_id;
+	ARDOUR_COMMAND_LINE::backend_client_name = client_id;
 
-    if (ARDOUR_UI::instance()->get_session_parameters(true, false, "")) {
-        return ERR_GENERAL;
-    }
-    return r;
+	/* this appears asynchronous, but almost certainly is
+	 * synchronous. However, there's no return value available.
+	 */
+
+	Gtkmm2ext::Application::instance()->ShouldLoad (name);
+
+	return r;
 }

@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 1998-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1998-2015 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2013-2014 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __pbd_abstract_ui_h__
 #define __pbd_abstract_ui_h__
@@ -54,25 +55,25 @@ class Touchable;
 template<typename RequestObject>
 class ABSTRACT_UI_API AbstractUI : public BaseUI
 {
-  public:
+public:
 	AbstractUI (const std::string& name);
-	virtual ~AbstractUI() {}
+	virtual ~AbstractUI();
 
 	void register_thread (pthread_t, std::string, uint32_t num_requests);
 	void call_slot (EventLoop::InvalidationRecord*, const boost::function<void()>&);
-        Glib::Threads::Mutex& slot_invalidation_mutex() { return request_buffer_map_lock; }
+	Glib::Threads::Mutex& slot_invalidation_mutex() { return request_buffer_map_lock; }
 
 	Glib::Threads::Mutex request_buffer_map_lock;
 
 	static void* request_buffer_factory (uint32_t num_requests);
 
-  protected:
+protected:
 	struct RequestBuffer : public PBD::RingBufferNPT<RequestObject> {
-                bool dead;
-                RequestBuffer (uint32_t size)
-                        : PBD::RingBufferNPT<RequestObject> (size)
-	                , dead (false) {}
-        };
+		bool dead;
+		RequestBuffer (uint32_t size)
+			: PBD::RingBufferNPT<RequestObject> (size)
+			, dead (false) {}
+	};
 	typedef typename RequestBuffer::rw_vector RequestBufferVector;
 
 #if defined(COMPILER_MINGW) && defined(PTW32_VERSION)
@@ -91,9 +92,8 @@ class ABSTRACT_UI_API AbstractUI : public BaseUI
 #endif
 
 	RequestBufferMap request_buffers;
-        static Glib::Threads::Private<RequestBuffer> per_thread_request_buffer;
+	static Glib::Threads::Private<RequestBuffer> per_thread_request_buffer;
 
-	Glib::Threads::Mutex               request_list_lock;
 	std::list<RequestObject*> request_list;
 
 	RequestObject* get_request (RequestType);

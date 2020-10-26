@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2006 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2015 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_data_type_h__
 #define __ardour_data_type_h__
@@ -44,6 +45,9 @@ public:
 	 * types are added, so this number is NOT suitable for serialization,
 	 * network, or binary anything.
 	 *
+	 * Some heuristics in Ardour's UI assume that the DataTypes are ordered
+	 * from most to least likely to be the main intended type of a route.
+	 *
 	 * WARNING: The number of non-NIL entries here must match num_types.
 	 */
 	enum Symbol {
@@ -60,6 +64,8 @@ public:
 	DataType(const Symbol& symbol)
 	: _symbol(symbol)
 	{}
+
+	static DataType front() { return DataType((Symbol) 0); }
 
 	/** Construct from a string (Used for loading from XML and Ports)
 	 * The string can be as in an XML file (eg "audio" or "midi"), or a

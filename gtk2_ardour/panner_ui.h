@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2011 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_gtk_panner_ui_h__
 #define __ardour_gtk_panner_ui_h__
@@ -28,9 +31,6 @@
 #include <gtkmm/arrow.h>
 #include <gtkmm/togglebutton.h>
 #include <gtkmm/button.h>
-
-#include <gtkmm2ext/click_box.h>
-#include <gtkmm2ext/slider_controller.h>
 
 #include "ardour/session_handle.h"
 
@@ -46,11 +46,7 @@ namespace ARDOUR {
 	class Panner;
 	class PannerShell;
 	class Delivery;
-        class AutomationControl;
-}
-
-namespace Gtkmm2ext {
-	class FastMeter;
+	class AutomationControl;
 }
 
 namespace Gtk {
@@ -60,7 +56,7 @@ namespace Gtk {
 
 class PannerUI : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 {
-  public:
+public:
 	PannerUI (ARDOUR::Session*);
 	~PannerUI ();
 
@@ -84,7 +80,7 @@ class PannerUI : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 
 	static void setup_slider_pix ();
 
-  private:
+private:
 	friend class MixerStrip;
 	friend class SendUI;
 
@@ -105,23 +101,22 @@ class PannerUI : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 
 	Gtk::VBox           pan_bar_packer;
 	Gtk::VBox           pan_vbox;
-        Gtk::VBox           poswidth_box;
+	Gtk::VBox           poswidth_box;
 	Width              _width;
 
-        StereoPanner*  _stereo_panner;
+	StereoPanner*  _stereo_panner;
 	MonoPanner*    _mono_panner;
 
-        bool _ignore_width_change;
-        bool _ignore_position_change;
-        void width_adjusted ();
-        void show_width ();
-        void position_adjusted ();
-        void show_position ();
+	bool _ignore_width_change;
+	bool _ignore_position_change;
+	void width_adjusted ();
+	void show_width ();
+	void position_adjusted ();
+	void show_position ();
 
 	Gtk::Menu* pan_astate_menu;
 	Gtk::Menu* pan_astyle_menu;
 
-	Gtk::Button pan_automation_style_button;
 	Gtk::ToggleButton pan_automation_state_button;
 
 	void pan_value_changed (uint32_t which);
@@ -140,28 +135,19 @@ class PannerUI : public Gtk::HBox, public ARDOUR::SessionHandlePtr
 
 	Gtk::Menu* pan_menu;
 	Gtk::CheckMenuItem* bypass_menu_item;
+	Gtk::CheckMenuItem* send_link_menu_item;
 	void build_pan_menu ();
 	void pan_reset ();
 	void pan_bypass_toggle ();
+	void pan_link_toggle ();
 	void pan_edit ();
 	void pan_set_custom_type (std::string type);
 
 	void pan_automation_state_changed();
-	void pan_automation_style_changed();
-	gint pan_automation_style_button_event (GdkEventButton *);
 	gint pan_automation_state_button_event (GdkEventButton *);
-	sigc::connection pan_watching;
 
-	std::string astate_string (ARDOUR::AutoState);
-	std::string short_astate_string (ARDOUR::AutoState);
-	std::string _astate_string (ARDOUR::AutoState, bool);
-
-	std::string astyle_string (ARDOUR::AutoStyle);
-	std::string short_astyle_string (ARDOUR::AutoStyle);
-	std::string _astyle_string (ARDOUR::AutoStyle, bool);
-
-        void start_touch (boost::weak_ptr<ARDOUR::AutomationControl>);
-        void stop_touch (boost::weak_ptr<ARDOUR::AutomationControl>);
+	void start_touch (boost::weak_ptr<ARDOUR::AutomationControl>);
+	void stop_touch (boost::weak_ptr<ARDOUR::AutomationControl>);
 
 	std::map<std::string,std::string> _panner_list;
 	bool _suspend_menu_callbacks;

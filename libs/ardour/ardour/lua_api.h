@@ -1,20 +1,20 @@
 /*
- * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2017 Paul Davis <paul@linuxaudiosystems.com>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #ifndef _ardour_lua_api_h_
 #define _ardour_lua_api_h_
@@ -22,11 +22,22 @@
 #include <string>
 #include <lo/lo.h>
 #include <boost/shared_ptr.hpp>
+#include <boost/enable_shared_from_this.hpp>
+#include <rubberband/RubberBandStretcher.h>
+#include <vamp-hostsdk/Plugin.h>
+
+#include "evoral/Note.h"
 
 #include "ardour/libardour_visibility.h"
 
+#include "ardour/audioregion.h"
+#include "ardour/midi_model.h"
 #include "ardour/processor.h"
 #include "ardour/session.h"
+
+namespace ARDOUR {
+	class Readable;
+}
 
 namespace ARDOUR { namespace LuaAPI {
 
@@ -57,6 +68,9 @@ namespace ARDOUR { namespace LuaAPI {
 	 */
 	boost::shared_ptr<ARDOUR::Processor> new_luaproc (ARDOUR::Session *s, const std::string& p);
 
+	/** List all installed plugins */
+	std::list<boost::shared_ptr<ARDOUR::PluginInfo> > list_plugins ();
+
 	/** search a Plugin
 	 *
 	 * @param id Plugin Name, ID or URI
@@ -70,6 +84,7 @@ namespace ARDOUR { namespace LuaAPI {
 	 * @param s Session Handle
 	 * @param id Plugin Name, ID or URI
 	 * @param type Plugin Type
+	 * @param preset name of plugin-preset to load, leave empty "" to not load any preset after instantiation
 	 * @returns Processor or nil
 	 */
 	boost::shared_ptr<ARDOUR::Processor> new_plugin (ARDOUR::Session *s, const std::string& id, ARDOUR::PluginType type, const std::string& preset = "");
@@ -81,17 +96,45 @@ namespace ARDOUR { namespace LuaAPI {
 	 * @param value value to set
 	 * @returns true on success, false on error or out-of-bounds value
 	 */
-	bool set_processor_param (boost::shared_ptr<ARDOUR::Processor> proc, uint32_t which, float val);
+	bool set_processor_param (boost::shared_ptr<ARDOUR::Processor> proc, uint32_t which, float value);
+
+	/** get a plugin control parameter value
+	 *
+	 * @param proc Plugin-Processor
+	 * @param which control port to set (starting at 0, including ports of type input and output))
+	 * @param ok boolean variable contains true or false after call returned. to be checked by caller before using value.
+	 * @returns value
+	 */
+	float get_processor_param (boost::shared_ptr<Processor> proc, uint32_t which, bool &ok);
+
+	/** reset a processor to its default values (only works for plugins )
+	 *
+	 * This is a wrapper which looks up the Processor by plugin-insert.
+	 *
+	 * @param proc Plugin-Insert
+	 * @returns true on success, false when the processor is not a plugin
+	 */
+	bool reset_processor_to_default (boost::shared_ptr<Processor> proc);
+
 	/** set a plugin control-input parameter value
 	 *
 	 * This is a wrapper around set_processor_param which looks up the Processor by plugin-insert.
 	 *
-	 * @param proc Plugin-Insert
+	 * @param pi Plugin-Insert
 	 * @param which control-input to set (starting at 0)
 	 * @param value value to set
 	 * @returns true on success, false on error or out-of-bounds value
 	 */
-	bool set_plugin_insert_param (boost::shared_ptr<ARDOUR::PluginInsert> pi, uint32_t which, float val);
+	bool set_plugin_insert_param (boost::shared_ptr<ARDOUR::PluginInsert> pi, uint32_t which, float value);
+
+	/** get a plugin control parameter value
+	 *
+	 * @param pi Plugin-Insert
+	 * @param which control port to query (starting at 0, including ports of type input and output)
+	 * @param ok boolean variable contains true or false after call returned. to be checked by caller before using value.
+	 * @returns value
+	 */
+	float get_plugin_insert_param (boost::shared_ptr<ARDOUR::PluginInsert> pi, uint32_t which, bool &ok);
 
 	/**
 	 * A convenience function to get a Automation Lists and ParamaterDescriptor
@@ -118,6 +161,202 @@ namespace ARDOUR { namespace LuaAPI {
 	 * @returns 3 parameters: AutomationList, ControlList, ParamaterDescriptor
 	 */
 	int plugin_automation (lua_State *lua);
+
+	/**
+	 * A convenience function for colorspace HSL to RGB conversion.
+	 * All ranges are 0..1
+	 *
+	 * Example:
+	 * @code
+	 * local r, g, b, a = ARDOUR.LuaAPI.hsla_to_rgba (hue, saturation, luminosity, alpha)
+	 * @endcode
+	 * @returns 4 parameters: red, green, blue, alpha (in range 0..1)
+	 */
+	int hsla_to_rgba (lua_State *lua);
+
+	/**
+	 * A convenience function to expand RGBA parameters from an integer
+	 *
+	 * convert a Canvas::Color (uint32_t 0xRRGGBBAA) into
+	 * double RGBA values which can be passed as parameters to
+	 * Cairo::Context::set_source_rgba
+	 *
+	 * Example:
+	 * @code
+	 * local r, g, b, a = ARDOUR.LuaAPI.color_to_rgba (0x88aa44ff)
+	 * cairo_ctx:set_source_rgba (ARDOUR.LuaAPI.color_to_rgba (0x11336699)
+	 * @endcode
+	 * @returns 4 parameters: red, green, blue, alpha (in range 0..1)
+	 */
+	int color_to_rgba (lua_State *lua);
+
+	/**
+	 */
+	std::string ascii_dtostr (const double d);
+
+	/**
+	 * Creates a filename from a series of elements using the correct separator for filenames.
+	 *
+	 * No attempt is made to force the resulting filename to be an absolute path.
+	 * If the first element is a relative path, the result will be a relative path.
+	 */
+	int build_filename (lua_State *lua);
+
+	/**
+	 * Generic conversion from audio sample count to timecode.
+	 * (TimecodeType, sample-rate, sample-pos)
+	 */
+	int sample_to_timecode (lua_State *L);
+
+	/**
+	 * Generic conversion from timecode to audio sample count.
+	 * (TimecodeType, sample-rate, hh, mm, ss, ff)
+	 */
+	int timecode_to_sample (lua_State *L);
+
+	/**
+	 * Use current session settings to convert
+	 * audio-sample count into hh, mm, ss, ff
+	 * timecode (this include session pull up/down).
+	 */
+	int sample_to_timecode_lua (lua_State *L);
+
+	/**
+	 * Use current session settings to convert
+	 * timecode (hh, mm, ss, ff) to audio-sample
+	 * count (this include session pull up/down).
+	 */
+	int timecode_to_sample_lua (lua_State *L);
+
+	class Vamp {
+	/** Vamp Plugin Interface
+	 *
+	 * Vamp is an audio processing plugin system for plugins that extract descriptive information
+	 * from audio data - typically referred to as audio analysis plugins or audio feature
+	 * extraction plugins.
+	 *
+	 * This interface allows to load a plugins and directly access it using the Vamp Plugin API.
+	 *
+	 * A convenience method is provided to analyze Ardour::Readable objects (Regions).
+	 */
+		public:
+			Vamp (const std::string&, float sample_rate);
+			~Vamp ();
+
+			/** Search for all available available Vamp plugins.
+			 * @returns list of plugin-keys
+			 */
+			static std::vector<std::string> list_plugins ();
+
+			::Vamp::Plugin* plugin () { return _plugin; }
+
+			/** high-level abstraction to process a single channel of the given Readable.
+			 *
+			 * If the plugin is not yet initialized, initialize() is called.
+			 *
+			 * if \p fn is not nil, it is called with the immediate
+			 * Vamp::Plugin::Features on every process call.
+			 *
+			 * @param r readable
+			 * @param channel channel to process
+			 * @param fn lua callback function or nil
+			 * @return 0 on success
+			 */
+			int analyze (boost::shared_ptr<ARDOUR::Readable> r, uint32_t channel, luabridge::LuaRef fn);
+
+			/** call plugin():reset() and clear intialization flag */
+			void reset ();
+
+			/** initialize the plugin for use with analyze().
+			 *
+			 * This is equivalent to plugin():initialise (1, ssiz, bsiz)
+			 * and prepares a plugin for analyze.
+			 * (by preferred step and block sizes are used. if the plugin
+			 * does not specify them or they're larger than 8K, both are set to 1024)
+			 *
+			 * Manual initialization is only required to set plugin-parameters
+			 * which depend on prior initialization of the plugin.
+			 *
+			 * @code
+			 * vamp:reset ()
+			 * vamp:initialize ()
+			 * vamp:plugin():setParameter (0, 1.5, nil)
+			 * vamp:analyze (r, 0)
+			 * @endcode
+			 */
+			bool initialize ();
+
+			bool initialized () const { return _initialized; }
+
+			/** process given array of audio-samples.
+			 *
+			 * This is a lua-binding for vamp:plugin():process ()
+			 *
+			 * @param d audio-data, the vector must match the configured channel count
+			 *    and hold a complete buffer for every channel as set during
+			 *    plugin():initialise()
+			 * @param rt timestamp matching the provided buffer.
+			 * @returns features extracted from that data (if the plugin is causal)
+			 */
+			::Vamp::Plugin::FeatureSet process (const std::vector<float*>& d, ::Vamp::RealTime rt);
+
+		private:
+			::Vamp::Plugin* _plugin;
+			float           _sample_rate;
+			samplecnt_t     _bufsize;
+			samplecnt_t     _stepsize;
+			bool            _initialized;
+
+	};
+
+	class Rubberband : public Readable , public boost::enable_shared_from_this<Rubberband>
+	{
+		public:
+			Rubberband (boost::shared_ptr<AudioRegion>, bool percussive);
+			~Rubberband ();
+			bool set_strech_and_pitch (double stretch_ratio, double pitch_ratio);
+			bool set_mapping (luabridge::LuaRef tbl);
+			boost::shared_ptr<AudioRegion> process (luabridge::LuaRef cb);
+			boost::shared_ptr<Readable> readable ();
+
+			/* readable API */
+			samplecnt_t readable_length () const { return _read_len; }
+			uint32_t n_channels () const { return _n_channels; }
+			samplecnt_t read (Sample*, samplepos_t pos, samplecnt_t cnt, int channel) const;
+
+		private:
+			Rubberband (Rubberband const&); // no copy construction
+			bool read_region (bool study);
+			bool retrieve (float**);
+			void cleanup (bool abort);
+			boost::shared_ptr<AudioRegion> finalize ();
+
+			boost::shared_ptr<AudioRegion> _region;
+
+			uint32_t    _n_channels;
+			samplecnt_t _read_len;
+			samplecnt_t _read_start;
+			samplecnt_t _read_offset;
+
+			std::vector<boost::shared_ptr<AudioSource> > _asrc;
+
+			RubberBand::RubberBandStretcher _rbs;
+			std::map<size_t, size_t>        _mapping;
+
+			double _stretch_ratio;
+			double _pitch_ratio;
+
+			luabridge::LuaRef*            _cb;
+			boost::shared_ptr<Rubberband> _self;
+			static const samplecnt_t      _bufsize;
+	};
+
+	boost::shared_ptr<Evoral::Note<Temporal::Beats> >
+		new_noteptr (uint8_t, Temporal::Beats, Temporal::Beats, uint8_t, uint8_t);
+
+	std::list<boost::shared_ptr< Evoral::Note<Temporal::Beats> > >
+		note_list (boost::shared_ptr<ARDOUR::MidiModel>);
+
 } } /* namespace */
 
 namespace ARDOUR { namespace LuaOSC {
@@ -169,6 +408,46 @@ namespace ARDOUR { namespace LuaOSC {
 			lo_address _addr;
 	};
 
-} } /* namespace */
+}
+
+class LuaTableRef {
+public:
+	LuaTableRef ();
+	~LuaTableRef ();
+
+	int get (lua_State* L);
+	int set (lua_State* L);
+
+private:
+	struct LuaTableEntry {
+		LuaTableEntry (int kt, int vt)
+			: keytype (kt)
+			, valuetype (vt)
+		{ }
+
+		int keytype;
+		std::string k_s;
+		unsigned int k_n;
+
+		int valuetype;
+		// LUA_TUSERDATA
+		const void* c;
+		void* p;
+		// LUA_TBOOLEAN
+		bool b;
+		// LUA_TSTRING:
+		std::string s;
+		// LUA_TNUMBER:
+		double n;
+	};
+
+	std::vector<LuaTableEntry> _data;
+
+	static void* findclasskey (lua_State *L, const void* key);
+	template<typename T>
+	static void assign (luabridge::LuaRef* rv, T key, const LuaTableEntry& s);
+};
+
+} /* namespace */
 
 #endif // _ardour_lua_api_h_

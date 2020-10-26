@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <boost/foreach.hpp>
 
@@ -23,7 +25,7 @@
 
 #include "ardour/route_group.h"
 
-#include "canvas/colors.h"
+#include "gtkmm2ext/colors.h"
 
 #include "mixer_group_tabs.h"
 #include "mixer_strip.h"
@@ -33,7 +35,7 @@
 #include "ui_config.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace Gtk;
@@ -61,11 +63,21 @@ MixerGroupTabs::compute_tabs () const
 	TreeModel::Children rows = _mixer->track_model->children ();
 	for (TreeModel::Children::iterator i = rows.begin(); i != rows.end(); ++i) {
 
-		MixerStrip* s = (*i)[_mixer->track_columns.strip];
+		AxisView* av = (*i)[_mixer->stripable_columns.strip];
+		MixerStrip* s = dynamic_cast<MixerStrip*> (av);
+
+		if (!s) {
+			continue;
+		}
 
 		if (s->route()->is_master() || s->route()->is_monitor() || !s->marked_for_display()) {
 			continue;
 		}
+#ifdef MIXBUS
+		if (s->route()->mixbus()) {
+			continue;
+		}
+#endif
 
 		RouteGroup* g = s->route_group ();
 
@@ -97,15 +109,15 @@ MixerGroupTabs::compute_tabs () const
 }
 
 void
-MixerGroupTabs::draw_tab (cairo_t* cr, Tab const & tab) const
+MixerGroupTabs::draw_tab (cairo_t* cr, Tab const & tab)
 {
 	double const arc_radius = get_height();
 	double r, g, b, a;
 
 	if (tab.group && tab.group->is_active()) {
-		ArdourCanvas::color_to_rgba (tab.color, r, g, b, a);
+		Gtkmm2ext::color_to_rgba (tab.color, r, g, b, a);
 	} else {
-		ArdourCanvas::color_to_rgba (UIConfiguration::instance().color ("inactive group tab"), r, g, b, a);
+		Gtkmm2ext::color_to_rgba (UIConfiguration::instance().color ("inactive group tab"), r, g, b, a);
 	}
 
 	a = 1.0;
@@ -117,20 +129,24 @@ MixerGroupTabs::draw_tab (cairo_t* cr, Tab const & tab) const
 	cairo_line_to (cr, tab.from, get_height());
 	cairo_fill (cr);
 
-	if (tab.group) {
-		pair<string, double> const f = Gtkmm2ext::fit_to_pixels (cr, tab.group->name(), tab.to - tab.from - arc_radius * 2);
+	if (tab.group && (tab.to - tab.from) > arc_radius) {
+		int text_width, text_height;
 
-		cairo_text_extents_t ext;
-		cairo_text_extents (cr, tab.group->name().c_str(), &ext);
+		Glib::RefPtr<Pango::Layout> layout;
+		layout = Pango::Layout::create (get_pango_context ());
+		layout->set_ellipsize (Pango::ELLIPSIZE_MIDDLE);
 
-		ArdourCanvas::Color c = ArdourCanvas::contrasting_text_color (ArdourCanvas::rgba_to_color (r, g, b, a));
-		ArdourCanvas::color_to_rgba (c, r, g, b, a);
+		layout->set_text (tab.group->name ());
+		layout->set_width ((tab.to - tab.from - arc_radius) * PANGO_SCALE);
+		layout->get_pixel_size (text_width, text_height);
 
+		cairo_move_to (cr, tab.from + (tab.to - tab.from - text_width) * .5, (get_height () - text_height) * .5);
+
+		Gtkmm2ext::Color c = Gtkmm2ext::contrasting_text_color (Gtkmm2ext::rgba_to_color (r, g, b, a));
+		Gtkmm2ext::color_to_rgba (c, r, g, b, a);
 		cairo_set_source_rgb (cr, r, g, b);
-		cairo_move_to (cr, tab.from + (tab.to - tab.from - f.second) / 2, get_height() - ext.height / 2);
-		cairo_save (cr);
-		cairo_show_text (cr, f.first.c_str());
-		cairo_restore (cr);
+
+		pango_cairo_show_layout (cr, layout->gobj ());
 	}
 }
 
@@ -149,11 +165,16 @@ MixerGroupTabs::routes_for_tab (Tab const * t) const
 	TreeModel::Children rows = _mixer->track_model->children ();
 	for (TreeModel::Children::iterator i = rows.begin(); i != rows.end(); ++i) {
 
-		MixerStrip* s = (*i)[_mixer->track_columns.strip];
+		AxisView* av = (*i)[_mixer->stripable_columns.strip];
+		MixerStrip* s = dynamic_cast<MixerStrip*> (av);
 
-	 	if (s->route()->is_master() || s->route()->is_monitor() || !s->marked_for_display()) {
-	 		continue;
-	 	}
+		if (!s) {
+			continue;
+		}
+
+		if (s->route()->is_master() || s->route()->is_monitor() || !s->marked_for_display()) {
+			continue;
+		}
 
 		if (x >= t->to) {
 			/* tab finishes before this track starts */
@@ -176,8 +197,8 @@ RouteList
 MixerGroupTabs::selected_routes () const
 {
 	RouteList rl;
-	BOOST_FOREACH (RouteUI* r, _mixer->selection().routes) {
-		boost::shared_ptr<Route> rp = r->route();
+	BOOST_FOREACH (AxisView* r, _mixer->selection().axes) {
+		boost::shared_ptr<Route> rp = boost::dynamic_pointer_cast<Route> (r->stripable());
 		if (rp) {
 			rl.push_back (rp);
 		}
@@ -185,8 +206,3 @@ MixerGroupTabs::selected_routes () const
 	return rl;
 }
 
-void
-MixerGroupTabs::sync_order_keys ()
-{
-	_mixer->sync_order_keys_from_treeview ();
-}

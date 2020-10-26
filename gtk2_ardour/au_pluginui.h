@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk2_ardour_auplugin_ui_h__
 #define __gtk2_ardour_auplugin_ui_h__
@@ -62,7 +63,7 @@ class AUPluginUI;
 @interface NotificationObject : NSObject {
 	@private
 		AUPluginUI* plugin_ui;
-	        NSWindow* cocoa_parent;
+		NSWindow* cocoa_parent;
 		NSWindow* top_level_parent;
 }
 @end
@@ -75,7 +76,7 @@ class AUPluginUI;
 
 class AUPluginUI : public PlugUIBase, public Gtk::VBox
 {
-  public:
+public:
 	AUPluginUI (boost::shared_ptr<ARDOUR::PluginInsert>);
 	~AUPluginUI ();
 
@@ -87,7 +88,7 @@ class AUPluginUI : public PlugUIBase, public Gtk::VBox
 	void activate ();
 	void deactivate ();
 
-        bool non_gtk_gui() const { return true; }
+	bool non_gtk_gui() const { return true; }
 
 	void lower_box_realized ();
 	bool lower_box_visibility_notify (GdkEventVisibility*);
@@ -110,7 +111,7 @@ class AUPluginUI : public PlugUIBase, public Gtk::VBox
 	void start_live_resize ();
 	void end_live_resize ();
 
-  private:
+private:
 	WindowRef wr;
 	boost::shared_ptr<ARDOUR::AUPlugin> au;
 	int prefheight;
@@ -133,7 +134,7 @@ class AUPluginUI : public PlugUIBase, public Gtk::VBox
 
 	NSWindow*           cocoa_window;
 	NSView*             au_view;
-        NSRect              last_au_frame;
+	NSRect              last_au_frame;
 	bool                in_live_resize;
 	uint32_t            plugin_requested_resize;
 
@@ -175,7 +176,7 @@ class AUPluginUI : public PlugUIBase, public Gtk::VBox
 	static bool timer_callback ();
 	static sigc::connection timer_connection;
 
-  public:
+public:
 	static void start_cf_timer ();
 	static void stop_cf_timer ();
 };

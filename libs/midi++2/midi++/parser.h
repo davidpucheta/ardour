@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 1998 Paul Barton-Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1998-2018 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef  __midi_parse_h__
 #define  __midi_parse_h__
@@ -35,13 +37,14 @@ class Parser;
 
 typedef PBD::Signal1<void,Parser&>                   ZeroByteSignal;
 typedef PBD::Signal2<void,Parser&,unsigned short>    BankSignal;
-typedef PBD::Signal2<void,Parser&,framecnt_t>        TimestampedSignal;
+typedef PBD::Signal2<void,Parser&,samplecnt_t>       TimestampedSignal;
 typedef PBD::Signal2<void,Parser&, byte>             OneByteSignal;
 typedef PBD::Signal2<void,Parser &, EventTwoBytes *> TwoByteSignal;
 typedef PBD::Signal2<void,Parser &, pitchbend_t>     PitchBendSignal;
 typedef PBD::Signal3<void,Parser &, uint16_t, int>   RPNSignal;
 typedef PBD::Signal3<void,Parser &, uint16_t, float> RPNValueSignal;
 typedef PBD::Signal3<void,Parser &, byte *, size_t>  Signal;
+typedef PBD::Signal4<void,Parser &, byte *, size_t, samplecnt_t> AnySignal;
 
 class LIBMIDIPP_API Parser {
  public:
@@ -53,8 +56,8 @@ class LIBMIDIPP_API Parser {
 	   therefore be set before every byte passed into ::scanner().
 	*/
 
-	framecnt_t get_timestamp() const { return _timestamp; }
-	void set_timestamp (const framecnt_t timestamp) { _timestamp = timestamp; }
+	samplecnt_t get_timestamp() const { return _timestamp; }
+	void set_timestamp (const samplecnt_t timestamp) { _timestamp = timestamp; }
 
 	/* signals that anyone can connect to */
 
@@ -86,10 +89,10 @@ class LIBMIDIPP_API Parser {
 	Signal                mtc;
 	Signal                raw_preparse;
 	Signal                raw_postparse;
-	Signal                any;
+	AnySignal             any;
 	Signal                sysex;
 	Signal                mmc;
-	Signal                position;
+	AnySignal             position;
 	Signal                song;
 
 	ZeroByteSignal        all_notes_off;
@@ -131,8 +134,8 @@ class LIBMIDIPP_API Parser {
 	const byte *mtc_current() const { return _mtc_time; }
 	bool        mtc_locked() const  { return _mtc_locked; }
 
-	PBD::Signal3<void, Parser &, int, framecnt_t>      mtc_qtr;
-	PBD::Signal3<void, const byte *, bool, framecnt_t> mtc_time;
+	PBD::Signal3<void, Parser &, int, samplecnt_t>      mtc_qtr;
+	PBD::Signal3<void, const byte *, bool, samplecnt_t> mtc_time;
 	PBD::Signal1<void, MTC_Status>                     mtc_status;
 	PBD::Signal0<bool>                                 mtc_skipped;
 
@@ -147,7 +150,7 @@ class LIBMIDIPP_API Parser {
 
 	std::ostream *trace_stream;
 	std::string trace_prefix;
-	void trace_event (Parser &p, byte *msg, size_t len);
+	void trace_event (Parser &p, byte *msg, size_t len, samplecnt_t);
 	PBD::ScopedConnection trace_connection;
 
 	size_t message_counter[256];
@@ -178,7 +181,7 @@ class LIBMIDIPP_API Parser {
 	bool       _mtc_locked;
 	byte last_qtr_frame;
 
-	framecnt_t _timestamp;
+	samplecnt_t _timestamp;
 
 	ParseState pre_variable_state;
 	MIDI::eventType pre_variable_msgtype;

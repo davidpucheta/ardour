@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <algorithm>
@@ -35,7 +37,7 @@
 
 #include "pbd/convert.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using std::string;
 using std::vector;
@@ -46,12 +48,12 @@ namespace PBD {
 string
 capitalize (const string& str)
 {
-        string ret = str;
-        if (!str.empty()) {
-                /* XXX not unicode safe */
-                ret[0] = toupper (str[0]);
-        }
-        return ret;
+	string ret = str;
+	if (!str.empty()) {
+		/* XXX not unicode safe */
+		ret[0] = toupper (str[0]);
+	}
+	return ret;
 }
 
 string
@@ -175,8 +177,8 @@ internationalize (const char *package_name, const char **array)
 static int32_t
 int_from_hex (char hic, char loc)
 {
-	int hi;		/* hi byte */
-	int lo;		/* low byte */
+	int hi; /* hi byte */
+	int lo; /* low byte */
 
 	hi = (int) hic;
 
@@ -222,37 +224,37 @@ url_decode (string const & url)
 
 #if 0
 string
-length2string (const int32_t frames, const float sample_rate)
+length2string (const int32_t samples, const float sample_rate)
 {
-    int32_t secs = (int32_t) (frames / sample_rate);
-    int32_t hrs =  secs / 3600;
-    secs -= (hrs * 3600);
-    int32_t mins = secs / 60;
-    secs -= (mins * 60);
+	int32_t secs = (int32_t) (samples / sample_rate);
+	int32_t hrs =  secs / 3600;
+	secs -= (hrs * 3600);
+	int32_t mins = secs / 60;
+	secs -= (mins * 60);
 
-    int32_t total_secs = (hrs * 3600) + (mins * 60) + secs;
-    int32_t frames_remaining = (int) floor (frames - (total_secs * sample_rate));
-    float fractional_secs = (float) frames_remaining / sample_rate;
+	int32_t total_secs = (hrs * 3600) + (mins * 60) + secs;
+	int32_t samples_remaining = (int) floor (samples - (total_secs * sample_rate));
+	float fractional_secs = (float) samples_remaining / sample_rate;
 
-    char duration_str[32];
-    sprintf (duration_str, "%02" PRIi32 ":%02" PRIi32 ":%05.2f", hrs, mins, (float) secs + fractional_secs);
+	char duration_str[32];
+	sprintf (duration_str, "%02" PRIi32 ":%02" PRIi32 ":%05.2f", hrs, mins, (float) secs + fractional_secs);
 
-    return duration_str;
+	return duration_str;
 }
 #endif
 
 string
-length2string (const int64_t frames, const double sample_rate)
+length2string (const int64_t samples, const double sample_rate)
 {
-	int64_t secs = (int64_t) floor (frames / sample_rate);
+	int64_t secs = (int64_t) floor (samples / sample_rate);
 	int64_t hrs =  secs / 3600LL;
 	secs -= (hrs * 3600LL);
 	int64_t mins = secs / 60LL;
 	secs -= (mins * 60LL);
 
 	int64_t total_secs = (hrs * 3600LL) + (mins * 60LL) + secs;
-	int64_t frames_remaining = (int64_t) floor (frames - (total_secs * sample_rate));
-	float fractional_secs = (float) frames_remaining / sample_rate;
+	int64_t samples_remaining = (int64_t) floor (samples - (total_secs * sample_rate));
+	float fractional_secs = (float) samples_remaining / sample_rate;
 
 	char duration_str[64];
 	sprintf (duration_str, "%02" PRIi64 ":%02" PRIi64 ":%05.2f", hrs, mins, (float) secs + fractional_secs);
@@ -276,26 +278,6 @@ strings_equal_ignore_case (const string& a, const string& b)
 		return std::equal (a.begin(), a.end(), b.begin(), chars_equal_ignore_case);
 	}
 	return false;
-}
-
-bool
-string_is_affirmative (const std::string& str)
-{
-	/* to be used only with XML data - not intended to handle user input */
-
-	if (str.empty ()) {
-		return false;
-	}
-
-	/* the use of g_ascii_strncasecmp() is solely to get around issues with
-	 * charsets posed by trying to use C++ for the same
-	 * comparison. switching a std::string to its lower- or upper-case
-	 * version has several issues, but handled by default
-	 * in the way we desire when doing it in C.
-	 */
-
-	return str == "1" || str == "y" || str == "Y" || (!g_ascii_strncasecmp(str.c_str(), "yes", str.length())) ||
-		(!g_ascii_strncasecmp(str.c_str(), "true", str.length()));
 }
 
 /** A wrapper for dgettext that takes a msgid of the form Context|Text.

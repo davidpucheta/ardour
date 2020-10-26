@@ -1,22 +1,24 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "ardour/audio_playlist_importer.h"
 
@@ -31,7 +33,7 @@
 #include "ardour/playlist_factory.h"
 #include "ardour/session_playlists.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -51,11 +53,11 @@ AudioPlaylistImportHandler::AudioPlaylistImportHandler (XMLTree const & source, 
 
 	XMLNodeList const & pl_children = playlists->children();
 	for (XMLNodeList::const_iterator it = pl_children.begin(); it != pl_children.end(); ++it) {
-		const XMLProperty* type = (*it)->property("type");
+		XMLProperty const * type = (*it)->property("type");
 		if ( !type || type->value() == "audio" ) {
 			try {
 				elements.push_back (ElementPtr ( new AudioPlaylistImporter (source, session, *this, **it)));
-			} catch (failed_constructor err) {
+			} catch (failed_constructor const&) {
 				set_dirty();
 			}
 		}
@@ -75,7 +77,7 @@ AudioPlaylistImportHandler::get_regions (XMLNode const & node, ElementList & lis
 }
 
 void
-AudioPlaylistImportHandler::update_region_id (XMLProperty* id_prop)
+AudioPlaylistImportHandler::update_region_id (XMLProperty * id_prop)
 {
 	PBD::ID old_id (id_prop->value());
 	PBD::ID new_id (region_handler.get_new_id (old_id));
@@ -170,7 +172,7 @@ bool
 AudioPlaylistImporter::_prepare_move ()
 {
 	// Rename
-	while (session.playlists->by_name (name) || !handler.check_name (name)) {
+	while (session.playlists()->by_name (name) || !handler.check_name (name)) {
 		std::pair<bool, string> rename_pair = *Rename (_("A playlist with this name already exists, please rename it."), name);
 		if (!rename_pair.first) {
 			return false;
@@ -178,7 +180,7 @@ AudioPlaylistImporter::_prepare_move ()
 		name = rename_pair.second;
 	}
 
-	XMLProperty* p = xml_playlist.property ("name");
+	XMLProperty * p = xml_playlist.property ("name");
 	if (!p) {
 		error << _("badly-formed XML in imported playlist") << endmsg;
 		return false;
@@ -219,8 +221,8 @@ AudioPlaylistImporter::_move ()
 	// Update region ids in crossfades
 	XMLNodeList crossfades = xml_playlist.children("Crossfade");
 	for (XMLNodeIterator it = crossfades.begin(); it != crossfades.end(); ++it) {
-		XMLProperty* in = (*it)->property("in");
-		XMLProperty* out = (*it)->property("out");
+		XMLProperty * in = (*it)->property("in");
+		XMLProperty * out = (*it)->property("out");
 		if (!in || !out) {
 			error << string_compose (X_("AudioPlaylistImporter (%1): did not find the \"in\" or \"out\" property from a crossfade"), name) << endmsg;
 			continue; // or fatal?
@@ -230,12 +232,12 @@ AudioPlaylistImporter::_move ()
 		handler.update_region_id (out);
 
 		// rate convert length and position
-		XMLProperty* length = (*it)->property("length");
+		XMLProperty * length = (*it)->property("length");
 		if (length) {
 			length->set_value (rate_convert_samples (length->value()));
 		}
 
-		XMLProperty* position = (*it)->property("position");
+		XMLProperty * position = (*it)->property("position");
 		if (position) {
 			position->set_value (rate_convert_samples (position->value()));
 		}

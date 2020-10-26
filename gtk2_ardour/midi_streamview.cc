@@ -1,20 +1,26 @@
 /*
-    Copyright (C) 2001-2007 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <utility>
@@ -33,6 +39,7 @@
 #include "ardour/region_factory.h"
 #include "ardour/session.h"
 #include "ardour/smf_source.h"
+#include "ardour/evoral_types_convert.h"
 
 #include "gui_thread.h"
 #include "midi_region_view.h"
@@ -47,7 +54,7 @@
 #include "ui_config.h"
 #include "utils.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -211,7 +218,7 @@ MidiStreamView::display_track (boost::shared_ptr<Track> tr)
 
 	draw_note_lines();
 
-	NoteRangeChanged();
+	NoteRangeChanged(); /* EMIT SIGNAL*/
 }
 
 void
@@ -240,6 +247,18 @@ MidiStreamView::update_data_note_range(uint8_t min, uint8_t max)
 		dirty = true;
 	}
 	return dirty;
+}
+
+void
+MidiStreamView::set_layer_display (LayerDisplay d)
+{
+
+//revert this change for now.  Although stacked view is weirdly implemented wrt the "scroomer", it is still necessary to manage layered midi regions.
+//	if (d != Overlaid) {
+//		return;
+//	}
+
+	StreamView::set_layer_display (d);
 }
 
 void
@@ -346,7 +365,7 @@ MidiStreamView::draw_note_lines()
 		double h = y - prev_y;
 		double mid = y + (h/2.0);
 
-		if (height > 1.0) { // XXX ? should that not be h >= 1 ?
+		if (mid >= 0 && h > 1.0) {
 			_note_lines->add (mid, h, color);
 		}
 
@@ -411,7 +430,7 @@ MidiStreamView::apply_note_range(uint8_t lowest, uint8_t highest, bool to_region
 		apply_note_range_to_regions ();
 	}
 
-	NoteRangeChanged();
+	NoteRangeChanged(); /* EMIT SIGNAL*/
 }
 
 void
@@ -436,11 +455,12 @@ MidiStreamView::setup_rec_box ()
 {
 	// cerr << _trackview.name() << " streamview SRB\n";
 
-	if (_trackview.session()->transport_rolling()) {
+	if (!_trackview.session()->transport_stopped_or_stopping() &&
+	    (_trackview.session()->transport_rolling() || _trackview.session()->get_record_enabled())) {
 
 		if (!rec_active &&
 		    _trackview.session()->record_status() == Session::Recording &&
-		    _trackview.track()->record_enabled()) {
+		    _trackview.track()->rec_enable_control()->get_value()) {
 
 			if (UIConfiguration::instance().get_show_waveforms_while_recording() && rec_regions.size() == rec_rects.size()) {
 
@@ -454,10 +474,10 @@ MidiStreamView::setup_rec_box ()
 
 				// handle multi
 
-				framepos_t start = 0;
+				samplepos_t start = 0;
 				if (rec_regions.size() > 0) {
 					start = rec_regions.back().first->start()
-						+ _trackview.track()->get_captured_frames(rec_regions.size()-1);
+					        + _trackview.track()->get_captured_samples (rec_regions.size() - 1);
 				}
 
 				if (!rec_regions.empty()) {
@@ -473,10 +493,10 @@ MidiStreamView::setup_rec_box ()
 				   is so that the RegionView gets created with a non-zero width, as apparently
 				   creating a RegionView with a zero width causes it never to be displayed
 				   (there is a warning in TimeAxisViewItem::init about this).  However, we
-				   must also set length_beats to something non-zero, otherwise the frame length
+				   must also set length_beats to something non-zero, otherwise the sample length
 				   of 1 causes length_beats to be set to some small quantity << 1.  Then
 				   when the position is set up below, this length_beats is used to recompute
-				   length using BeatsFramesConverter::to, which is slightly innacurate for small
+				   length using BeatsSamplesConverter::to, which is slightly innacurate for small
 				   beats values because it converts floating point beats to bars, beats and
 				   integer ticks.  The upshot of which being that length gets set back to 0,
 				   meaning no region view is ever seen, meaning no MIDI notes during record (#3820).
@@ -489,8 +509,8 @@ MidiStreamView::setup_rec_box ()
 				                                      (RegionFactory::create (sources, plist, false)));
 				if (region) {
 					region->set_start (_trackview.track()->current_capture_start()
-					                   - _trackview.track()->get_capture_start_frame (0));
-					region->set_position (_trackview.session()->transport_frame());
+					                   - _trackview.track()->get_capture_start_sample (0));
+					region->set_position (_trackview.session()->transport_sample());
 
 					RegionView* rv = add_region_view_internal (region, false, true);
 					MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rv);
@@ -508,11 +528,11 @@ MidiStreamView::setup_rec_box ()
 
 			/* start a new rec box */
 
-			create_rec_box(_trackview.midi_track()->current_capture_start(), 0);
+			create_rec_box (_trackview.midi_track()->current_capture_start(), 0);
 
 		} else if (rec_active &&
 		           (_trackview.session()->record_status() != Session::Recording ||
-		            !_trackview.track()->record_enabled())) {
+		            !_trackview.track()->rec_enable_control()->get_value())) {
 			screen_update_connection.disconnect();
 			rec_active = false;
 			rec_updating = false;
@@ -610,7 +630,7 @@ MidiStreamView::update_rec_box ()
 
 	/* Update the region being recorded to reflect where we currently are */
 	boost::shared_ptr<ARDOUR::Region> region = rec_regions.back().first;
-	region->set_length (_trackview.track()->current_capture_end () - _trackview.track()->current_capture_start());
+	region->set_length (_trackview.track()->current_capture_end () - _trackview.track()->current_capture_start(), 0);
 
 	MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (rec_regions.back().second);
 	mrv->extend_active_notes ();
@@ -662,7 +682,7 @@ struct RegionPositionSorter {
 };
 
 bool
-MidiStreamView::paste (ARDOUR::framepos_t pos, const Selection& selection, PasteContext& ctx)
+MidiStreamView::paste (ARDOUR::samplepos_t pos, const Selection& selection, PasteContext& ctx, const int32_t sub_num)
 {
 	/* Paste into the first region which starts on or before pos.  Only called when
 	   using an internal editing tool. */
@@ -690,5 +710,21 @@ MidiStreamView::paste (ARDOUR::framepos_t pos, const Selection& selection, Paste
 	}
 
 	MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (*prev);
-	return mrv ? mrv->paste(pos, selection, ctx) : false;
+	return mrv ? mrv->paste(pos, selection, ctx, sub_num) : false;
+}
+
+void
+MidiStreamView::get_regions_with_selected_data (RegionSelection& rs)
+{
+	for (list<RegionView*>::const_iterator i = region_views.begin(); i != region_views.end(); ++i) {
+		MidiRegionView* mrv = dynamic_cast<MidiRegionView*> (*i);
+
+		if (!mrv) {
+			continue;
+		}
+
+		if (!mrv->selection().empty()) {
+			rs.add (*i);
+		}
+	}
 }

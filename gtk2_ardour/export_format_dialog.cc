@@ -1,29 +1,37 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2010 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2013 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2013-2014 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2016-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+#include <gtkmm/stock.h>
 
 #include "ardour/session.h"
 #include "ardour/export_format_specification.h"
 
+#include "widgets/tooltips.h"
+
 #include "export_format_dialog.h"
 #include "gui_thread.h"
-#include "i18n.h"
+
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -58,7 +66,7 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
   silence_end_checkbox (_("Add silence at end:")),
   silence_end_clock ("silence_end", true, "", true, false, true),
 
-  command_label(_("Command to run post-export\n(%f=full path & filename, %d=directory, %b=basename):"), Gtk::ALIGN_LEFT),
+  command_label(_("Command to run post-export\n(%f=file path, %d=directory, %b=basename, see tooltip for more):"), Gtk::ALIGN_LEFT),
 
   format_table (3, 4),
   compatibility_label (_("Compatibility"), Gtk::ALIGN_LEFT),
@@ -66,6 +74,18 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
   format_label (_("File format"), Gtk::ALIGN_LEFT),
   sample_rate_label (_("Sample rate"), Gtk::ALIGN_LEFT),
   src_quality_label (_("Sample rate conversion quality:"), Gtk::ALIGN_RIGHT),
+
+  /* Watermarking */
+  watermark_heading (_("Preview / Watermark"), Gtk::ALIGN_LEFT),
+
+  demo_noise_mode_label (_("Mode:"), Gtk::ALIGN_LEFT),
+  demo_noise_level_label (_("Noise Level:"), Gtk::ALIGN_LEFT),
+  demo_noise_dbfs_unit (_("dBFS"), Gtk::ALIGN_LEFT),
+
+  demo_noise_dbfs_adjustment ( -20.0, -90.00, -6.00, 1, 5),
+  demo_noise_dbfs_spinbutton (demo_noise_dbfs_adjustment, 1, 0),
+
+  /* Changing encoding options from here on */
 
   encoding_options_label ("", Gtk::ALIGN_LEFT),
 
@@ -85,7 +105,8 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
 
 	get_vbox()->pack_start (silence_table, false, false, 6);
 	get_vbox()->pack_start (format_table, false, false, 6);
-	get_vbox()->pack_start (encoding_options_vbox, false, false, 0);
+	get_vbox()->pack_start (watermark_options_table, false, false, 6);
+	get_vbox()->pack_start (encoding_options_vbox, false, false, 6);
 	get_vbox()->pack_start (cue_toc_vbox, false, false, 0);
 	get_vbox()->pack_start (name_hbox, false, false, 6);
 
@@ -119,6 +140,9 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
 	normalize_hbox.pack_start (normalize_dbtp_spinbutton, false, false, 2);
 	normalize_hbox.pack_start (normalize_dbtp_label, false, false, 0);
 
+	ArdourWidgets::set_tooltip (normalize_loudness_rb,
+			_("Normalize to EBU-R128 LUFS target loudness without exceeding the given true-peak limit. EBU-R128 normalization is only available for mono and stereo targets, true-peak works for any channel layout."));
+
 	normalize_dbfs_spinbutton.configure (normalize_dbfs_adjustment, 0.1, 2);
 	normalize_lufs_spinbutton.configure (normalize_lufs_adjustment, 0.1, 2);
 	normalize_dbtp_spinbutton.configure (normalize_dbtp_adjustment, 0.1, 2);
@@ -143,9 +167,45 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
 	get_vbox()->pack_start (command_label, false, false);
 	get_vbox()->pack_start (command_entry, false, false);
 
+	ArdourWidgets::set_tooltip (command_entry,
+			_(
+				"%a Artist name\n"
+				"%b File's base-name\n"
+				"%c Copyright\n"
+				"%d File's directory\n"
+				"%f File's full absolute path\n"
+				"%l Lyricist\n"
+				"%n Session name\n"
+				"%o Conductor\n"
+				"%t Title\n"
+				"%z Organization\n"
+				"%A Album\n"
+				"%C Comment\n"
+				"%E Engineer\n"
+				"%G Genre\n"
+				"%L Total track count\n"
+				"%M Mixer\n"
+				"%N Timespan name\n"
+				"%O Composer\n"
+				"%P Producer\n"
+				"%S Disc subtitle\n"
+				"%T Track number\n"
+				"%Y Year\n"
+				"%Z Country"
+			 ));
+
 	/* Format table */
 
 	init_format_table();
+
+	/* Watermark */
+
+	watermark_options_table.attach (watermark_heading,          0, 3, 0, 1, Gtk::EXPAND|Gtk::FILL, Gtk::SHRINK);
+	watermark_options_table.attach (demo_noise_mode_label,      0, 1, 1, 2, Gtk::FILL, Gtk::SHRINK);
+	watermark_options_table.attach (demo_noise_combo,           1, 3, 1, 2, Gtk::EXPAND|Gtk::FILL, Gtk::SHRINK);
+	watermark_options_table.attach (demo_noise_level_label,     0, 1, 2, 3, Gtk::FILL, Gtk::SHRINK);
+	watermark_options_table.attach (demo_noise_dbfs_spinbutton, 1, 2, 2, 3, Gtk::FILL, Gtk::SHRINK);
+	watermark_options_table.attach (demo_noise_dbfs_unit,       2, 3, 2, 3, Gtk::EXPAND|Gtk::FILL, Gtk::SHRINK);
 
 	/* Encoding options */
 
@@ -160,6 +220,13 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
 	Pango::Attribute b = Pango::Attribute::create_attr_weight (Pango::WEIGHT_BOLD);
 	bold.insert (b);
 	encoding_options_label.set_attributes (bold);
+
+	/* Codec options */
+
+	codec_quality_list = Gtk::ListStore::create (codec_quality_cols);
+	codec_quality_combo.set_model (codec_quality_list);
+	codec_quality_combo.pack_start (codec_quality_cols.label);
+	//codec_quality_combo.set_active (0);
 
 	/* Buttons */
 
@@ -206,6 +273,11 @@ ExportFormatDialog::ExportFormatDialog (FormatPtr format, bool new_dialog) :
 	silence_end_clock.ValueChanged.connect (sigc::mem_fun (*this, &ExportFormatDialog::update_silence_end_selection));
 
 	src_quality_combo.signal_changed().connect (sigc::mem_fun (*this, &ExportFormatDialog::update_src_quality_selection));
+	codec_quality_combo.signal_changed().connect (sigc::mem_fun (*this, &ExportFormatDialog::update_codec_quality_selection));
+
+	watermark_heading.set_attributes (bold);
+	demo_noise_combo.signal_changed().connect (sigc::mem_fun (*this, &ExportFormatDialog::update_demo_noise_selection));
+	demo_noise_dbfs_spinbutton.signal_value_changed().connect (sigc::mem_fun (*this, &ExportFormatDialog::update_demo_noise_selection));
 
 	/* Format table signals */
 
@@ -265,7 +337,7 @@ ExportFormatDialog::set_session (ARDOUR::Session* s)
 	if (sample_rate_view.get_selection()->count_selected_rows() == 0) {
 		Gtk::ListStore::Children::iterator it;
 		for (it = sample_rate_list->children().begin(); it != sample_rate_list->children().end(); ++it) {
-			if ((framecnt_t) (*it)->get_value (sample_rate_cols.ptr)->rate == _session->nominal_frame_rate()) {
+			if ((samplecnt_t) (*it)->get_value (sample_rate_cols.ptr)->rate == _session->nominal_sample_rate()) {
 				sample_rate_view.get_selection()->select (it);
 				break;
 			}
@@ -297,9 +369,28 @@ ExportFormatDialog::load_state (FormatPtr spec)
 	with_toc.set_active (spec->with_toc());
 	with_mp4chaps.set_active (spec->with_mp4chaps());
 
+	demo_noise_combo.set_active (0);
+	for (Gtk::ListStore::Children::iterator it = demo_noise_list->children().begin(); it != demo_noise_list->children().end(); ++it) {
+		if (it->get_value (demo_noise_cols.interval) == spec->demo_noise_interval ()
+		    && it->get_value (demo_noise_cols.duration) == spec->demo_noise_duration ()) {
+			demo_noise_combo.set_active (it);
+			break;
+		}
+	}
+
+	demo_noise_dbfs_spinbutton.set_value (spec->demo_noise_level ());
+	update_demo_noise_sensitivity ();
+
 	for (Gtk::ListStore::Children::iterator it = src_quality_list->children().begin(); it != src_quality_list->children().end(); ++it) {
 		if (it->get_value (src_quality_cols.id) == spec->src_quality()) {
 			src_quality_combo.set_active (it);
+			break;
+		}
+	}
+
+	for (Gtk::ListStore::Children::iterator it = codec_quality_list->children().begin(); it != codec_quality_list->children().end(); ++it) {
+		if (it->get_value (codec_quality_cols.quality) == spec->codec_quality()) {
+			codec_quality_combo.set_active (it);
 			break;
 		}
 	}
@@ -527,6 +618,41 @@ ExportFormatDialog::init_format_table ()
 
 	src_quality_combo.pack_start (src_quality_cols.label);
 	src_quality_combo.set_active (0);
+
+	/* Demo Noise Optoins */
+
+	demo_noise_list = Gtk::ListStore::create (demo_noise_cols);
+	demo_noise_combo.set_model (demo_noise_list);
+
+	iter = demo_noise_list->append();
+	row = *iter;
+	row[demo_noise_cols.duration] = 0;
+	row[demo_noise_cols.interval] = 0;
+	row[demo_noise_cols.label] = _("No Watermark");
+
+	iter = demo_noise_list->append();
+	row = *iter;
+	row[demo_noise_cols.duration] = 500;
+	row[demo_noise_cols.interval] = 15000;
+	row[demo_noise_cols.label] = _("1/2 sec white noise every 15 sec");
+
+	iter = demo_noise_list->append();
+	row = *iter;
+	row[demo_noise_cols.duration] = 1000;
+	row[demo_noise_cols.interval] = 30000;
+	row[demo_noise_cols.label] = _("1 sec white noise every 30 sec");
+
+	iter = demo_noise_list->append();
+	row = *iter;
+	row[demo_noise_cols.duration] = 1000;
+	row[demo_noise_cols.interval] = 1200000;
+	row[demo_noise_cols.label] = _("1 sec white noise every 2 mins");
+
+	demo_noise_combo.pack_start (demo_noise_cols.label);
+	demo_noise_combo.set_active (0);
+
+	ArdourWidgets::set_tooltip (demo_noise_combo,
+			_("This option allows to add noise, to send complete mixes to the clients for preview but watermarked. White noise is injected after analysis, right before the sample-format conversion or encoding. The first noise burst happens at 1/3 of the interval. Note: there is currently no limiter."));
 }
 
 void
@@ -611,6 +737,8 @@ ExportFormatDialog::update_selection (Glib::RefPtr<Gtk::ListStore> & list, Gtk::
 		bool selected = selection->is_selected (it);
 		it->get_value (cols.ptr)->set_selected (selected);
 	}
+
+	set_codec_quality_selection ();
 }
 
 void
@@ -656,7 +784,7 @@ ExportFormatDialog::change_sample_rate_selection (bool select, WeakSampleRatePtr
 	if (select) {
 		ExportFormatManager::SampleRatePtr ptr = rate.lock();
 		if (ptr && _session) {
-			src_quality_combo.set_sensitive ((uint32_t) ptr->rate != _session->frame_rate());
+			src_quality_combo.set_sensitive ((uint32_t) ptr->rate != _session->sample_rate());
 		}
 	}
 }
@@ -842,7 +970,7 @@ void
 ExportFormatDialog::update_clock (AudioClock & clock, ARDOUR::AnyTime const & time)
 {
 	// TODO position
-	clock.set (_session->convert_to_frames (time), true);
+	clock.set (_session->convert_to_samples (time), true);
 
 	AudioClock::Mode mode(AudioClock::Timecode);
 
@@ -853,8 +981,8 @@ ExportFormatDialog::update_clock (AudioClock & clock, ARDOUR::AnyTime const & ti
 	  case AnyTime::BBT:
 		mode = AudioClock::BBT;
 		break;
-	  case AnyTime::Frames:
-		mode = AudioClock::Frames;
+	  case AnyTime::Samples:
+		mode = AudioClock::Samples;
 		break;
 	  case AnyTime::Seconds:
 		mode = AudioClock::MinSec;
@@ -871,24 +999,25 @@ ExportFormatDialog::update_time (AnyTime & time, AudioClock const & clock)
 		return;
 	}
 
-	framecnt_t frames = clock.current_duration();
+	samplecnt_t samples = clock.current_duration();
 
 	switch (clock.mode()) {
 	  case AudioClock::Timecode:
 		time.type = AnyTime::Timecode;
-		_session->timecode_time (frames, time.timecode);
+		_session->timecode_time (samples, time.timecode);
 		break;
 	  case AudioClock::BBT:
 		time.type = AnyTime::BBT;
-		_session->bbt_time (frames, time.bbt);
+		_session->bbt_time (samples, time.bbt);
 		break;
+	  case AudioClock::Seconds:
 	  case AudioClock::MinSec:
 		time.type = AnyTime::Seconds;
-		time.seconds = (double) frames / _session->frame_rate();
+		time.seconds = (double) samples / _session->sample_rate();
 		break;
-	  case AudioClock::Frames:
-		time.type = AnyTime::Frames;
-		time.frames = frames;
+	  case AudioClock::Samples:
+		time.type = AnyTime::Samples;
+		time.samples = samples;
 		break;
 	}
 }
@@ -899,6 +1028,48 @@ ExportFormatDialog::update_src_quality_selection ()
 	Gtk::TreeModel::const_iterator iter = src_quality_combo.get_active();
 	ExportFormatBase::SRCQuality quality = iter->get_value (src_quality_cols.id);
 	manager.select_src_quality (quality);
+}
+
+void
+ExportFormatDialog::update_demo_noise_sensitivity ()
+{
+	Gtk::TreeModel::const_iterator iter = demo_noise_combo.get_active();
+	if (!iter) {
+		demo_noise_dbfs_spinbutton.set_sensitive (false);
+		return;
+	}
+	int duration = iter->get_value (demo_noise_cols.duration);
+	int interval = iter->get_value (demo_noise_cols.interval);
+	demo_noise_dbfs_spinbutton.set_sensitive (interval != 0 && duration != 0);
+}
+
+void
+ExportFormatDialog::update_demo_noise_selection ()
+{
+	Gtk::TreeModel::const_iterator iter = demo_noise_combo.get_active();
+	if (!iter) {
+		demo_noise_dbfs_spinbutton.set_sensitive (false);
+		return;
+	}
+	int duration = iter->get_value (demo_noise_cols.duration);
+	int interval = iter->get_value (demo_noise_cols.interval);
+	int level = demo_noise_dbfs_spinbutton.get_value();
+	demo_noise_dbfs_spinbutton.set_sensitive (interval != 0 && duration != 0);
+
+	manager.select_demo_noise_duration (duration);
+	manager.select_demo_noise_interval (interval);
+	manager.select_demo_noise_level(level);
+}
+
+void
+ExportFormatDialog::update_codec_quality_selection ()
+{
+	Gtk::TreeModel::const_iterator iter = codec_quality_combo.get_active();
+	if (!iter) {
+		return;
+	}
+	int quality = iter->get_value (codec_quality_cols.quality);
+	manager.select_codec_quality (quality);
 }
 
 void
@@ -916,6 +1087,7 @@ ExportFormatDialog::change_encoding_options (ExportFormatPtr ptr)
 	boost::shared_ptr<ARDOUR::ExportFormatOggVorbis> ogg_ptr;
 	boost::shared_ptr<ARDOUR::ExportFormatFLAC> flac_ptr;
 	boost::shared_ptr<ARDOUR::ExportFormatBWF> bwf_ptr;
+	boost::shared_ptr<ARDOUR::ExportFormatFFMPEG> ffmpeg_ptr;
 
 	if ((linear_ptr = boost::dynamic_pointer_cast<ExportFormatLinear> (ptr))) {
 		show_linear_enconding_options (linear_ptr);
@@ -925,6 +1097,8 @@ ExportFormatDialog::change_encoding_options (ExportFormatPtr ptr)
 		show_flac_enconding_options (flac_ptr);
 	} else if ((bwf_ptr = boost::dynamic_pointer_cast<ExportFormatBWF> (ptr))) {
 		show_bwf_enconding_options (bwf_ptr);
+	} else if ((ffmpeg_ptr = boost::dynamic_pointer_cast<ExportFormatFFMPEG> (ptr))) {
+		show_ffmpeg_enconding_options (ffmpeg_ptr);
 	} else {
 		std::cout << "Unrecognized format!" << std::endl;
 	}
@@ -961,13 +1135,14 @@ ExportFormatDialog::show_linear_enconding_options (boost::shared_ptr<ARDOUR::Exp
 }
 
 void
-ExportFormatDialog::show_ogg_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatOggVorbis> /*ptr*/)
+ExportFormatDialog::show_ogg_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatOggVorbis> ptr)
 {
 	encoding_options_label.set_label (_("Ogg Vorbis options"));
 
-	encoding_options_table.resize (1, 1);
-	encoding_options_table.attach (tag_checkbox, 0, 1, 0, 1);
-
+	encoding_options_table.resize (2, 1);
+	encoding_options_table.attach (codec_quality_combo, 0, 1, 0, 1);
+	encoding_options_table.attach (tag_checkbox, 0, 1, 1, 2);
+	fill_codec_quality_lists (ptr);
 	show_all_children ();
 }
 
@@ -1001,6 +1176,17 @@ ExportFormatDialog::show_bwf_enconding_options (boost::shared_ptr<ARDOUR::Export
 
 	fill_sample_format_lists (boost::dynamic_pointer_cast<HasSampleFormat> (ptr));
 
+	show_all_children ();
+}
+
+void
+ExportFormatDialog::show_ffmpeg_enconding_options (boost::shared_ptr<ARDOUR::ExportFormatFFMPEG> ptr)
+{
+	encoding_options_label.set_label (_("FFMPEG/MP3 options"));
+	encoding_options_table.resize (1, 1);
+	encoding_options_table.attach (codec_quality_combo, 0, 1, 0, 1);
+	encoding_options_table.attach (tag_checkbox, 0, 1, 1, 2);
+	fill_codec_quality_lists (ptr);
 	show_all_children ();
 }
 
@@ -1043,6 +1229,33 @@ ExportFormatDialog::fill_sample_format_lists (boost::shared_ptr<ARDOUR::HasSampl
 
 		if ((*it)->selected()) {
 			dither_type_view.get_selection()->select (iter);
+		}
+	}
+}
+
+void
+ExportFormatDialog::fill_codec_quality_lists (boost::shared_ptr<ARDOUR::HasCodecQuality> ptr)
+{
+	HasCodecQuality::CodecQualityList const & codecs = ptr->get_codec_qualities();
+
+	codec_quality_list->clear();
+	for (HasCodecQuality::CodecQualityList::const_iterator it = codecs.begin(); it != codecs.end(); ++it) {
+
+	Gtk::TreeModel::iterator iter = codec_quality_list->append();
+	Gtk::TreeModel::Row row = *iter;
+		row[codec_quality_cols.quality] = (*it)->quality;
+		row[codec_quality_cols.label] = (*it)->name;
+	}
+	set_codec_quality_selection ();
+}
+
+void
+ExportFormatDialog::set_codec_quality_selection ()
+{
+	for (Gtk::ListStore::Children::iterator it = codec_quality_list->children().begin(); it != codec_quality_list->children().end(); ++it) {
+		if (it->get_value (codec_quality_cols.quality) == format->codec_quality()) {
+			codec_quality_combo.set_active (it);
+			break;
 		}
 	}
 }

@@ -1,33 +1,41 @@
 /*
-    Copyright (C) 2001-2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2006 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2005-2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2006-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2006-2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2006 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2008-2009 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2013-2017 John Emmas <john@creativepost.co.uk>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cstdlib>
-#include <signal.h>
 #include <cerrno>
 #include <vector>
+
+#include <signal.h>
+#include <locale.h>
 
 #include <sigc++/bind.h>
 #include <gtkmm/settings.h>
 
-#ifdef HAVE_FFTW35F
-#include <fftw3.h>
-#endif
+#include <curl/curl.h>
 
 #include "pbd/error.h"
 #include "pbd/file_utils.h"
@@ -35,6 +43,7 @@
 #include "pbd/failed_constructor.h"
 #include "pbd/pathexpand.h"
 #include "pbd/pthread_utils.h"
+#include "pbd/win_console.h"
 #ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
 #include "pbd/boost_debug.h"
 #endif
@@ -46,25 +55,35 @@
 #include "ardour/filesystem_paths.h"
 
 #include <gtkmm/main.h>
+#include <gtkmm/stock.h>
+
 #include <gtkmm2ext/application.h>
-#include <gtkmm2ext/popup.h>
 #include <gtkmm2ext/utils.h>
 
+#include "ardour_message.h"
 #include "ardour_ui.h"
 #include "ui_config.h"
 #include "opts.h"
 #include "enums.h"
 #include "bundle_env.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 #ifdef PLATFORM_WINDOWS
 #include <fcntl.h> // Needed for '_fmode'
 #include <shellapi.h> // console
 #endif
 
+#ifdef HAVE_DRMINGW
+#include <exchndl.h>
+#endif
+
 #ifdef WAF_BUILD
 #include "gtk2ardour-version.h"
+#endif
+
+#ifdef LXVST_SUPPORT
+#include <gdk/gdkx.h>
 #endif
 
 using namespace std;
@@ -73,7 +92,7 @@ using namespace ARDOUR_COMMAND_LINE;
 using namespace ARDOUR;
 using namespace PBD;
 
-TextReceiver text_receiver ("ardour");
+TextReceiver text_receiver (PROGRAM_NAME);
 
 extern int curvetest (string);
 
@@ -83,10 +102,10 @@ static string localedir (LOCALEDIR);
 void
 gui_jack_error ()
 {
-	MessageDialog win (string_compose (_("%1 could not connect to the audio backend."), PROGRAM_NAME),
-	                   false,
-	                   Gtk::MESSAGE_INFO,
-	                   Gtk::BUTTONS_NONE);
+	ArdourMessageDialog win (string_compose (_("%1 could not connect to the audio backend."), PROGRAM_NAME),
+	                         false,
+	                         Gtk::MESSAGE_INFO,
+	                         Gtk::BUTTONS_NONE);
 
 	win.add_button (Stock::QUIT, RESPONSE_CLOSE);
 	win.set_default_response (RESPONSE_CLOSE);
@@ -128,9 +147,9 @@ static void ardour_g_log (const gchar *log_domain, GLogLevelFlags log_level, con
 static gboolean
 tell_about_backend_death (void* /* ignored */)
 {
-	if (AudioEngine::instance()->processed_frames() == 0) {
+	if (AudioEngine::instance()->processed_samples() == 0) {
 		/* died during startup */
-		MessageDialog msg (string_compose (_("The audio backend (%1) has failed, or terminated"), AudioEngine::instance()->current_backend_name()), false);
+		ArdourMessageDialog msg (string_compose (_("The audio backend (%1) has failed, or terminated"), AudioEngine::instance()->current_backend_name()), false);
 		msg.set_position (Gtk::WIN_POS_CENTER);
 		msg.set_secondary_text (string_compose (_(
 "%2 exited unexpectedly, and without notifying %1.\n\
@@ -140,16 +159,16 @@ This could be due to misconfiguration or to an error inside %2.\n\
 Click OK to exit %1."), PROGRAM_NAME, AudioEngine::instance()->current_backend_name()));
 
 		msg.run ();
-		_exit (0);
+		_exit (EXIT_SUCCESS);
 
 	} else {
 
 		/* engine has already run, so this is a mid-session backend death */
 
-		MessageDialog msg (string_compose (_("The audio backend (%1) has failed, or terminated"), AudioEngine::instance()->current_backend_name()), false);
+		ArdourMessageDialog msg (string_compose (_("The audio backend (%1) has failed, or terminated"), AudioEngine::instance()->current_backend_name()), false);
 		msg.set_secondary_text (string_compose (_("%2 exited unexpectedly, and without notifying %1."),
 							 PROGRAM_NAME, AudioEngine::instance()->current_backend_name()));
-		msg.present ();
+		msg.run ();
 	}
 	return false; /* do not call again */
 }
@@ -172,85 +191,22 @@ sigpipe_handler (int /*signal*/)
 
 #if (!defined COMPILER_MSVC && defined PLATFORM_WINDOWS)
 
-static FILE* pStdOut = 0;
-static FILE* pStdErr = 0;
-static BOOL  bConsole;
-static HANDLE hStdOut;
-
-static bool
-IsAConsolePort (HANDLE handle)
-{
-	DWORD mode;
-	return (GetConsoleMode(handle, &mode) != 0);
-}
-
-static void
-console_madness_begin ()
-{
-	bConsole = AttachConsole(ATTACH_PARENT_PROCESS);
-	hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-
-	/* re-attach to the console so we can see 'printf()' output etc.
-	 * for MSVC see  gtk2_ardour/msvc/winmain.cc
-	 */
-
-	if ((bConsole) && (IsAConsolePort(hStdOut))) {
-		pStdOut = freopen( "CONOUT$", "w", stdout );
-		pStdErr = freopen( "CONOUT$", "w", stderr );
-	}
-}
-
-static void
-console_madness_end ()
-{
-	if (pStdOut) {
-		fclose (pStdOut);
-	}
-	if (pStdErr) {
-		fclose (pStdErr);
-	}
-
-	if (bConsole) {
-		// Detach and free the console from our application
-		INPUT_RECORD input_record;
-
-		input_record.EventType = KEY_EVENT;
-		input_record.Event.KeyEvent.bKeyDown = TRUE;
-		input_record.Event.KeyEvent.dwControlKeyState = 0;
-		input_record.Event.KeyEvent.uChar.UnicodeChar = VK_RETURN;
-		input_record.Event.KeyEvent.wRepeatCount      = 1;
-		input_record.Event.KeyEvent.wVirtualKeyCode   = VK_RETURN;
-		input_record.Event.KeyEvent.wVirtualScanCode  = MapVirtualKey( VK_RETURN, 0 );
-
-		DWORD written = 0;
-		WriteConsoleInput( GetStdHandle( STD_INPUT_HANDLE ), &input_record, 1, &written );
-
-		FreeConsole();
-	}
-}
-
 static void command_line_parse_error (int *argc, char** argv[]) {}
 
 #elif (defined(COMPILER_MSVC) && defined(NDEBUG) && !defined(RDC_BUILD))
-
-// these are not used here. for MSVC see  gtk2_ardour/msvc/winmain.cc
-static void console_madness_begin () {}
-static void console_madness_end () {}
 
 static void command_line_parse_error (int *argc, char** argv[]) {
 	// Since we don't ordinarily have access to stdout and stderr with
 	// an MSVC app, let the user know we encountered a parsing error.
 	Gtk::Main app(argc, argv); // Calls 'gtk_init()'
 
-	Gtk::MessageDialog dlgReportParseError (string_compose (_("\n   %1 could not understand your command line      "), PROGRAM_NAME),
+	ArdourMessageDialog dlgReportParseError (string_compose (_("\n   %1 could not understand your command line      "), PROGRAM_NAME),
 			false, MESSAGE_ERROR, BUTTONS_CLOSE, true);
 	dlgReportParseError.set_title (string_compose (_("An error was encountered while launching %1"), PROGRAM_NAME));
 	dlgReportParseError.run ();
 }
 
 #else
-static void console_madness_begin () {}
-static void console_madness_end () {}
 static void command_line_parse_error (int *argc, char** argv[]) {}
 #endif
 
@@ -279,7 +235,14 @@ int nomain (int argc, char *argv[])
 int main (int argc, char *argv[])
 #endif
 {
+	console_madness_begin();
+
 	ARDOUR::check_for_old_configuration_files();
+
+	/* global init is not thread safe.*/
+	if (curl_global_init (CURL_GLOBAL_DEFAULT)) {
+		cerr << "curl_global_init() failed. The web is gone. We're all doomed." << endl;
+	}
 
 	fixup_bundle_environment (argc, argv, localedir);
 
@@ -289,15 +252,18 @@ int main (int argc, char *argv[])
 		Glib::thread_init();
 	}
 
-#ifdef HAVE_FFTW35F
-	fftwf_make_planner_thread_safe ();
+#ifdef LXVST_SUPPORT
+	XInitThreads ();
 #endif
 
-#ifdef ENABLE_NLS
-	gtk_set_locale ();
+#if ENABLE_NLS
+	/* initialize C locale to user preference */
+	if (ARDOUR::translations_are_enabled ()) {
+		if (!setlocale (LC_ALL, "")) {
+			std::cerr << "localization call failed, " << PROGRAM_NAME << " will not be translated\n";
+		}
+	}
 #endif
-
-	console_madness_begin();
 
 #if (defined WINDOWS_VST_SUPPORT && !defined PLATFORM_WINDOWS)
 	/* this does some magic that is needed to make GTK and X11 client interact properly.
@@ -306,8 +272,11 @@ int main (int argc, char *argv[])
 	windows_vst_gui_init (&argc, &argv);
 #endif
 
-#ifdef ENABLE_NLS
+#if ENABLE_NLS
+
+#ifndef NDEBUG
 	cerr << "bind txt domain [" << PACKAGE << "] to " << localedir << endl;
+#endif
 
 	(void) bindtextdomain (PACKAGE, localedir.c_str());
 	/* our i18n translations are all in UTF-8, so make sure
@@ -321,10 +290,11 @@ int main (int argc, char *argv[])
 
 	// catch error message system signals ();
 
-	text_receiver.listen_to (error);
+	text_receiver.listen_to (debug);
 	text_receiver.listen_to (info);
-	text_receiver.listen_to (fatal);
 	text_receiver.listen_to (warning);
+	text_receiver.listen_to (error);
+	text_receiver.listen_to (fatal);
 
 #ifdef BOOST_SP_ENABLE_DEBUG_HOOKS
 	if (g_getenv ("BOOST_DEBUG")) {
@@ -334,7 +304,16 @@ int main (int argc, char *argv[])
 
 	if (parse_opts (argc, argv)) {
 		command_line_parse_error (&argc, &argv);
-		exit (1);
+		exit (EXIT_FAILURE);
+	}
+
+	{
+#ifndef NDEBUG
+		const char *adf;
+		if ((adf = g_getenv ("ARDOUR_DEBUG_FLAGS"))) {
+			PBD::parse_debug_options (adf);
+		}
+#endif /* NDEBUG */
 	}
 
 	cout << PROGRAM_NAME
@@ -348,27 +327,44 @@ int main (int argc, char *argv[])
 	     << endl;
 
 	if (just_version) {
-		exit (0);
+		exit (EXIT_SUCCESS);
 	}
 
 	if (no_splash) {
-		cerr << _("Copyright (C) 1999-2015 Paul Davis") << endl
+		cout << _("Copyright (C) 1999-2020 Paul Davis") << endl
 		     << _("Some portions Copyright (C) Steve Harris, Ari Johnson, Brett Viren, Joel Baker, Robin Gareus") << endl
 		     << endl
 		     << string_compose (_("%1 comes with ABSOLUTELY NO WARRANTY"), PROGRAM_NAME) << endl
-		     <<	_("not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.") << endl
+		     << _("not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.") << endl
 		     << _("This is free software, and you are welcome to redistribute it ") << endl
 		     << _("under certain conditions; see the source for copying conditions.")
 		     << endl;
 	}
 
-	if (!ARDOUR::init (ARDOUR_COMMAND_LINE::use_vst, ARDOUR_COMMAND_LINE::try_hw_optimization, localedir.c_str())) {
-		error << string_compose (_("could not initialize %1."), PROGRAM_NAME) << endmsg;
-		exit (1);
-	}
+#ifdef HAVE_DRMINGW
+	if (true) {
+		/* %localappdata%\Ardour<X>\CrashLog\ */
+		string crash_dir = Glib::build_filename (Glib::get_user_data_dir (), string_compose ("%1%2", PROGRAM_NAME, PROGRAM_VERSION), "CrashLog");
+		g_mkdir_with_parents (crash_dir.c_str(), 0700);
 
-	if (curvetest_file) {
-		return curvetest (curvetest_file);
+		Glib::DateTime tm (g_date_time_new_now_local ());
+		string crash_file = string_compose ("%1-%2-crash-%3.txt", PROGRAM_NAME, VERSIONSTRING, tm.format ("%s"));
+		string crash_path = Glib::build_filename (crash_dir, crash_file);
+
+		ExcHndlInit ();
+		ExcHndlSetLogFileNameA (crash_path.c_str());
+		cout << "Crash Log: " << crash_path << endl;
+	}
+#endif
+
+	if (!ARDOUR::init (ARDOUR_COMMAND_LINE::use_vst, ARDOUR_COMMAND_LINE::try_hw_optimization, localedir.c_str(), true)) {
+		error << string_compose (_("could not initialize %1."), PROGRAM_NAME) << endmsg;
+		Gtk::Main main (argc, argv);
+		Gtk::MessageDialog msg (string_compose (_("Could not initialize %1 (likely due to corrupt config files).\n"
+		                                          "Run %1 from a commandline for more information."), PROGRAM_NAME),
+		                        false, Gtk::MESSAGE_ERROR , Gtk::BUTTONS_OK, true);
+		msg.run ();
+		exit (EXIT_FAILURE);
 	}
 
 #ifndef PLATFORM_WINDOWS
@@ -377,16 +373,18 @@ int main (int argc, char *argv[])
 	}
 #endif
 
+	DEBUG_TRACE (DEBUG::Locale, string_compose ("main() locale '%1'\n", setlocale (LC_NUMERIC, NULL)));
+
 	if (UIConfiguration::instance().pre_gui_init ()) {
 		error << _("Could not complete pre-GUI initialization") << endmsg;
-		exit (1);
+		exit (EXIT_FAILURE);
 	}
 
 	try {
 		ui = new ARDOUR_UI (&argc, &argv, localedir.c_str());
 	} catch (failed_constructor& err) {
 		error << string_compose (_("could not create %1 GUI"), PROGRAM_NAME) << endmsg;
-		exit (1);
+		exit (EXIT_FAILURE);
 	}
 
 #ifndef NDEBUG
@@ -401,7 +399,21 @@ int main (int argc, char *argv[])
 	ui = 0;
 
 	ARDOUR::cleanup ();
+#ifndef NDEBUG
+	if (getenv ("ARDOUR_RUNNING_UNDER_VALGRIND")) {
+		Glib::usleep(100000);
+		sched_yield();
+	}
+#endif
+
 	pthread_cancel_all ();
+
+#ifndef NDEBUG
+	if (getenv ("ARDOUR_RUNNING_UNDER_VALGRIND")) {
+		Glib::usleep(100000);
+		sched_yield();
+	}
+#endif
 
 	console_madness_end ();
 

@@ -1,21 +1,25 @@
 /*
-    Copyright (C) 2001 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2008-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __gtk_ardour_marker_h__
 #define __gtk_ardour_marker_h__
@@ -44,7 +48,7 @@ class PublicEditor;
  */
 class ArdourMarker : public sigc::trackable
 {
-  public:
+public:
 	enum Type {
 		Mark,
 		Tempo,
@@ -61,7 +65,7 @@ class ArdourMarker : public sigc::trackable
 
 
 	ArdourMarker (PublicEditor& editor, ArdourCanvas::Container &, guint32 rgba, const std::string& text, Type,
-		framepos_t frame = 0, bool handle_events = true);
+	              samplepos_t sample = 0, bool handle_events = true);
 
 	virtual ~ArdourMarker ();
 
@@ -75,12 +79,13 @@ class ArdourMarker : public sigc::trackable
 	void set_show_line (bool);
 	void canvas_height_set (double);
 
-	void set_position (framepos_t);
+	void set_position (samplepos_t);
 	void set_name (const std::string&);
+	void set_points_color (uint32_t rgba);
 	void set_color_rgba (uint32_t rgba);
 	void setup_line ();
 
-	framepos_t position() const { return frame_position; }
+	samplepos_t position() const { return sample_position; }
 
 	ArdourCanvas::Container * get_parent() { return _parent; }
 	void reparent (ArdourCanvas::Container & parent);
@@ -99,7 +104,7 @@ class ArdourMarker : public sigc::trackable
 
 	bool label_on_left () const;
 
-  protected:
+protected:
 	PublicEditor& editor;
 
 	Pango::FontDescription name_font;
@@ -107,14 +112,14 @@ class ArdourMarker : public sigc::trackable
 	ArdourCanvas::Container* _parent;
 	ArdourCanvas::Container *group;
 	ArdourCanvas::Polygon *mark;
-        ArdourCanvas::Text *_name_item;
+	ArdourCanvas::Text *_name_item;
 	ArdourCanvas::Points *points;
 	ArdourCanvas::Line* _track_canvas_line;
 	ArdourCanvas::Rectangle* _name_background;
 
 	std::string  _name;
 	double        unit_position;
-	framepos_t    frame_position;
+	samplepos_t    sample_position;
 	double       _shift;
 	Type         _type;
 	int           name_height;
@@ -123,6 +128,7 @@ class ArdourMarker : public sigc::trackable
 	bool         _line_shown;
 	double       _canvas_height;
 	uint32_t     _color;
+	uint32_t     _points_color;
 	double       _left_label_limit; ///< the number of pixels available to the left of this marker for a label
 	double       _right_label_limit; ///< the number of pixels available to the right of this marker for a label
 	double       _label_offset;
@@ -140,11 +146,12 @@ private:
 class TempoMarker : public ArdourMarker
 {
   public:
-        TempoMarker (PublicEditor& editor, ArdourCanvas::Container &, guint32 rgba, const std::string& text, ARDOUR::TempoSection&);
+	TempoMarker (PublicEditor& editor, ArdourCanvas::Container &, guint32 rgba, const std::string& text, ARDOUR::TempoSection&);
 	~TempoMarker ();
 
 	ARDOUR::TempoSection& tempo() const { return _tempo; }
 
+	void update_height_mark (const double ratio);
   private:
 	ARDOUR::TempoSection& _tempo;
 };
@@ -152,7 +159,7 @@ class TempoMarker : public ArdourMarker
 class MeterMarker : public ArdourMarker
 {
   public:
-        MeterMarker (PublicEditor& editor, ArdourCanvas::Container &, guint32 rgba, const std::string& text, ARDOUR::MeterSection&);
+	MeterMarker (PublicEditor& editor, ArdourCanvas::Container &, guint32 rgba, const std::string& text, ARDOUR::MeterSection&);
 	~MeterMarker ();
 
 	ARDOUR::MeterSection& meter() const { return _meter; }

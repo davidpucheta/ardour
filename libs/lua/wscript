@@ -6,7 +6,7 @@ import sys
 
 # Variables for 'waf dist'
 APPNAME = 'liblua'
-VERSION = "3.5.1"
+VERSION = "5.3.5"
 I18N_PACKAGE = 'liblua'
 
 # Mandatory variables
@@ -21,13 +21,13 @@ def configure(conf):
     autowaf.configure(conf)
 
 def build(bld):
-    obj=bld.stlib (source = ['lua.cc', 'luastate.cc'],
-               cflags = [ '-fPIC' ],
-               cxxflags = [ '-fPIC' ],
-               includes = ['.'],
-               export_includes = ['.'],
-               target = 'liblua',
-               uselib = [ 'SIGCPP', 'DL' ]
+    obj=bld.stlib (source   = ['lua.cc', 'luastate.cc'],
+                   cflags   = [ bld.env['compiler_flags_dict']['pic'] ],
+                   cxxflags = [ bld.env['compiler_flags_dict']['pic'] ],
+                   includes = ['.'],
+                   export_includes = ['.'],
+                   target = 'liblua',
+                   uselib = [ 'SIGCPP', 'DL' ]
                )
     autowaf.ensure_visible_symbols (obj, True)
 

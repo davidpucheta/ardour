@@ -18,33 +18,23 @@
 
 #include "Filter.h"
 
-struct FiltFiltConfig{
-    unsigned int ord;
-    double* ACoeffs;
-    double* BCoeffs;
-};
-
-class FiltFilt
+/**
+ * Zero-phase digital filter, implemented by processing the data
+ * through a filter specified by the given filter parameters (see
+ * Filter) and then processing it again in reverse.
+ */
+class FiltFilt  
 {
 public:
-    FiltFilt( FiltFiltConfig Config );
+    FiltFilt(Filter::Parameters);
     virtual ~FiltFilt();
 
     void reset();
     void process( double* src, double* dst, unsigned int length );
 
 private:
-    void initialise( FiltFiltConfig Config );
-    void deInitialise();
-
-    unsigned int m_ord;
-
-    Filter* m_filter;
-
-    double* m_filtScratchIn;
-    double* m_filtScratchOut;
-
-    FilterConfig m_filterConfig;
+    Filter m_filter;
+    int m_ord;
 };
 
 #endif

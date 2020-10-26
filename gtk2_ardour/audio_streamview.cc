@@ -1,20 +1,25 @@
 /*
-    Copyright (C) 2001, 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2007-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <cassert>
@@ -29,6 +34,7 @@
 #include "ardour/audioregion.h"
 #include "ardour/audiofilesource.h"
 #include "ardour/audio_track.h"
+#include "ardour/record_enable_control.h"
 #include "ardour/region_factory.h"
 #include "ardour/profile.h"
 #include "ardour/rc_configuration.h"
@@ -38,7 +44,6 @@
 
 #include "audio_streamview.h"
 #include "audio_region_view.h"
-#include "tape_region_view.h"
 #include "audio_time_axis.h"
 #include "region_selection.h"
 #include "region_gain_line.h"
@@ -48,7 +53,7 @@
 #include "gui_thread.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -108,10 +113,7 @@ AudioStreamView::create_region_view (boost::shared_ptr<Region> r, bool wait_for_
 					_samples_per_pixel, region_color);
 		}
 		break;
-	case Destructive:
-		region_view = new TapeAudioRegionView (_canvas_group, _trackview, region,
-						       _samples_per_pixel, region_color);
-		break;
+
 	default:
 		fatal << string_compose (_("programming error: %1"), "illegal track mode in ::create_region_view()") << endmsg;
 		abort(); /*NOTREACHED*/
@@ -176,17 +178,32 @@ AudioStreamView::redisplay_track ()
 }
 
 void
+AudioStreamView::reload_waves ()
+{
+	list<RegionView *>::iterator i;
+	for (i = region_views.begin(); i != region_views.end(); ++i) {
+		AudioRegionView* arv = dynamic_cast<AudioRegionView*> (*i);
+		if (!arv) {
+			continue;
+		}
+		arv->delete_waves();
+		arv->create_waves();
+	}
+}
+
+void
 AudioStreamView::setup_rec_box ()
 {
 	//cerr << _trackview.name() << " streamview SRB region_views.size() = " << region_views.size() << endl;
 
-	if (_trackview.session()->transport_rolling()) {
+	if (!_trackview.session()->transport_stopped_or_stopping() &&
+	    (_trackview.session()->transport_rolling() || _trackview.session()->get_record_enabled())) {
 
 		// cerr << "\trolling\n";
 
 		if (!rec_active &&
 		    _trackview.session()->record_status() == Session::Recording &&
-		    _trackview.track()->record_enabled()) {
+		    _trackview.track()->rec_enable_control()->get_value()) {
 			if (_trackview.audio_track()->mode() == Normal && UIConfiguration::instance().get_show_waveforms_while_recording() && rec_regions.size() == rec_rects.size()) {
 
 				/* add a new region, but don't bother if they set show-waveforms-while-recording mid-record */
@@ -209,10 +226,10 @@ AudioStreamView::setup_rec_box ()
 
 				// handle multi
 
-				framepos_t start = 0;
+				samplepos_t start = 0;
 				if (rec_regions.size() > 0) {
 					start = rec_regions.back().first->start()
-							+ _trackview.track()->get_captured_frames(rec_regions.size()-1);
+							+ _trackview.track()->get_captured_samples(rec_regions.size()-1);
 				}
 
 				PropertyList plist;
@@ -226,21 +243,20 @@ AudioStreamView::setup_rec_box ()
 					boost::dynamic_pointer_cast<AudioRegion>(RegionFactory::create (sources, plist, false)));
 
 				assert(region);
-				region->set_position (_trackview.session()->transport_frame());
+				region->set_position (_trackview.session()->transport_sample());
 				rec_regions.push_back (make_pair(region, (RegionView*) 0));
 			}
 
 			/* start a new rec box */
 
 			boost::shared_ptr<AudioTrack> at = _trackview.audio_track();
-			framepos_t const frame_pos = at->current_capture_start ();
-			double     const width     = ((at->mode() == Destructive) ? 2 : 0);
+			samplepos_t const sample_pos = at->current_capture_start ();
 
-			create_rec_box(frame_pos, width);
+			create_rec_box(sample_pos, 0);
 
 		} else if (rec_active &&
-			   (_trackview.session()->record_status() != Session::Recording ||
-			    !_trackview.track()->record_enabled())) {
+		           (_trackview.session()->record_status() != Session::Recording ||
+		            !_trackview.track()->rec_enable_control()->get_value())) {
 			screen_update_connection.disconnect();
 			rec_active = false;
 			rec_updating = false;
@@ -288,7 +304,7 @@ AudioStreamView::setup_rec_box ()
 }
 
 void
-AudioStreamView::rec_peak_range_ready (framepos_t start, framecnt_t cnt, boost::weak_ptr<Source> weak_src)
+AudioStreamView::rec_peak_range_ready (samplepos_t start, samplecnt_t cnt, boost::weak_ptr<Source> weak_src)
 {
 	ENSURE_GUI_THREAD (*this, &AudioStreamView::rec_peak_range_ready, start, cnt, weak_src)
 
@@ -300,8 +316,8 @@ AudioStreamView::rec_peak_range_ready (framepos_t start, framecnt_t cnt, boost::
 
 	// this is called from the peak building thread
 
-	if (rec_data_ready_map.size() == 0 || start + cnt > last_rec_data_frame) {
-		last_rec_data_frame = start + cnt;
+	if (rec_data_ready_map.size() == 0 || start + cnt > last_rec_data_sample) {
+		last_rec_data_sample = start + cnt;
 	}
 
 	rec_data_ready_map[src] = true;
@@ -313,7 +329,7 @@ AudioStreamView::rec_peak_range_ready (framepos_t start, framecnt_t cnt, boost::
 }
 
 void
-AudioStreamView::update_rec_regions (framepos_t start, framecnt_t cnt)
+AudioStreamView::update_rec_regions (samplepos_t start, samplecnt_t cnt)
 {
 	if (!UIConfiguration::instance().get_show_waveforms_while_recording ()) {
 		return;
@@ -341,19 +357,20 @@ AudioStreamView::update_rec_regions (framepos_t start, framecnt_t cnt)
 			continue;
 		}
 
-		framecnt_t origlen = region->length();
+		samplecnt_t origlen = region->length();
 
 		if (region == rec_regions.back().first && rec_active) {
 
-			if (last_rec_data_frame > region->start()) {
+			if (last_rec_data_sample > region->start()) {
 
-				framecnt_t nlen = last_rec_data_frame - region->start();
+				samplecnt_t nlen = last_rec_data_sample - region->start();
 
 				if (nlen != region->length()) {
 
 					region->suspend_property_changes ();
-					region->set_position (_trackview.track()->get_capture_start_frame(n));
-					region->set_length (nlen);
+					/* set non-musical position / length */
+					region->set_position (_trackview.track()->get_capture_start_sample(n));
+					region->set_length (nlen, 0);
 					region->resume_property_changes ();
 
 					if (origlen == 1) {
@@ -372,15 +389,15 @@ AudioStreamView::update_rec_regions (framepos_t start, framecnt_t cnt)
 
 			} else {
 
-				framecnt_t nlen = _trackview.track()->get_captured_frames(n);
+				samplecnt_t nlen = _trackview.track()->get_captured_samples(n);
 
 				if (nlen != region->length()) {
 
 					if (region->source_length(0) >= region->start() + nlen) {
 
 						region->suspend_property_changes ();
-						region->set_position (_trackview.track()->get_capture_start_frame(n));
-						region->set_length (nlen);
+						region->set_position (_trackview.track()->get_capture_start_sample(n));
+						region->set_length (nlen, 0);
 						region->resume_property_changes ();
 
 						if (origlen == 1) {
@@ -436,7 +453,7 @@ AudioStreamView::hide_xfades_with (boost::shared_ptr<AudioRegion> ar)
 	for (list<RegionView*>::iterator i = region_views.begin(); i != region_views.end(); ++i) {
 		AudioRegionView* const arv = dynamic_cast<AudioRegionView*>(*i);
 		if (arv) {
-			switch (arv->region()->coverage (ar->position(), ar->last_frame())) {
+			switch (arv->region()->coverage (ar->position(), ar->last_sample())) {
 			case Evoral::OverlapNone:
 				break;
 			default:

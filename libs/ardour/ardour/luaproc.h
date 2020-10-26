@@ -1,21 +1,27 @@
 /*
-    Copyright (C) 2016 Robin Gareus <robin@gareus.org>
-    Copyright (C) 2006 Paul Davis
+ * Copyright (C) 2016-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
+/* print runtime and garbage-collection timing statistics */
+//#define WITH_LUAPROC_STATS
 
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+/* memory allocation system, default: ReallocPool */
+//#define USE_TLSF // use TLSF instead of ReallocPool
+//#define USE_MALLOC // or plain OS provided realloc (no mlock) -- if USE_TLSF isn't defined
 
 #ifndef __ardour_luaproc_h__
 #define __ardour_luaproc_h__
@@ -24,13 +30,20 @@
 #include <vector>
 #include <string>
 
-#include "pbd/reallocpool.h"
+#define USE_TLSF
+#ifdef USE_TLSF
+#  include "pbd/tlsf.h"
+#else
+#  include "pbd/reallocpool.h"
+#endif
+
 #include "pbd/stateful.h"
 
 #include "ardour/types.h"
 #include "ardour/plugin.h"
 #include "ardour/luascripting.h"
 #include "ardour/dsp_filter.h"
+#include "ardour/lua_api.h"
 
 #include "lua/luastate.h"
 
@@ -55,7 +68,7 @@ public:
 
 	uint32_t    parameter_count() const;
 	float       default_value (uint32_t port);
-	void        set_parameter (uint32_t port, float val);
+	void        set_parameter (uint32_t port, float val, sampleoffset_t);
 	float       get_parameter (uint32_t port) const;
 	int         get_parameter_descriptor (uint32_t which, ParameterDescriptor&) const;
 	uint32_t    nth_parameter (uint32_t port, bool& ok) const;
@@ -65,6 +78,8 @@ public:
 
 	PluginOutputConfiguration possible_output () const { return _output_configs; }
 
+	void drop_references ();
+
 	std::set<Evoral::Parameter> automatable() const;
 
 	void activate () { }
@@ -72,20 +87,24 @@ public:
 	void cleanup () { }
 
 	int set_block_size (pframes_t /*nframes*/) { return 0; }
-	framecnt_t  signal_latency() const { return 0; }
+	bool connect_all_audio_outputs () const { return _connect_all_audio_outputs; }
 
 	int connect_and_run (BufferSet& bufs,
-			ChanMapping in, ChanMapping out,
-			pframes_t nframes, framecnt_t offset);
+			samplepos_t start, samplepos_t end, double speed,
+			ChanMapping const& in, ChanMapping const& out,
+			pframes_t nframes, samplecnt_t offset);
 
 	std::string describe_parameter (Evoral::Parameter);
-	void        print_parameter (uint32_t, char*, uint32_t len) const;
 	boost::shared_ptr<ScalePoints> get_scale_points(uint32_t port_index) const;
 
 	bool parameter_is_audio (uint32_t) const { return false; }
 	bool parameter_is_control (uint32_t) const { return true; }
 	bool parameter_is_input (uint32_t) const;
 	bool parameter_is_output (uint32_t) const;
+
+	uint32_t designated_bypass_port () {
+		return _designated_bypass_port;
+	}
 
 	std::string state_node_name() const { return "luaproc"; }
 	void add_state (XMLNode *) const;
@@ -98,8 +117,8 @@ public:
 
 	bool has_editor() const { return false; }
 
-	bool can_support_io_configuration (const ChanCount& in, ChanCount& out, ChanCount* imprecise);
-	bool configure_io (ChanCount in, ChanCount out);
+	bool match_variable_io (ChanCount& in, ChanCount& aux_in, ChanCount& out);
+	bool reconfigure_io (ChanCount in, ChanCount aux_in, ChanCount out);
 
 	ChanCount output_streams() const { return _configured_out; }
 	ChanCount input_streams() const { return _configured_in; }
@@ -107,25 +126,44 @@ public:
 	bool has_inline_display () { return _lua_has_inline_display; }
 	void setup_lua_inline_gui (LuaState *lua_gui);
 
+	DSP::DspShm* instance_shm () { return &lshm; }
+	LuaTableRef* instance_ref () { return &lref; }
+
 private:
+	samplecnt_t plugin_latency() const { return _signal_latency; }
 	void find_presets ();
 
 	/* END Plugin interface */
+
+public:
+	void set_origin (std::string& path) { _origin = path; }
+
 protected:
 	const std::string& script() const { return _script; }
+	const std::string& origin() const { return _origin; }
 
 private:
+#ifdef USE_TLSF
+	PBD::TLSF _mempool;
+#else
 	PBD::ReallocPool _mempool;
+#endif
 	LuaState lua;
 	luabridge::LuaRef * _lua_dsp;
+	luabridge::LuaRef * _lua_latency;
 	std::string _script;
+	std::string _origin;
 	std::string _docs;
 	bool _lua_does_channelmapping;
 	bool _lua_has_inline_display;
+	bool _connect_all_audio_outputs;
 
 	void queue_draw () { QueueDraw(); /* EMIT SIGNAL */ }
-	DSP::DspShm* instance_shm () { return &lshm; }
 	DSP::DspShm lshm;
+
+	LuaTableRef lref;
+
+	boost::weak_ptr<Route> route () const;
 
 	void init ();
 	bool load_script ();
@@ -140,16 +178,26 @@ private:
 	std::vector<std::pair<bool, int> > _ctrl_params;
 	std::map<int, ARDOUR::ParameterDescriptor> _param_desc;
 	std::map<int, std::string> _param_doc;
+	uint32_t _designated_bypass_port;
+
+	samplecnt_t _signal_latency;
 
 	float* _control_data;
 	float* _shadow_data;
 
 	ChanCount _configured_in;
 	ChanCount _configured_out;
+
+	bool      _configured;
+
+	ChanCount _selected_in;
+	ChanCount _selected_out;
+
 	PluginOutputConfiguration _output_configs;
 
 	bool _has_midi_input;
 	bool _has_midi_output;
+
 
 #ifdef WITH_LUAPROC_STATS
 	int64_t _stats_avg[2];
@@ -167,13 +215,13 @@ class LIBARDOUR_API LuaPluginInfo : public PluginInfo
 	PluginPtr load (Session& session);
 	std::vector<Plugin::PresetRecord> get_presets (bool user_only) const;
 
-	bool in_category (const std::string &c) const {
-		return (category == c);
-	}
-	bool is_instrument () const { return _is_instrument; }
 	bool reconfigurable_io() const { return true; }
+	uint32_t max_configurable_ouputs () const {
+		return _max_outputs;
+	}
 
-	bool _is_instrument;
+	private:
+	uint32_t _max_outputs;
 };
 
 typedef boost::shared_ptr<LuaPluginInfo> LuaPluginInfoPtr;

@@ -1,3 +1,22 @@
+/*
+ * Copyright (C) 2006-2007 John Anderson
+ * Copyright (C) 2012-2015 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
+
 #ifndef mackie_surface_h
 #define mackie_surface_h
 
@@ -22,7 +41,7 @@ namespace MIDI {
 }
 
 namespace ARDOUR {
-	class Route;
+	class Stripable;
 	class Port;
 }
 
@@ -79,8 +98,8 @@ public:
 	uint32_t n_strips (bool with_locked_strips = true) const;
 	Strip* nth_strip (uint32_t n) const;
 
-	bool route_is_locked_to_strip (boost::shared_ptr<ARDOUR::Route>) const;
-	bool route_is_mapped (boost::shared_ptr<ARDOUR::Route>) const;
+	bool stripable_is_locked_to_strip (boost::shared_ptr<ARDOUR::Stripable>) const;
+	bool stripable_is_mapped (boost::shared_ptr<ARDOUR::Stripable>) const;
 
 	/// This collection owns the groups
 	typedef std::map<std::string,Group*> Groups;
@@ -88,7 +107,9 @@ public:
 
 	SurfacePort& port() const { return *_port; }
 
-	void map_routes (const std::vector<boost::shared_ptr<ARDOUR::Route> >& routes);
+	void map_stripables (const std::vector<boost::shared_ptr<ARDOUR::Stripable> >&);
+
+	void update_strip_selection ();
 
 	const MidiByteArray& sysex_hdr() const;
 
@@ -155,7 +176,6 @@ public:
 	void update_view_mode_display (bool with_helpful_text);
 	void update_flip_mode_display ();
 
-	void gui_selection_changed (const ARDOUR::StrongRouteNotificationList&);
 	void subview_mode_changed ();
 
 	MackieControlProtocol& mcp() const { return _mcp; }
@@ -174,6 +194,8 @@ public:
 
 	XMLNode& get_state ();
 	int set_state (const XMLNode&, int version);
+
+	bool get_qcon_flag() { return is_qcon; }
 
   private:
 	MackieControlProtocol& _mcp;
@@ -204,6 +226,9 @@ public:
 	};
 
 	int connection_state;
+
+	// QCon Flag
+	bool is_qcon;
 
 	MidiByteArray display_line (std::string const& msg, int line_num);
 

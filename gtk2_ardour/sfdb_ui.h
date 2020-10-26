@@ -1,21 +1,26 @@
 /*
-    Copyright (C) 2005-2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2007 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2013 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2015-2017 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_sfdb_ui_h__
 #define __ardour_sfdb_ui_h__
@@ -61,7 +66,7 @@ class Mootcher;
 
 class SoundFileBox : public Gtk::VBox, public ARDOUR::SessionHandlePtr, public PBD::ScopedConnectionList
 {
-  public:
+public:
 	SoundFileBox (bool persistent);
 	virtual ~SoundFileBox () {};
 
@@ -74,7 +79,7 @@ class SoundFileBox : public Gtk::VBox, public ARDOUR::SessionHandlePtr, public P
 	void set_src_quality(ARDOUR::SrcQuality q) { _src_quality = q; }
 	void set_import_position(Editing::ImportPosition p) { _import_position = p; }
 
-  protected:
+protected:
 	std::string path;
 
 	ARDOUR::SoundFileInfo sf_info;
@@ -86,9 +91,11 @@ class SoundFileBox : public Gtk::VBox, public ARDOUR::SessionHandlePtr, public P
 	Gtk::Label channels;
 	Gtk::Label samplerate;
 	Gtk::Label timecode;
+	Gtk::Label tempomap;
 
 	Gtk::Label channels_value;
 	Gtk::Label samplerate_value;
+	Gtk::Label tempomap_value;
 
 	Gtk::Label format_text;
 	AudioClock length_clock;
@@ -111,7 +118,10 @@ class SoundFileBox : public Gtk::VBox, public ARDOUR::SessionHandlePtr, public P
 
 	PBD::ScopedConnectionList auditioner_connections;
 	void audition_active(bool);
-	void audition_progress(ARDOUR::framecnt_t, ARDOUR::framecnt_t);
+	void audition_progress(ARDOUR::samplecnt_t, ARDOUR::samplecnt_t);
+
+	void update_autoplay ();
+	void autoplay_toggled ();
 
 	bool tags_entry_left (GdkEventFocus* event);
 	void tags_changed ();
@@ -126,10 +136,10 @@ class SoundFileBox : public Gtk::VBox, public ARDOUR::SessionHandlePtr, public P
 
 class SoundFileBrowser : public ArdourWindow
 {
-  private:
+private:
 	class FoundTagColumns : public Gtk::TreeModel::ColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<std::string> pathname;
 
 		FoundTagColumns() { add(pathname); }
@@ -137,7 +147,7 @@ class SoundFileBrowser : public ArdourWindow
 
 	class FreesoundColumns : public Gtk::TreeModel::ColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<std::string> id;
 		Gtk::TreeModelColumn<std::string> uri;
 		Gtk::TreeModelColumn<std::string> filename;
@@ -169,7 +179,8 @@ class SoundFileBrowser : public ArdourWindow
 	Gtk::Button freesound_similar_btn;
 
 	void handle_freesound_results(std::string theString);
-  public:
+
+public:
 	SoundFileBrowser (std::string title, ARDOUR::Session* _s, bool persistent);
 	virtual ~SoundFileBrowser ();
 
@@ -199,7 +210,7 @@ class SoundFileBrowser : public ArdourWindow
 	void freesound_search();
 	void refresh_display(std::string ID, std::string file);
 
-  protected:
+protected:
 	bool resetting_ourselves;
 	int matches;
 	int _status;
@@ -214,7 +225,6 @@ class SoundFileBrowser : public ArdourWindow
 	Gtk::VBox vpacker;
 
 	Gtk::Button import_button;
-	Gtk::Button close_button;
 
 	static std::string persistent_folder;
 
@@ -248,34 +258,36 @@ class SoundFileBrowser : public ArdourWindow
 	bool on_audio_and_midi_filter (const Gtk::FileFilter::Info& filter_info);
 
 	void set_action_sensitive (bool);
+	bool get_action_sensitive () const;
 
 	virtual bool reset_options () { return true; }
 
-  protected:
 	void on_show();
+	bool on_key_press_event (GdkEventKey*);
 	virtual void do_something(int action);
 };
 
 class SoundFileChooser : public SoundFileBrowser
 {
-  public:
+public:
 	SoundFileChooser (std::string title, ARDOUR::Session* _s = 0);
 	virtual ~SoundFileChooser () {};
 
 	std::string get_filename ();
 
-  protected:
+protected:
 	void on_hide();
 };
 
 class SoundFileOmega : public SoundFileBrowser
 {
-
-  public:
-	SoundFileOmega (std::string title, ARDOUR::Session* _s,
-			uint32_t selected_audio_tracks, uint32_t selected_midi_tracks,
-			bool persistent,
-			Editing::ImportMode mode_hint = Editing::ImportAsTrack);
+public:
+	SoundFileOmega (std::string title,
+	                ARDOUR::Session* _s,
+	                uint32_t selected_audio_tracks,
+	                uint32_t selected_midi_tracks,
+	                bool persistent,
+	                Editing::ImportMode mode_hint = Editing::ImportAsTrack);
 
 	void reset (uint32_t selected_audio_tracks, uint32_t selected_midi_tracks);
 
@@ -283,35 +295,41 @@ class SoundFileOmega : public SoundFileBrowser
 	Gtk::ComboBoxText where_combo;
 	Gtk::ComboBoxText channel_combo;
 	Gtk::ComboBoxText src_combo;
+	Gtk::ComboBoxText midi_track_name_combo;
 	InstrumentSelector instrument_combo;
 
 	Gtk::CheckButton copy_files_btn;
+	Gtk::CheckButton smf_tempo_btn;
 
 	void set_mode (Editing::ImportMode);
 	Editing::ImportMode get_mode() const;
+	ARDOUR::MidiTrackNameSource get_midi_track_name_source () const;
+	bool get_use_smf_tempo_map () const;
 	Editing::ImportPosition get_position() const;
 	Editing::ImportDisposition get_channel_disposition() const;
 	ARDOUR::SrcQuality get_src_quality() const;
 
-  protected:
+protected:
 	void on_hide();
 
-  private:
+private:
 	uint32_t selected_audio_track_cnt;
 	uint32_t selected_midi_track_cnt;
 
 	typedef std::map<std::string,Editing::ImportDisposition> DispositionMap;
 	DispositionMap disposition_map;
 
-	Gtk::HBox options;
+	Gtk::Table options;
 	Gtk::VBox block_two;
 	Gtk::VBox block_three;
 	Gtk::VBox block_four;
 
 	bool check_info (const std::vector<std::string>& paths,
-			 bool& same_size, bool& src_needed, bool& multichannel);
+	                 bool& same_size, bool& src_needed, bool& multichannel, bool& must_copy);
 
 	static bool check_link_status (const ARDOUR::Session*, const std::vector<std::string>& paths);
+
+	void instrument_combo_changed ();
 
 	void file_selection_changed ();
 	bool reset_options ();

@@ -1,21 +1,23 @@
 /*
-    Copyright (C) 2002 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2014 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_gtk_track_meter_h__
 #define __ardour_gtk_track_meter_h__
@@ -34,10 +36,9 @@
 #include "ardour/chan_count.h"
 #include "ardour/session_handle.h"
 
-#include <gtkmm2ext/click_box.h>
-#include <gtkmm2ext/focus_entry.h>
-#include <gtkmm2ext/slider_controller.h>
-#include <gtkmm2ext/fastmeter.h>
+#include "widgets/fastmeter.h"
+#include "widgets/focus_entry.h"
+#include "widgets/slider_controller.h"
 
 #include "enums.h"
 
@@ -51,9 +52,9 @@ namespace Gtk {
 
 class LevelMeterBase : public ARDOUR::SessionHandlePtr, virtual public sigc::trackable
 {
-  public:
+public:
 	LevelMeterBase (ARDOUR::Session*, PBD::EventLoop::InvalidationRecord* ir,
-			Gtkmm2ext::FastMeter::Orientation o = Gtkmm2ext::FastMeter::Vertical);
+			ArdourWidgets::FastMeter::Orientation o = ArdourWidgets::FastMeter::Vertical);
 	virtual ~LevelMeterBase ();
 
 	virtual void set_meter (ARDOUR::PeakMeter* meter);
@@ -65,40 +66,37 @@ class LevelMeterBase : public ARDOUR::SessionHandlePtr, virtual public sigc::tra
 	void clear_meters (bool reset_highlight = true);
 	void hide_meters ();
 	void setup_meters (int len=0, int width=3, int thin=2);
-
-	void set_type (ARDOUR::MeterType);
-	ARDOUR::MeterType get_type () { return meter_type; }
+	void set_max_audio_meter_count (uint32_t cnt = 0);
 
 	/** Emitted in the GUI thread when a button is pressed over the meter */
 	PBD::Signal1<bool, GdkEventButton *> ButtonPress;
 	PBD::Signal1<bool, GdkEventButton *> ButtonRelease;
-	PBD::Signal1<void, ARDOUR::MeterType> MeterTypeChanged;
 
-	protected:
+protected:
 	virtual void mtr_pack(Gtk::Widget &w) = 0;
 	virtual void mtr_remove(Gtk::Widget &w) = 0;
 
-  private:
+private:
 	PBD::EventLoop::InvalidationRecord* parent_invalidator;
 	ARDOUR::PeakMeter* _meter;
-	Gtkmm2ext::FastMeter::Orientation _meter_orientation;
+	ArdourWidgets::FastMeter::Orientation _meter_orientation;
 
 	Width _width;
 
 	struct MeterInfo {
-	    Gtkmm2ext::FastMeter *meter;
-	    gint16                width;
-            int			  length;
-	    bool                  packed;
-	    float                 max_peak;
+		ArdourWidgets::FastMeter* meter;
+		gint16                    width;
+		int                       length;
+		bool                      packed;
+		float                     max_peak;
 
-	    MeterInfo() {
-		    meter = 0;
-		    width = 0;
-                    length = 0;
-		    packed = false;
-		    max_peak = -INFINITY;
-	    }
+		MeterInfo() {
+			meter = 0;
+			width = 0;
+			length = 0;
+			packed = false;
+			max_peak = -INFINITY;
+		}
 	};
 
 	guint16                regular_meter_width;
@@ -106,9 +104,10 @@ class LevelMeterBase : public ARDOUR::SessionHandlePtr, virtual public sigc::tra
 	guint16                thin_meter_width;
 	std::vector<MeterInfo> meters;
 	float                  max_peak;
-	ARDOUR::MeterType      meter_type;
 	ARDOUR::MeterType      visible_meter_type;
-	uint32_t               visible_meter_count;
+	uint32_t               midi_count;
+	uint32_t               meter_count;
+	uint32_t               max_visible_meters;
 
 	PBD::ScopedConnection _configuration_connection;
 	PBD::ScopedConnection _meter_type_connection;
@@ -128,22 +127,22 @@ class LevelMeterBase : public ARDOUR::SessionHandlePtr, virtual public sigc::tra
 
 class LevelMeterHBox : public LevelMeterBase, public Gtk::HBox
 {
-  public:
+public:
 	LevelMeterHBox (ARDOUR::Session*);
 	~LevelMeterHBox();
 
-	protected:
+protected:
 	void mtr_pack(Gtk::Widget &w);
 	void mtr_remove(Gtk::Widget &w);
 };
 
 class LevelMeterVBox : public LevelMeterBase, public Gtk::VBox
 {
-  public:
+public:
 	LevelMeterVBox (ARDOUR::Session*);
 	~LevelMeterVBox();
 
-	protected:
+protected:
 	void mtr_pack(Gtk::Widget &w);
 	void mtr_remove(Gtk::Widget &w);
 };

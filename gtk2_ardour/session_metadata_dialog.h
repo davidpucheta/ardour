@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify it
-    under the terms of the GNU General Public License as published by the Free
-    Software Foundation; either version 2 of the License, or (at your option)
-    any later version.
-
-    This program is distributed in the hope that it will be useful, but WITHOUT
-    ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
-    FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
-    for more details.
-
-    You should have received a copy of the GNU General Public License along
-    with this program; if not, write to the Free Software Foundation, Inc.,
-    675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2008-2013 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2009 David Robillard <d@drobilla.net>
+ * Copyright (C) 2015 Colin Fletcher <colin.m.fletcher@googlemail.com>
+ * Copyright (C) 2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __session_metadata_dialog_h__
 #define __session_metadata_dialog_h__
@@ -26,7 +29,18 @@
 #undef interface
 #endif
 
-#include <gtkmm.h>
+#include <gtkmm/box.h>
+#include <gtkmm/button.h>
+#include <gtkmm/checkbutton.h>
+#include <gtkmm/entry.h>
+#include <gtkmm/label.h>
+#include <gtkmm/liststore.h>
+#include <gtkmm/notebook.h>
+#include <gtkmm/table.h>
+#include <gtkmm/textview.h>
+#include <gtkmm/treemodel.h>
+#include <gtkmm/treeview.h>
+
 #include <boost/shared_ptr.hpp>
 
 #include <string>
@@ -38,8 +52,9 @@ class MetadataField;
 typedef boost::shared_ptr<MetadataField> MetadataPtr;
 
 /// Wraps a metadata field to be used in a GUI
-class MetadataField {
-  public:
+class MetadataField
+{
+public:
 	MetadataField (std::string const & field_name);
 	virtual ~MetadataField();
 	virtual MetadataPtr copy () = 0;
@@ -56,17 +71,18 @@ class MetadataField {
 	virtual Gtk::Widget & value_widget () = 0;
 	/// Get widget for editing value
 	virtual Gtk::Widget & edit_widget () = 0;
-  protected:
-        std::string _name;
-        std::string _value;
+protected:
+	std::string _name;
+	std::string _value;
 };
 
 /// MetadataField that contains text
-class TextMetadataField : public MetadataField {
-  private:
+class TextMetadataField : public MetadataField
+{
+protected:
 	typedef std::string (ARDOUR::SessionMetadata::*Getter) () const;
 	typedef void (ARDOUR::SessionMetadata::*Setter) (std::string const &);
-  public:
+public:
 	TextMetadataField (Getter getter, Setter setter, std::string const & field_name, guint width = 50);
 	MetadataPtr copy ();
 
@@ -76,7 +92,7 @@ class TextMetadataField : public MetadataField {
 	Gtk::Widget & name_widget ();
 	Gtk::Widget & value_widget ();
 	Gtk::Widget & edit_widget ();
-  private:
+protected:
 	void update_value ();
 
 	Getter getter;
@@ -89,12 +105,27 @@ class TextMetadataField : public MetadataField {
 	guint width;
 };
 
+/// MetadataField that contains longform text
+class LongTextMetadataField : public TextMetadataField
+{
+public:
+	LongTextMetadataField (Getter getter, Setter setter, std::string const & field_name, guint width = 50);
+	MetadataPtr copy ();
+
+	Gtk::Widget & edit_widget ();
+private:
+	void update_value ();
+
+	Gtk::TextView* tview;
+};
+
 /// MetadataField that accepts only numbers
-class NumberMetadataField : public MetadataField {
-  private:
+class NumberMetadataField : public MetadataField
+{
+private:
 	typedef uint32_t (ARDOUR::SessionMetadata::*Getter) () const;
 	typedef void (ARDOUR::SessionMetadata::*Setter) (uint32_t);
-  public:
+public:
 	NumberMetadataField (Getter getter, Setter setter, std::string const & field_name, guint numbers, guint width = 50);
 	MetadataPtr copy ();
 
@@ -104,9 +135,9 @@ class NumberMetadataField : public MetadataField {
 	Gtk::Widget & name_widget ();
 	Gtk::Widget & value_widget ();
 	Gtk::Widget & edit_widget ();
-  private:
+private:
 	void update_value ();
-        std::string uint_to_str (uint32_t i) const;
+	std::string uint_to_str (uint32_t i) const;
 	uint32_t str_to_uint (std::string const & str) const;
 
 	Getter getter;
@@ -121,11 +152,12 @@ class NumberMetadataField : public MetadataField {
 };
 
 /// MetadataField that accepts EAN-13 data only
-class EAN13MetadataField : public MetadataField {
-  private:
+class EAN13MetadataField : public MetadataField
+{
+private:
 	typedef std::string (ARDOUR::SessionMetadata::*Getter) () const;
 	typedef void (ARDOUR::SessionMetadata::*Setter) (std::string const &);
-  public:
+public:
 	EAN13MetadataField (Getter getter, Setter setter, std::string const & field_name, guint width = 13);
 	MetadataPtr copy ();
 
@@ -138,9 +170,9 @@ class EAN13MetadataField : public MetadataField {
 
 	Gtk::Label* status_label;
 	void update_status ();
-  private:
+private:
 	void update_value ();
-        std::string numeric_string (std::string const & str) const;
+	std::string numeric_string (std::string const & str) const;
 
 	Getter getter;
 	Setter setter;
@@ -153,8 +185,9 @@ class EAN13MetadataField : public MetadataField {
 };
 
 /// Interface for MetadataFields
-class SessionMetadataSet : public ARDOUR::SessionHandlePtr {
-  public:
+class SessionMetadataSet : public ARDOUR::SessionHandlePtr
+{
+public:
 	SessionMetadataSet (std::string const & name);
 	virtual ~SessionMetadataSet () {};
 
@@ -168,15 +201,16 @@ class SessionMetadataSet : public ARDOUR::SessionHandlePtr {
 	virtual Gtk::Widget & get_widget () = 0;
 	virtual Gtk::Widget & get_tab_widget () = 0;
 
-  protected:
+protected:
 	typedef std::list<MetadataPtr> DataList;
 	DataList list;
-        std::string name;
+	std::string name;
 };
 
 /// Contains MetadataFields for editing
-class SessionMetadataSetEditable : public SessionMetadataSet {
-  public:
+class SessionMetadataSetEditable : public SessionMetadataSet
+{
+public:
 	SessionMetadataSetEditable (std::string const & name);
 
 	Gtk::Widget & get_widget () { return vbox; }
@@ -187,15 +221,16 @@ class SessionMetadataSetEditable : public SessionMetadataSet {
 	/// Saves from MetadataFields into data
 	void save_data ();
 
-  private:
+private:
 	Gtk::VBox vbox;
 	Gtk::Table table;
 	Gtk::Label tab_widget;
 };
 
 /// Contains MetadataFields for importing
-class SessionMetadataSetImportable : public SessionMetadataSet {
-  public:
+class SessionMetadataSetImportable : public SessionMetadataSet
+{
+public:
 	SessionMetadataSetImportable (std::string const & name);
 
 	Gtk::Widget & get_widget () { return tree_view; }
@@ -207,13 +242,13 @@ class SessionMetadataSetImportable : public SessionMetadataSet {
 	/// Saves from importable data (see load_data) to session_data
 	void save_data ();
 
-  private:
+private:
 	DataList & session_list; // References MetadataSet::list
 	DataList import_list;
 
 	struct Columns : public Gtk::TreeModel::ColumnRecord
 	{
-	  public:
+	public:
 		Gtk::TreeModelColumn<std::string>     field;
 		Gtk::TreeModelColumn<std::string>     values;
 		Gtk::TreeModelColumn<bool>        import;
@@ -241,10 +276,10 @@ class SessionMetadataSetImportable : public SessionMetadataSet {
 template <typename DataSet>
 class SessionMetadataDialog : public ArdourDialog
 {
-  public:
+public:
 	SessionMetadataDialog (std::string const & name);
 
-  protected:
+protected:
 	void init_data ( bool skip_user = false );
 	void load_extra_data (ARDOUR::SessionMetadata const & data);
 	void save_data ();
@@ -267,8 +302,9 @@ class SessionMetadataDialog : public ArdourDialog
 
 	Gtk::Notebook     notebook;
 
-  private:
+private:
 	void init_user_data ();
+	void init_description_data ();
 	void init_track_data ();
 	void init_album_data ();
 	void init_people_data ();
@@ -282,12 +318,13 @@ class SessionMetadataDialog : public ArdourDialog
 	Gtk::Button *     cancel_button;
 };
 
-class SessionMetadataEditor : public SessionMetadataDialog<SessionMetadataSetEditable> {
-  public:
+class SessionMetadataEditor : public SessionMetadataDialog<SessionMetadataSetEditable>
+{
+public:
 	SessionMetadataEditor ();
 	~SessionMetadataEditor ();
 	void run ();
-  private:
+private:
 	void init_gui ();
 };
 

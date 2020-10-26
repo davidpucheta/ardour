@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2004 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2018 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "fst.h"
 
@@ -26,7 +27,7 @@
 #include "ardour/windows_vst_plugin.h"
 #include "ardour/session.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace ARDOUR;
@@ -39,9 +40,10 @@ WindowsVSTPlugin::WindowsVSTPlugin (AudioEngine& e, Session& session, VSTHandle*
 	if ((_state = fst_instantiate (_handle, Session::vst_callback, this)) == 0) {
 		throw failed_constructor();
 	}
+	open_plugin ();
 	Session::vst_current_loading_id = 0;
 
-	set_plugin (_state->plugin);
+	init_plugin ();
 }
 
 WindowsVSTPlugin::WindowsVSTPlugin (const WindowsVSTPlugin &other)
@@ -53,9 +55,15 @@ WindowsVSTPlugin::WindowsVSTPlugin (const WindowsVSTPlugin &other)
 	if ((_state = fst_instantiate (_handle, Session::vst_callback, this)) == 0) {
 		throw failed_constructor();
 	}
+	open_plugin ();
 	Session::vst_current_loading_id = 0;
 
-	_plugin = _state->plugin;
+	XMLNode* root = new XMLNode (other.state_node_name ());
+	other.add_state (root);
+	set_state (*root, Stateful::loading_state_version);
+	delete root;
+
+	init_plugin ();
 }
 
 WindowsVSTPlugin::~WindowsVSTPlugin ()
@@ -98,7 +106,7 @@ std::vector<Plugin::PresetRecord>
 WindowsVSTPluginInfo::get_presets (bool user_only) const
 {
 	std::vector<Plugin::PresetRecord> p;
-#ifndef NO_PLUGIN_STATE
+
 	if (!Config->get_use_lxvst()) {
 		return p;
 	}
@@ -115,20 +123,18 @@ WindowsVSTPluginInfo::get_presets (bool user_only) const
 		if (t->read ()) {
 			XMLNode* root = t->root ();
 			for (XMLNodeList::const_iterator i = root->children().begin(); i != root->children().end(); ++i) {
-				XMLProperty* uri = (*i)->property (X_("uri"));
-				XMLProperty* label = (*i)->property (X_("label"));
+				XMLProperty const * uri = (*i)->property (X_("uri"));
+				XMLProperty const * label = (*i)->property (X_("label"));
 				p.push_back (Plugin::PresetRecord (uri->value(), label->value(), true));
 			}
 		}
 	}
 	delete t;
-#endif
-
 	return p;
 }
 
-WindowsVSTPluginInfo::WindowsVSTPluginInfo()
+WindowsVSTPluginInfo::WindowsVSTPluginInfo (_VSTInfo* nfo) : VSTPluginInfo (nfo)
 {
-       type = ARDOUR::Windows_VST;
+	type = ARDOUR::Windows_VST;
 }
 

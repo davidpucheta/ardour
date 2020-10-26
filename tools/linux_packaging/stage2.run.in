@@ -31,6 +31,7 @@ USER_NAME=$(logname)
 
 #### Global Variables ####
 HAS_XDG="T"
+MULTABI_BUNDLE=""
 
 ########################
 # Function Definitions
@@ -60,6 +61,39 @@ VaildateYesNoQuestion ()
 	
 	echo $USER_INPUT | tr '[:upper:]' '[:lower:]'
 	
+}
+
+VaildateYesNoEnterQuestion ()
+{
+	# $1 = Question Text
+	# $2 = default y/n
+
+	local INPUT_OK="n"
+	local USER_INPUT=""
+	local PRMT="[Y/n]"
+	local DFLT="y"
+
+	if [ "$2" = "n" ]; then
+		PRMT="[y/N]"
+		DFLT="n"
+	fi
+
+	until test "y" = $INPUT_OK; do
+		echo ""
+		read -p "$1 $PRMT: " USER_INPUT
+		echo ""
+
+		if [ -z $USER_INPUT ]; then
+			INPUT_OK="y"
+			USER_INPUT=$DFLT
+		else
+			if [ "Y" = $USER_INPUT -o "y" = $USER_INPUT -o "n" = $USER_INPUT -o "N" = $USER_INPUT ]; then
+				INPUT_OK="y"
+			fi
+		fi
+	done
+
+	echo $USER_INPUT | tr '[:upper:]' '[:lower:]'
 }
 
 SystemInstall ()
@@ -118,7 +152,21 @@ cd "${PKG_PATH}"
 
 echo ""
 echo "Welcome to the ${PGM_NAME} installer"
-echo ""
+
+case `uname -s` in
+	Linux)
+		echo ""
+		;;
+	*)
+		echo ""
+		echo "!!! ERROR !!! - Unsupported Operating System `uname -s`."
+		echo "This installer is for 'Linux' kernel based systems only."
+		echo ""
+		read -p "Press ENTER to exit installer:" BLAH
+		exit 1
+		;;
+esac
+
 echo "${PGM_NAME} will be installed for user ${USER_NAME} in ${INSTALL_DEST_BASE}"
 echo ""
 #############################
@@ -220,6 +268,16 @@ case `uname -m` in
 		echo "Architecture is x86_64"
 		ARCH='x86_64'
 		;;
+	arm|armv7l|aarch32)
+		echo "Architecture is armhf"
+		ARCH='armhf'
+		NOABICHECK=1
+		;;
+	aarch64|armv8b)
+		echo "Architecture is arm64"
+		ARCH='arm64'
+		NOABICHECK=1
+		;;
 	*)
 		echo ""
 		echo "!!! ERROR !!! - Unknown architecture `uname -m`"
@@ -229,6 +287,42 @@ case `uname -m` in
 		;;
 esac
 
+###################
+# Determine gcc ABI
+###################
+
+if test -n "$MULTABI_BUNDLE"; then
+	if ! "${PKG_PATH}/.gcc-glibmm-abi-check" --fail --gcc5; then
+		ABI=-gcc4
+	else
+		ABI=-gcc5
+	fi
+  # allow to manually override
+	if test "$1" = "--gcc4"; then
+		ABI=-gcc4
+	fi
+	if test "$1" = "--gcc5"; then
+		ABI=-gcc5
+	fi
+else
+	ABI=
+fi
+
+####################################
+# Check if bundle is for this system
+####################################
+
+if [ ! -e ${PGM_NAME}_${ARCH}${ABI}-*.tar ]; then
+	echo ""
+	echo "!!! ERROR !!! Can't locate ${ARCH}${ABI} bundle file."
+	echo "The installer detected the system as ${ARCH}${ABI}, but this bundle"
+	echo "does not contain the files needed for that configuration."
+	echo ""
+	read -p "Press ENTER to exit installer:" BLAH
+	exit 1
+fi
+
+
 ####################
 # Check disk space
 ####################
@@ -237,15 +331,15 @@ esac
 # in case they are on different devices
 echo "Checking for required disk space"
 
-if [ ! -e .${PGM_NAME}_${ARCH}-*.size ]; then
+if [ ! -e .${PGM_NAME}_${ARCH}${ABI}-*.size ]; then
 	echo ""
-	echo "!!! ERROR !!! Can't locate .size file for ${ARCH} bundle."
-	echo "This package is broken or does not support ${ARCH}."
+	echo "!!! ERROR !!! Can't locate .size file for ${ARCH}${ABI} bundle."
+	echo "This package is broken or does not support ${ARCH}${ABI}."
 	echo ""
 	read -p "Press ENTER to exit installer:" BLAH
 	exit 1
 else
-	REQUIRED_BYTES=$(cat .${PGM_NAME}_${ARCH}-*.size)
+	REQUIRED_BYTES=$(cat .${PGM_NAME}_${ARCH}${ABI}-*.size)
 
 	#Installer needs 2x the space since the bundle is unpacked locally and then copied
 	REQUIRED_BYTES=$(($REQUIRED_BYTES + $REQUIRED_BYTES))
@@ -277,38 +371,40 @@ else
 	fi
 fi
 
-#############################
-# Determine C11 stdlibc++ ABI
-#############################
+###############################
+# Determine C++11 stdlibc++ ABI
+###############################
 
-if %REPLACE_GCC5%; then
-	# Ardour was compiled with gcc5, warn on gcc4 systems
-	if ! ${NORM_USER} "${PKG_PATH}/.gcc-glibmm-abi-check --gcc5 > /dev/null"; then
-		echo ""
-		echo "WARNING: GCC4/5 libstdc++ ABI Mismatch"
-		echo ""
-		echo "${PGM_NAME} was compiled with gcc5, your system uses an older version of the"
-		echo "standard c++ library. Plugins on your system may not load or plugin-UIs"
-		echo "may cause crashes."
-		echo ""
-		ANSWER=$(VaildateYesNoQuestion "Continue anyway?")
-		if test "n" = $ANSWER; then
-			exit 1
+if test -z "$ABI" -a -z "$NOABICHECK"; then
+	if %REPLACE_GCC5%; then
+		# Ardour was compiled with gcc5, warn on gcc4 systems
+		if ! "${PKG_PATH}/.gcc-glibmm-abi-check" --gcc5; then
+			echo ""
+			echo "WARNING: GCC4/5 libstdc++ ABI Mismatch"
+			echo ""
+			echo "${PGM_NAME} was compiled with gcc5, your system uses an older version of the"
+			echo "standard c++ library. Plugins on your system may not load or plugin-UIs"
+			echo "may cause crashes."
+			echo ""
+			ANSWER=$(VaildateYesNoQuestion "Continue anyway?")
+			if test "n" = $ANSWER; then
+				exit 1
+			fi
 		fi
-	fi
-else
-	# Ardour was compiled with gcc4, warn on gcc5 systems
-	if ! ${NORM_USER} "${PKG_PATH}/.gcc-glibmm-abi-check --gcc4 > /dev/null"; then
-		echo ""
-		echo "WARNING: GCC4/5 libstdc++ ABI Mismatch"
-		echo ""
-		echo "${PGM_NAME} was compiled with gcc4, your system uses a newer version of the"
-		echo "standard c++ library. Plugins on your system may not load or plugin-UIs"
-		echo "may cause crashes."
-		echo ""
-		ANSWER=$(VaildateYesNoQuestion "Continue anyway?")
-		if test "n" = $ANSWER; then
-			exit 1
+	else
+		# Ardour was compiled with gcc4, warn on gcc5 systems
+		if ! "${PKG_PATH}/.gcc-glibmm-abi-check" --gcc4 ; then
+			echo ""
+			echo "WARNING: GCC4/5 libstdc++ ABI Mismatch"
+			echo ""
+			echo "${PGM_NAME} was compiled with gcc4, your system uses a newer version of the"
+			echo "standard c++ library. Plugins on your system may not load or plugin-UIs"
+			echo "may cause crashes."
+			echo ""
+			ANSWER=$(VaildateYesNoQuestion "Continue anyway?")
+			if test "n" = $ANSWER; then
+				exit 1
+			fi
 		fi
 	fi
 fi
@@ -334,19 +430,11 @@ FILESYSTEM_TYPE=$(df -P -T "${PKG_PATH}" | grep / | awk '{print $2}')
 echo "Bundle is on ${FILESYSTEM_TYPE} filesystem"
 
 # untar the correct bundle for us to install
-echo "Unpacking bundle for $ARCH"
+echo "Unpacking bundle for $ARCH${ABI}"
 
-if [ ! -e ${PGM_NAME}_${ARCH}-*.tar.bz2 ]; then
+if ! tar -xf ${PGM_NAME}_${ARCH}${ABI}-*.tar; then
 	echo ""
-	echo "!!! ERROR !!! Can't locate ${ARCH} bundle file."
-	echo ""
-	read -p "Press ENTER to exit installer:" BLAH
-	exit 1
-fi
-
-if ! tar -xjf ${PGM_NAME}_${ARCH}-*.tar.bz2; then
-	echo ""
-	echo "!!! ERROR !!! Can't unpack ${ARCH} bundle file."
+	echo "!!! ERROR !!! Can't unpack ${ARCH}${ABI} bundle file."
 	echo ""
 	read -p "Press ENTER to exit installer:" BLAH
 	exit 1
@@ -447,8 +535,8 @@ echo ""
 LIB_ERROR="F"
 LD_PATH=`pwd`/${BUNDLE_DIR}/lib
 
-# check the main App
-LDD_RESULT=$(LD_LIBRARY_PATH=${LD_PATH} ldd ${BUNDLE_DIR}/bin/${PGM_NAME_LOWER}-* 2>&1 > /dev/null | grep -v "no version information")
+# check the main App(s)
+LDD_RESULT=$(LANG=C LD_LIBRARY_PATH=${LD_PATH} ldd ${BUNDLE_DIR}/*/${PGM_NAME_LOWER}-* 2>&1 | grep "not found/")
 
 if [ -n "$LDD_RESULT" ];
 then
@@ -457,11 +545,11 @@ then
 fi
 	
 # check the libs
-LIB_FILES=$(find ${BUNDLE_DIR}/lib -name "*.so")
+LIB_FILES=$(find ${BUNDLE_DIR}/lib -name "*.so" -type f | grep -v backends)
 
 for path in $LIB_FILES
 do
-	LDD_RESULT=$(LD_LIBRARY_PATH=${LD_PATH} ldd $path 2>&1 > /dev/null | grep -v "no version information")
+	LDD_RESULT=$(LANG=C LD_LIBRARY_PATH=${LD_PATH} ldd $path 2>&1 | grep "not found")
 	if [ -n "$LDD_RESULT" ];
 	then
 		echo "$LDD_RESULT"
@@ -500,7 +588,7 @@ else
 fi
 
 PGM_EXEC_PATH="${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/bin/${PGM_EXEC_FILE}"
-ICON_PATH="${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/share/icons"
+ICON_PATH="${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/share/resources"
 MENU_FILE_PATH="${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/share"
 
 ################################
@@ -508,7 +596,7 @@ MENU_FILE_PATH="${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/share"
 ################################
 
 # uninstall any older versions
-UNINSTALLERS=$(find ${INSTALL_DEST_BASE} -maxdepth 1 -type f -name "${PGM_NAME}*.uninstall.sh")
+UNINSTALLERS=$(find ${INSTALL_DEST_BASE} -maxdepth 1 -type f -name "${PGM_NAME}-*.uninstall.sh")
 if [ ! -z "$UNINSTALLERS" ];
 then
 	for i in $UNINSTALLERS; do
@@ -563,15 +651,15 @@ ${SUPER} mv /tmp/${MENU_FILE} ${MENU_FILE_PATH}/.
 if [ "T" = ${HAS_XDG} ];
 then
 	echo "Adding ${PGM_NAME} to the applications menu"
-	${SUPER} xdg-icon-resource install --context apps --size 16 ${ICON_PATH}/${PGM_NAME_LOWER}_icon_16px.png ${ICON_NAME}
-	${SUPER} xdg-icon-resource install --context apps --size 22 ${ICON_PATH}/${PGM_NAME_LOWER}_icon_22px.png ${ICON_NAME}
-	${SUPER} xdg-icon-resource install --context apps --size 32 ${ICON_PATH}/${PGM_NAME_LOWER}_icon_32px.png ${ICON_NAME}
-	${SUPER} xdg-icon-resource install --context apps --size 48 ${ICON_PATH}/${PGM_NAME_LOWER}_icon_48px.png ${ICON_NAME}
-	${SUPER} xdg-icon-resource install --context apps --size 256 ${ICON_PATH}/${PGM_NAME_LOWER}_icon_256px.png ${ICON_NAME}
+	${SUPER} xdg-icon-resource install --context apps --size 16 ${ICON_PATH}/${PGM_NAME}-icon_16px.png ${ICON_NAME}
+	${SUPER} xdg-icon-resource install --context apps --size 22 ${ICON_PATH}/${PGM_NAME}-icon_22px.png ${ICON_NAME}
+	${SUPER} xdg-icon-resource install --context apps --size 32 ${ICON_PATH}/${PGM_NAME}-icon_32px.png ${ICON_NAME}
+	${SUPER} xdg-icon-resource install --context apps --size 48 ${ICON_PATH}/${PGM_NAME}-icon_48px.png ${ICON_NAME}
+	${SUPER} xdg-icon-resource install --context apps --size 256 ${ICON_PATH}/${PGM_NAME}-icon_256px.png ${ICON_NAME}
 
-	if [ -e ${ICON_PATH}/${PGM_NAME_LOWER}_icon.svg -a -d /usr/share/icons/hicolor/scalable/apps ]; 
+	if [ -e ${ICON_PATH}/${PGM_NAME}_icon.svg -a -d /usr/share/icons/hicolor/scalable/apps ];
 	then
-		${SUPER} cp -f ${ICON_PATH}/${PGM_NAME_LOWER}_icon.svg  /usr/share/icons/hicolor/scalable/apps/${ICON_NAME}.svg
+		${SUPER} cp -f ${ICON_PATH}/${PGM_NAME}_icon.svg  /usr/share/icons/hicolor/scalable/apps/${ICON_NAME}.svg
 	fi
 
 	${SUPER} xdg-desktop-menu install ${MENU_FILE_PATH}/${MENU_FILE}
@@ -579,13 +667,13 @@ then
 	
 	echo ""
 	echo "Creating a desktop link for ${PGM_NAME} in ${USER_DESKTOP_DIR}"
-	cp ${MENU_FILE_PATH}/${MENU_FILE} ${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}
-	chmod ugo+rwx ${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}
+	cp ${MENU_FILE_PATH}/${MENU_FILE} "${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}"
+	chmod ugo+rwx "${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}"
 else
 	echo ""
 	echo "Creating a desktop link for ${PGM_NAME} in ${USER_DESKTOP_DIR}"
-	cp ${MENU_FILE_PATH}/${MENU_FILE} ${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}
-	chmod ugo+rwx ${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}
+	cp ${MENU_FILE_PATH}/${MENU_FILE} "${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}"
+	chmod ugo+rwx "${USER_DESKTOP_DIR}/${DESKTOP_LINK_FILE}"
 fi
 
 echo ""
@@ -613,6 +701,20 @@ else
 	echo "Can not create link because ${USER_BIN_DIR} does not exist"
 fi
 
+############################################
+# Allow to remove non-free stuff for purists
+############################################
+
+if test "${PGM_VENDOR}" = "Ardour" -a -d "${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/lib/LV2/Harrison.lv2"; then
+	ANSWER=$(VaildateYesNoEnterQuestion "Install Harrison XT plugins?" "y")
+
+	if test "n" = $ANSWER; then
+		${SUPER} rm -rf "${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/lib/LV2/Harrison.lv2"
+	else
+		echo "Deploying Harrison plugins to ${INSTALL_DEST_BASE}/${PGM_FULL_NAME}/lib/LV2/Harrison.lv2"
+	fi
+fi
+
 ###########################
 # Check Jack and qjackctl
 ###########################
@@ -633,7 +735,10 @@ elif which jackdbus > /dev/null; then
 	JACK_INSTALLED="i"
 else
 	echo ""
-	echo "The program Jack is missing from this system. Jack is a required component of $PGM_NAME."
+	echo "The program Jack is missing from this system."
+	echo ""
+	echo "Jack is a very useful utility to allow you to interconnect $PGM_NAME and other audio/MIDI applications."
+	echo "You can use $PGM_NAME without it, but you may find it useful to have around."
 	echo ""
 
 	ANSWER=$(VaildateYesNoQuestion "Install jack using system software repository?")
@@ -660,7 +765,7 @@ then
 	JACK_VERSION_OK="f"
 	JACK_VER_STRING=$(jackd --version | grep -e "jackd.*protocol")
 	JACK_NAME=$(echo $JACK_VER_STRING | awk '{print $1}')
-	JACK_VERSION=$(echo $JACK_VER_STRING | awk '{print $3}')
+	JACK_VERSION=$(echo $JACK_VER_STRING | awk '{print $3}' | sed 's/-.*$//')
 	JACK_VERSION_MAJOR=$(echo $JACK_VERSION | awk 'BEGIN{FS="."}{print $1}')
 	JACK_VERSION_MIDDLE=$(echo $JACK_VERSION | awk 'BEGIN{FS="."}{print $2}')
 	JACK_VERSION_MINOR=$(echo $JACK_VERSION | awk 'BEGIN{FS="."}{print $3}')

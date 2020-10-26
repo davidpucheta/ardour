@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2009-2012 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <glib.h>
 #include "pbd/gstdio_compat.h"
@@ -23,14 +26,14 @@
 
 #include "pbd/error.h"
 #include "pbd/file_utils.h"
-#include "pbd/locale_guard.h"
 #include "pbd/pathexpand.h"
 
 #include "ardour/types.h"
+#include "ardour/types_convert.h"
 #include "ardour/filesystem_paths.h"
 #include "ardour/session_configuration.h"
 #include "ardour/utils.h"
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 using namespace PBD;
@@ -54,7 +57,6 @@ XMLNode&
 SessionConfiguration::get_state ()
 {
 	XMLNode* root;
-	LocaleGuard lg (X_("C"));
 
 	root = new XMLNode ("Ardour");
 	root->add_child_nocopy (get_variables ());
@@ -67,7 +69,6 @@ XMLNode&
 SessionConfiguration::get_variables ()
 {
 	XMLNode* node;
-	LocaleGuard lg (X_("C"));
 
 	node = new XMLNode ("Config");
 
@@ -107,13 +108,14 @@ SessionConfiguration::set_variables (const XMLNode& node)
 #undef  CONFIG_VARIABLE
 #undef  CONFIG_VARIABLE_SPECIAL
 #define CONFIG_VARIABLE(type,var,name,value) \
-	if (var.set_from_node (node)) { \
-		ParameterChanged (name);		  \
-	}
+  if (var.set_from_node (node)) {            \
+    ParameterChanged (name);                 \
+  }
+
 #define CONFIG_VARIABLE_SPECIAL(type,var,name,value,mutator) \
-	if (var.set_from_node (node)) {    \
-		ParameterChanged (name);		     \
-	}
+  if (var.set_from_node (node)) {                            \
+    ParameterChanged (name);                                 \
+  }
 
 #include "ardour/session_configuration_vars.h"
 #undef  CONFIG_VARIABLE
@@ -159,7 +161,6 @@ SessionConfiguration::load_state ()
 
 		XMLNode* node;
 		if (((node = find_named_node (root, X_("Config"))) != 0)) {
-			LocaleGuard lg (X_("C"));
 			set_variables(*node);
 			info << _("Loaded custom session defaults.") << endmsg;
 		} else {

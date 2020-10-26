@@ -1,21 +1,22 @@
 /*
-    Copyright (C) 2012 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2007-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2008-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2016-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_gtk_key_editor_h__
 #define __ardour_gtk_key_editor_h__
@@ -25,9 +26,11 @@
 #include <gtkmm/buttonbox.h>
 #include <gtkmm/notebook.h>
 #include <gtkmm/scrolledwindow.h>
-#include <gtkmm/treeview.h>
+#include <gtkmm/treemodelfilter.h>
 #include <gtkmm/treestore.h>
-#include "gtkmm2ext/searchbar.h"
+#include <gtkmm/treeview.h>
+
+#include "widgets/searchbar.h"
 
 #include "ardour_window.h"
 
@@ -37,7 +40,7 @@ namespace Gtkmm2ext {
 
 class KeyEditor : public ArdourWindow
 {
-  public:
+public:
 	KeyEditor ();
 
 	void add_tab (std::string const &name, Gtkmm2ext::Bindings&);
@@ -45,10 +48,14 @@ class KeyEditor : public ArdourWindow
 
 	static sigc::signal<void> UpdateBindings;
 
-	private:
+	void disconnect () {
+		_refresh_connection.disconnect ();
+	}
+
+private:
 	class Tab : public Gtk::VBox
 	{
-		public:
+	public:
 		Tab (KeyEditor&, std::string const &name, Gtkmm2ext::Bindings*);
 
 		uint32_t populate ();
@@ -76,8 +83,8 @@ class KeyEditor : public ArdourWindow
 
 		Gtk::VBox vpacker;
 		/* give KeyEditor full access to these. This is just a helper
-		   class with no special semantics
-		*/
+		 * class with no special semantics
+		 */
 
 		KeyEditor& owner;
 		std::string name;
@@ -90,7 +97,7 @@ class KeyEditor : public ArdourWindow
 		KeyEditorColumns columns;
 		guint last_keyval;
 
-		protected:
+	protected:
 		bool key_press_event (GdkEventKey*);
 		bool key_release_event (GdkEventKey*);
 		Gtk::TreeModel::iterator find_action_path (Gtk::TreeModel::const_iterator begin, Gtk::TreeModel::const_iterator end, const std::string& path) const;
@@ -105,8 +112,10 @@ class KeyEditor : public ArdourWindow
 	Gtk::HBox reset_box;
 	Gtk::Button reset_button;
 	Gtk::Label reset_label;
-	Gtkmm2ext::SearchBar filter_entry;
+	ArdourWidgets::SearchBar filter_entry;
 	std::string filter_string;
+	Gtk::Button print_button;
+	Gtk::Label print_label;
 
 	typedef std::vector<Tab*> Tabs;
 
@@ -122,6 +131,9 @@ class KeyEditor : public ArdourWindow
 	Gtk::SortType sort_type;
 	void toggle_sort_type ();
 	void search_string_updated (const std::string&);
+	void print () const;
+
+	sigc::connection _refresh_connection;
 };
 
 #endif /* __ardour_gtk_key_editor_h__ */

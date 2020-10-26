@@ -1,22 +1,26 @@
 /*
-    Copyright (C) 2008 Paul Davis
-    Author: Sakari Bergen
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2008-2013 Sakari Bergen <sakari.bergen@beatwaves.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 David Robillard <d@drobilla.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2012-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2014 Nick Mainsbridge <mainsbridge@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cassert>
 #include <stdexcept>
@@ -29,8 +33,8 @@
 #include <glibmm/miscutils.h>
 
 #include "pbd/enumwriter.h"
+#include "pbd/enum_convert.h"
 #include "pbd/xml++.h"
-#include "pbd/convert.h"
 
 #include "ardour/export_profile_manager.h"
 #include "ardour/export_format_specification.h"
@@ -48,7 +52,11 @@
 #include "ardour/session.h"
 #include "ardour/broadcast_info.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
+
+namespace PBD {
+	DEFINE_ENUM_CONVERT(ARDOUR::ExportProfileManager::TimeFormat);
+}
 
 using namespace std;
 using namespace Glib;
@@ -58,7 +66,7 @@ namespace ARDOUR
 {
 
 ExportProfileManager::ExportProfileManager (Session & s, ExportType type)
-  : type(type)
+  : _type(type)
   , handler (s.get_export_handler())
   , session (s)
 
@@ -145,6 +153,7 @@ ExportProfileManager::prepare_for_export ()
 	FormatStateList::const_iterator format_it;
 	FilenameStateList::const_iterator filename_it;
 
+	handler->reset ();
 	// For each timespan
 	for (TimespanList::iterator ts_it = ts_list->begin(); ts_it != ts_list->end(); ++ts_it) {
 		// ..., each format-filename pair
@@ -153,7 +162,6 @@ ExportProfileManager::prepare_for_export ()
 		     ++format_it, ++filename_it) {
 
 			ExportFilenamePtr filename = (*filename_it)->filename;
-//			filename->include_timespan = (ts_list->size() > 1); Disabled for now...
 
 			boost::shared_ptr<BroadcastInfo> b;
 			if ((*format_it)->format->has_broadcast_info()) {
@@ -162,7 +170,7 @@ ExportProfileManager::prepare_for_export ()
 			}
 
 			// ...and each channel config
-			filename->include_channel_config = (type == StemExport) ||
+			filename->include_channel_config = (_type == StemExport) ||
 			                                   (channel_configs.size() > 1);
 			for(ChannelConfigStateList::iterator cc_it = channel_configs.begin(); cc_it != channel_configs.end(); ++cc_it) {
 				handler->add_export_config (*ts_it, (*cc_it)->config, (*format_it)->format, filename, b);
@@ -180,9 +188,14 @@ ExportProfileManager::load_preset (ExportPresetPtr preset)
 	if (!preset) { return false; }
 
 	XMLNode const * state;
+	/* local state is saved in instant.xml and contains timespan
+	 * and channel config for per session.
+	 * It may not be present for a given preset/session combination
+	 * and is never preset for system-wide presets, but that's OK.
+	 */
 	if ((state = preset->get_local_state())) {
 		set_local_state (*state);
-	} else { ok = false; }
+	}
 
 	if ((state = preset->get_global_state())) {
 		if (!set_global_state (*state)) {
@@ -344,7 +357,7 @@ ExportProfileManager::find_file (std::string const & pattern)
 }
 
 void
-ExportProfileManager::set_selection_range (framepos_t start, framepos_t end)
+ExportProfileManager::set_selection_range (samplepos_t start, samplepos_t end)
 {
 
 	if (start || end) {
@@ -361,7 +374,7 @@ ExportProfileManager::set_selection_range (framepos_t start, framepos_t end)
 }
 
 std::string
-ExportProfileManager::set_single_range (framepos_t start, framepos_t end, string name)
+ExportProfileManager::set_single_range (samplepos_t start, samplepos_t end, string name)
 {
 	single_range_mode = true;
 
@@ -395,13 +408,9 @@ ExportProfileManager::init_timespans (XMLNodeList nodes)
 		// Add session as default selection
 		Location * session_range;
 
-		if (Profile->get_trx()) {
-			session_range = (session.get_play_loop () ? session.locations()->auto_loop_location () : session.locations()->session_range_location());
-		} else {
-			session_range = session.locations()->session_range_location();
+		if ((session_range = session.locations()->session_range_location()) == 0) {
+			return false;
 		}
-
-		if (!session_range) { return false; }
 
 		ExportTimespanPtr timespan = handler->add_timespan();
 		timespan->set_name (session_range->name());
@@ -418,14 +427,14 @@ ExportProfileManager::TimespanStatePtr
 ExportProfileManager::deserialize_timespan (XMLNode & root)
 {
 	TimespanStatePtr state (new TimespanState (selection_range, ranges));
-	XMLProperty const * prop;
 
 	XMLNodeList spans = root.children ("Range");
 	for (XMLNodeList::iterator node_it = spans.begin(); node_it != spans.end(); ++node_it) {
 
-		prop = (*node_it)->property ("id");
-		if (!prop) { continue; }
-		string id = prop->value();
+		std::string id;
+		if (!(*node_it)->get_property ("id", id)) {
+			continue;
+		}
 
 		Location * location = 0;
 		for (LocationList::iterator it = ranges->begin(); it != ranges->end(); ++it) {
@@ -445,9 +454,7 @@ ExportProfileManager::deserialize_timespan (XMLNode & root)
 		state->timespans->push_back (timespan);
 	}
 
-	if ((prop = root.property ("format"))) {
-		state->time_format = (TimeFormat) string_2_enum (prop->value(), TimeFormat);
-	}
+	root.get_property ("format", state->time_format);
 
 	if (state->timespans->empty()) {
 		return TimespanStatePtr();
@@ -465,11 +472,11 @@ ExportProfileManager::serialize_timespan (TimespanStatePtr state)
 	update_ranges ();
 	for (TimespanList::iterator it = state->timespans->begin(); it != state->timespans->end(); ++it) {
 		if ((span = root.add_child ("Range"))) {
-			span->add_property ("id", (*it)->range_id());
+			span->set_property ("id", (*it)->range_id());
 		}
 	}
 
-	root.add_property ("format", enum_2_string (state->time_format));
+	root.set_property ("format", state->time_format);
 
 	return root;
 }
@@ -584,9 +591,9 @@ ExportProfileManager::save_format_to_disk (ExportFormatSpecPtr format)
 	string new_name = format->name();
 	new_name += export_format_suffix;
 
-        /* make sure its legal for the filesystem */
+	/* make sure its legal for the filesystem */
 
-        new_name = legalize_for_path (new_name);
+	new_name = legalize_for_path (new_name);
 
 	std::string new_path = Glib::build_filename (export_config_dir, new_name);
 
@@ -628,7 +635,6 @@ ExportProfileManager::save_format_to_disk (ExportFormatSpecPtr format)
 		tree.write();
 	}
 
-	FormatListChanged ();
 	return new_path;
 }
 
@@ -651,6 +657,23 @@ ExportProfileManager::remove_format_profile (ExportFormatSpecPtr format)
 		format_file_map.erase (it);
 	}
 
+	FormatListChanged ();
+}
+
+void
+ExportProfileManager::revert_format_profile (ExportFormatSpecPtr format)
+{
+	FileMap::iterator it;
+	if ((it = format_file_map.find (format->id())) == format_file_map.end()) {
+		return;
+	}
+
+	XMLTree tree;
+	if (!tree.read (it->second.c_str())) {
+		return;
+	}
+
+	format->set_state (*tree.root());
 	FormatListChanged ();
 }
 
@@ -701,7 +724,7 @@ ExportProfileManager::init_formats (XMLNodeList nodes)
 ExportProfileManager::FormatStatePtr
 ExportProfileManager::deserialize_format (XMLNode & root)
 {
-	XMLProperty * prop;
+	XMLProperty const * prop;
 	PBD::UUID id;
 
 	if ((prop = root.property ("id"))) {
@@ -723,7 +746,7 @@ ExportProfileManager::serialize_format (FormatStatePtr state)
 	XMLNode * root = new XMLNode ("ExportFormat");
 
 	string id = state->format ? state->format->id().to_s() : "";
-	root->add_property ("id", id);
+	root->set_property ("id", id);
 
 	return *root;
 }
@@ -756,6 +779,13 @@ ExportProfileManager::load_format_from_disk (std::string const & path)
 
 	ExportFormatSpecPtr format = handler->add_format (*root);
 
+	if (format->format_id() == ExportFormatBase::F_FFMPEG) {
+		std::string unused;
+		if (!ArdourVideoToolPaths::transcoder_exe (unused, unused)) {
+			error << string_compose (_("Ignored format '%1': encoder is not available"), path) << endmsg;
+			return;
+		}
+	}
 	/* Handle id to filename mapping and don't add duplicates to list */
 
 	FilePair pair (format->id(), path);
@@ -858,6 +888,8 @@ ExportProfileManager::get_warnings ()
 
 	/*** Check files ***/
 
+	bool folder_ok = true;
+
 	if (channel_config_state) {
 		FormatStateList::const_iterator format_it;
 		FilenameStateList::const_iterator filename_it;
@@ -865,7 +897,16 @@ ExportProfileManager::get_warnings ()
 		     format_it != formats.end() && filename_it != filenames.end();
 		     ++format_it, ++filename_it) {
 			check_config (warnings, timespan_state, channel_config_state, *format_it, *filename_it);
+
+			if (!Glib::file_test ((*filename_it)->filename->get_folder(), Glib::FileTest (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_DIR))) {
+				folder_ok = false;
+			}
+
 		}
+	}
+
+	if (!folder_ok) {
+		warnings->errors.push_back (_("Destination folder does not exist."));
 	}
 
 	return warnings;
@@ -873,10 +914,9 @@ ExportProfileManager::get_warnings ()
 
 void
 ExportProfileManager::check_config (boost::shared_ptr<Warnings> warnings,
-	                            TimespanStatePtr timespan_state,
-	                            ChannelConfigStatePtr channel_config_state,
-	                            FormatStatePtr format_state,
-	                            FilenameStatePtr filename_state)
+                                    TimespanStatePtr timespan_state,
+                                    ChannelConfigStatePtr channel_config_state,
+                                    FormatStatePtr format_state, FilenameStatePtr filename_state)
 {
 	TimespanListPtr timespans = timespan_state->timespans;
 	ExportChannelConfigPtr channel_config = channel_config_state->config;
@@ -901,8 +941,6 @@ ExportProfileManager::check_config (boost::shared_ptr<Warnings> warnings,
 	if (!warnings->errors.empty()) { return; }
 
 	/* Check filenames */
-
-//	filename->include_timespan = (timespans->size() > 1); Disabled for now...
 
 	std::list<string> paths;
 	build_filenames(paths, filename, timespans, channel_config, format);
@@ -937,6 +975,8 @@ ExportProfileManager::check_format (ExportFormatSpecPtr format, uint32_t channel
 	switch (format->type()) {
 	  case ExportFormatBase::T_Sndfile:
 		return check_sndfile_format (format, channels);
+	  case ExportFormatBase::T_FFMPEG:
+		return true;
 
 	  default:
 		throw ExportFailed (X_("Invalid format given for ExportFileFactory::check!"));

@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2006 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2006 Sampo Savolainen <v2@iki.fi>
+ * Copyright (C) 2008-2012 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_analysis_window_h__
 #define __ardour_analysis_window_h__
@@ -46,7 +46,6 @@ namespace ARDOUR {
 	class Session;
 }
 
-
 class AnalysisWindow : public Gtk::Window, public ARDOUR::SessionHandlePtr
 {
 public:
@@ -65,10 +64,12 @@ private:
 
 	void source_selection_changed (Gtk::RadioButton *);
 	void display_model_changed    (Gtk::RadioButton *);
-	void show_minmax_changed	();
-	void show_normalized_changed	();
 
-	void analyze_data				(Gtk::Button *);
+	void show_minmax_changed ();
+	void show_normalized_changed ();
+	void show_proportional_changed ();
+
+	void analyze_data (Gtk::Button *);
 
 	struct TrackListColumns : public Gtk::TreeModel::ColumnRecord {
 		public:
@@ -95,22 +96,16 @@ private:
 
 	Gtk::Label source_selection_label;
 
-
 	Gtk::RadioButton source_selection_ranges_rb;
 	Gtk::RadioButton source_selection_regions_rb;
 
 	Gtk::HSeparator hseparator1;
 
-	Gtk::Label display_model_label;
-	Gtk::RadioButton display_model_composite_separate_rb;
-	Gtk::RadioButton display_model_composite_all_tracks_rb;
-
 	Gtk::Button refresh_button;
-
 
 	Gtk::CheckButton show_minmax_button;
 	Gtk::CheckButton show_normalized_button;
-
+	Gtk::CheckButton show_proportional_button;
 
 	// The graph
 	FFTGraph fft_graph;

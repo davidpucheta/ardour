@@ -1,19 +1,19 @@
 /*
  * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
  *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "audiographer/general/analyser.h"
@@ -23,7 +23,7 @@ using namespace AudioGrapher;
 
 const float Analyser::fft_range_db (120); // dB
 
-Analyser::Analyser (float sample_rate, unsigned int channels, framecnt_t bufsize, framecnt_t n_samples)
+Analyser::Analyser (float sample_rate, unsigned int channels, samplecnt_t bufsize, samplecnt_t n_samples)
 	: LoudnessReader (sample_rate, channels, bufsize)
 	, _n_samples (n_samples)
 	, _pos (0)
@@ -104,11 +104,11 @@ Analyser::~Analyser ()
 void
 Analyser::process (ProcessContext<float> const & ctx)
 {
-	const framecnt_t n_samples = ctx.frames () / ctx.channels ();
+	const samplecnt_t n_samples = ctx.samples () / ctx.channels ();
 	assert (ctx.channels () == _channels);
-	assert (ctx.frames () % ctx.channels () == 0);
+	assert (ctx.samples () % ctx.channels () == 0);
 	assert (n_samples <= _bufsize);
-	//printf ("PROC %p @%ld F: %ld, S: %ld C:%d\n", this, _pos, ctx.frames (), n_samples, ctx.channels ());
+	//printf ("PROC %p @%ld F: %ld, S: %ld C:%d\n", this, _pos, ctx.samples (), n_samples, ctx.channels ());
 
 	// allow 1 sample slack for resampling
 	if (_pos + n_samples > _n_samples + 1) {
@@ -118,11 +118,11 @@ Analyser::process (ProcessContext<float> const & ctx)
 	}
 
 	float const * d = ctx.data ();
-	framecnt_t s;
+	samplecnt_t s;
 	const unsigned cmask = _result.n_channels - 1; // [0, 1]
 	for (s = 0; s < n_samples; ++s) {
 		_fft_data_in[s] = 0;
-		const framecnt_t pbin = (_pos + s) / _spp;
+		const samplecnt_t pbin = (_pos + s) / _spp;
 		for (unsigned int c = 0; c < _channels; ++c) {
 			const float v = *d;
 			if (fabsf(v) > _result.peak) { _result.peak = fabsf(v); }
@@ -149,12 +149,11 @@ Analyser::process (ProcessContext<float> const & ctx)
 	}
 
 	float const * const data = ctx.data ();
-	for (unsigned int c = 0; c < _channels; ++c) {
-		if (!_dbtp_plugin[c]) { continue; }
+	for (unsigned int c = 0; c < _channels && c < _dbtp_plugins.size (); ++c) {
 		for (s = 0; s < n_samples; ++s) {
 			_bufs[0][s] = data[s * _channels + c];
 		}
-		_dbtp_plugin[c]->process (_bufs, Vamp::RealTime::fromSeconds ((double) _pos / _sample_rate));
+		_dbtp_plugins.at(c)->process (_bufs, Vamp::RealTime::fromSeconds ((double) _pos / _sample_rate));
 	}
 
 	fftwf_execute (_fft_plan);
@@ -169,8 +168,8 @@ Analyser::process (ProcessContext<float> const & ctx)
 #undef FIm
 
 	const size_t height = sizeof (_result.spectrum[0]) / sizeof (float);
-	const framecnt_t x0 = _pos / _fpp;
-	framecnt_t x1 = (_pos + n_samples) / _fpp;
+	const samplecnt_t x0 = _pos / _fpp;
+	samplecnt_t x1 = (_pos + n_samples) / _fpp;
 	if (x0 == x1) x1 = x0 + 1;
 
 	for (uint32_t i = 0; i < _fft_data_size - 1; ++i) {
@@ -212,9 +211,9 @@ Analyser::result ()
 	if (_pos + 1 < _n_samples) {
 		// crude re-bin (silence stripped version)
 		const size_t peaks = sizeof (_result.peaks) / sizeof (ARDOUR::PeakData::PeakDatum) / 4;
-		for (framecnt_t b = peaks - 1; b > 0; --b) {
+		for (samplecnt_t b = peaks - 1; b > 0; --b) {
 			for (unsigned int c = 0; c < _result.n_channels; ++c) {
-				const framecnt_t sb = b * _pos / _n_samples;
+				const samplecnt_t sb = b * _pos / _n_samples;
 				_result.peaks[c][b].min = _result.peaks[c][sb].min;
 				_result.peaks[c][b].max = _result.peaks[c][sb].max;
 			}
@@ -223,9 +222,9 @@ Analyser::result ()
 		const size_t swh = sizeof (_result.spectrum) / sizeof (float);
 		const size_t height = sizeof (_result.spectrum[0]) / sizeof (float);
 		const size_t width = swh / height;
-		for (framecnt_t b = width - 1; b > 0; --b) {
+		for (samplecnt_t b = width - 1; b > 0; --b) {
 			// TODO round down to prev _fft_data_size bin
-			const framecnt_t sb = b * _pos / _n_samples;
+			const samplecnt_t sb = b * _pos / _n_samples;
 			for (unsigned int y = 0; y < height; ++y) {
 				_result.spectrum[b][y] = _result.spectrum[sb][y];
 			}
@@ -235,7 +234,10 @@ Analyser::result ()
 	if (_ebur_plugin) {
 		Vamp::Plugin::FeatureSet features = _ebur_plugin->getRemainingFeatures ();
 		if (!features.empty () && features.size () == 3) {
-			_result.loudness = features[0][0].values[0];
+			_result.integrated_loudness    = features[0][0].values[0];
+			_result.max_loudness_short     = features[0][1].values[0];
+			_result.max_loudness_momentary = features[0][2].values[0];
+
 			_result.loudness_range = features[1][0].values[0];
 			assert (features[2][0].values.size () == 540);
 			for (int i = 0; i < 540; ++i) {
@@ -248,9 +250,8 @@ Analyser::result ()
 	}
 
 	const unsigned cmask = _result.n_channels - 1; // [0, 1]
-	for (unsigned int c = 0; c < _channels; ++c) {
-		if (!_dbtp_plugin[c]) { continue; }
-		Vamp::Plugin::FeatureSet features = _dbtp_plugin[c]->getRemainingFeatures ();
+	for (unsigned int c = 0; c < _channels && c < _dbtp_plugins.size (); ++c) {
+		Vamp::Plugin::FeatureSet features = _dbtp_plugins.at(c)->getRemainingFeatures ();
 		if (!features.empty () && features.size () == 2) {
 			_result.have_dbtp = true;
 			float p = features[0][0].values[0];
@@ -258,7 +259,7 @@ Analyser::result ()
 
 			for (std::vector<float>::const_iterator i = features[1][0].values.begin();
 					i != features[1][0].values.end(); ++i) {
-				const framecnt_t pk = (*i) / _spp;
+				const samplecnt_t pk = (*i) / _spp;
 				const unsigned int cc = c & cmask;
 				_result.truepeakpos[cc].insert (pk);
 			}

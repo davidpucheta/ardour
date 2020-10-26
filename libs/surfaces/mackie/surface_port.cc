@@ -1,20 +1,24 @@
 /*
-	Copyright (C) 2006,2007 John Anderson
-
-	This program is free software; you can redistribute it and/or modify
-	it under the terms of the GNU General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
-	(at your option) any later version.
-
-	This program is distributed in the hope that it will be useful,
-	but WITHOUT ANY WARRANTY; without even the implied warranty of
-	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	GNU General Public License for more details.
-
-	You should have received a copy of the GNU General Public License
-	along with this program; if not, write to the Free Software
-	Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2006-2007 John Anderson
+ * Copyright (C) 2007-2016 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2010-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2015-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 Len Ovens <len@ovenwerks.net>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <sstream>
 #include <cstring>
@@ -33,15 +37,13 @@
 #include "ardour/rc_configuration.h"
 #include "ardour/session.h"
 #include "ardour/audioengine.h"
-#include "ardour/async_midi_port.h"
-#include "ardour/midiport_manager.h"
 
 #include "controls.h"
 #include "mackie_control_protocol.h"
 #include "surface.h"
 #include "surface_port.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace std;
 using namespace PBD;
@@ -94,6 +96,7 @@ SurfacePort::~SurfacePort()
 	} else {
 		if (_async_in) {
 			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("unregistering input port %1\n", _async_in->name()));
+			Glib::Threads::Mutex::Lock em (AudioEngine::instance()->process_lock());
 			AudioEngine::instance()->unregister_port (_async_in);
 			_async_in.reset ((ARDOUR::Port*) 0);
 		}
@@ -101,6 +104,7 @@ SurfacePort::~SurfacePort()
 		if (_async_out) {
 			_output_port->drain (10000, 250000);
 			DEBUG_TRACE (DEBUG::MackieControl, string_compose ("unregistering output port %1\n", _async_out->name()));
+			Glib::Threads::Mutex::Lock em (AudioEngine::instance()->process_lock());
 			AudioEngine::instance()->unregister_port (_async_out);
 			_async_out.reset ((ARDOUR::Port*) 0);
 		}

@@ -1,32 +1,37 @@
 /*
-  Copyright (C) 2003-2014 Paul Davis
+ * Copyright (C) 2016-2018 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+#include "pbd/convert.h"
+#include "pbd/enumwriter.h"
 
 #include "ardour/plugin_manager.h"
 #include "gtkmm2ext/gui_thread.h"
+
 #include "instrument_selector.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace Gtk;
 using namespace ARDOUR;
 
 InstrumentSelector::InstrumentSelector()
 	: _reasonable_synth_id(0)
+	, _gmsynth_id(UINT32_MAX)
 {
 	refill ();
 
@@ -49,7 +54,11 @@ InstrumentSelector::refill()
 	set_model(_instrument_list);
 	pack_start(_instrument_list_columns.name);
 	if (selected.empty ()) {
-		set_active(_reasonable_synth_id);
+		if (_gmsynth_id != UINT32_MAX) {
+			set_active(_gmsynth_id);
+		} else {
+			set_active(_reasonable_synth_id);
+		}
 	} else {
 		TreeModel::Children rows = _instrument_list->children();
 		TreeModel::Children::iterator i;
@@ -64,6 +73,24 @@ InstrumentSelector::refill()
 	set_button_sensitivity(Gtk::SENSITIVITY_AUTO);
 }
 
+static bool
+pluginsort (const PluginInfoPtr& a, const PluginInfoPtr& b)
+{
+	return PBD::downcase(a->name) < PBD::downcase(b->name);
+}
+
+static bool
+invalid_instrument (PluginInfoPtr p) {
+	const PluginManager& manager = PluginManager::instance();
+	if (manager.get_status(p) == PluginManager::Hidden) {
+		return true;
+	}
+	if (manager.get_status(p) == PluginManager::Concealed) {
+		return true;
+	}
+	return !p->is_instrument();
+}
+
 void
 InstrumentSelector::build_instrument_list()
 {
@@ -72,18 +99,25 @@ InstrumentSelector::build_instrument_list()
 	PluginInfoList all_plugs;
 	all_plugs.insert(all_plugs.end(), manager.ladspa_plugin_info().begin(), manager.ladspa_plugin_info().end());
 	all_plugs.insert(all_plugs.end(), manager.lua_plugin_info().begin(), manager.lua_plugin_info().end());
+	all_plugs.insert(all_plugs.end(), manager.lv2_plugin_info().begin(), manager.lv2_plugin_info().end());
 #ifdef WINDOWS_VST_SUPPORT
 	all_plugs.insert(all_plugs.end(), manager.windows_vst_plugin_info().begin(), manager.windows_vst_plugin_info().end());
 #endif
 #ifdef LXVST_SUPPORT
 	all_plugs.insert(all_plugs.end(), manager.lxvst_plugin_info().begin(), manager.lxvst_plugin_info().end());
 #endif
+#ifdef MACVST_SUPPORT
+	all_plugs.insert(all_plugs.end(), manager.mac_vst_plugin_info().begin(), manager.mac_vst_plugin_info().end());
+#endif
 #ifdef AUDIOUNIT_SUPPORT
 	all_plugs.insert(all_plugs.end(), manager.au_plugin_info().begin(), manager.au_plugin_info().end());
 #endif
-#ifdef LV2_SUPPORT
-	all_plugs.insert(all_plugs.end(), manager.lv2_plugin_info().begin(), manager.lv2_plugin_info().end());
+#ifdef VST3_SUPPORT
+	all_plugs.insert(all_plugs.end(), manager.vst3_plugin_info().begin(), manager.vst3_plugin_info().end());
 #endif
+
+	all_plugs.remove_if (invalid_instrument);
+	all_plugs.sort (pluginsort);
 
 	_instrument_list = ListStore::create(_instrument_list_columns);
 
@@ -92,25 +126,65 @@ InstrumentSelector::build_instrument_list()
 	row[_instrument_list_columns.name]     = _("-none-");
 
 	uint32_t n = 1;
-	for (PluginInfoList::const_iterator i = all_plugs.begin(); i != all_plugs.end(); ++i) {
-		if (manager.get_status(*i) == PluginManager::Hidden) {
-			continue;
+	std::string prev;
+	for (PluginInfoList::const_iterator i = all_plugs.begin(); i != all_plugs.end(); ++i, ++n) {
+		PluginInfoPtr p = *i;
+		
+		std::string suffix;
+
+#ifdef MIXBUS
+		uint32_t n_outs = p->max_configurable_ouputs ();
+		if (n_outs > 2) {
+			if (p->reconfigurable_io ()) {
+				suffix = string_compose(_("\u2264 %1 outs"), n_outs);
+			} else {
+				suffix = string_compose(_("%1 outs"), n_outs);
+			}
+		}
+#else
+		if (p->multichannel_name_ambiguity) {
+			uint32_t n_outs = p->max_configurable_ouputs ();
+			if (n_outs > 2) {
+				if (p->reconfigurable_io ()) {
+					suffix = string_compose(_("\u2264 %1 outs"), n_outs);
+				} else {
+					suffix = string_compose(_("%1 outs"), n_outs);
+				}
+			} else if (n_outs == 2) {
+				suffix = _("stereo");
+			}
+		}
+#endif
+
+		if (p->plugintype_name_ambiguity) {
+			std::string pt = PluginManager::plugin_type_name (p->type);
+			if (!suffix.empty ()) {
+				suffix += ", ";
+			}
+			suffix += pt;
 		}
 
-		if ((*i)->is_instrument()) {
-			row                                    = *(_instrument_list->append());
-			row[_instrument_list_columns.name]     = (*i)->name;
-			row[_instrument_list_columns.info_ptr] = *i;
-			if ((*i)->unique_id == "https://community.ardour.org/node/7596") {
-				_reasonable_synth_id = n;
-			}
-			n++;
+		std::string name = p->name;
+		if (!suffix.empty ()) {
+			name += " (" + suffix + ")";
 		}
+
+		row = *(_instrument_list->append());
+		row[_instrument_list_columns.name] = name;
+
+		row[_instrument_list_columns.info_ptr] = p;
+		if (p->unique_id == "https://community.ardour.org/node/7596") {
+			_reasonable_synth_id = n;
+		}
+		if (p->unique_id == "http://gareus.org/oss/lv2/gmsynth") {
+			_gmsynth_id = n;
+		}
+		prev = p->name;
 	}
 }
 
 PluginInfoPtr
-InstrumentSelector::selected_instrument()
+InstrumentSelector::selected_instrument() const
 {
 	TreeModel::iterator iter = get_active();
 	if (!iter) {
@@ -119,4 +193,14 @@ InstrumentSelector::selected_instrument()
 
 	const TreeModel::Row& row = (*iter);
 	return row[_instrument_list_columns.info_ptr];
+}
+
+std::string
+InstrumentSelector::selected_instrument_name () const
+{
+	PluginInfoPtr pip = selected_instrument ();
+	if (!pip) {
+		return "";
+	}
+	return pip->name;
 }

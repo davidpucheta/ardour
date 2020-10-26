@@ -378,6 +378,27 @@ struct CFunc
     }
   };
 
+  template <class T, class R>
+  struct CastClass
+  {
+    static int f (lua_State* L)
+    {
+      T * const t = Userdata::get <T> (L, 1, false );
+      Stack <R*>::push (L, dynamic_cast<R*>(t));
+      return 1;
+    }
+  };
+
+  template <class T, class R>
+  struct CastConstClass
+  {
+    static int f (lua_State* L)
+    {
+      T const* const t = Userdata::get <T> (L, 1, true);
+      Stack <R const*>::push (L, dynamic_cast<R const*>(t));
+      return 1;
+    }
+  };
 
   template <class T>
   struct PtrNullCheck
@@ -406,6 +427,116 @@ struct CFunc
       return 1;
     }
   };
+
+  template <class T>
+  struct PtrEqualCheck
+  {
+    static int f (lua_State* L)
+    {
+      boost::shared_ptr<T> t0 = luabridge::Stack<boost::shared_ptr<T> >::get (L, 1);
+      boost::shared_ptr<T> t1 = luabridge::Stack<boost::shared_ptr<T> >::get (L, 2);
+      Stack <bool>::push (L, t0 == t1);
+      return 1;
+    }
+  };
+
+  template <class T>
+  struct WPtrEqualCheck
+  {
+    static int f (lua_State* L)
+    {
+      bool rv = false;
+      boost::weak_ptr<T> tw0 = luabridge::Stack<boost::weak_ptr<T> >::get (L, 1);
+      boost::weak_ptr<T> tw1 = luabridge::Stack<boost::weak_ptr<T> >::get (L, 2);
+      boost::shared_ptr<T> const t0 = tw0.lock();
+      boost::shared_ptr<T> const t1 = tw1.lock();
+      if (t0 && t1) {
+        T* const tt0 = t0.get();
+        T* const tt1 = t1.get();
+        rv = (tt0 == tt1);
+      }
+      Stack <bool>::push (L, rv);
+      return 1;
+    }
+  };
+
+  template <class T>
+  struct ClassEqualCheck<boost::shared_ptr<T> >
+  {
+    static int f (lua_State* L)
+    {
+      return PtrEqualCheck<T>::f (L);
+    }
+  };
+
+  template <class T>
+  struct ClassEqualCheck<boost::weak_ptr<T> >
+  {
+    static int f (lua_State* L)
+    {
+      return WPtrEqualCheck<T>::f (L);
+    }
+  };
+
+  template <class C, typename T>
+  static int getPtrProperty (lua_State* L)
+  {
+    boost::shared_ptr<C> cp = luabridge::Stack<boost::shared_ptr<C> >::get (L, 1);
+    C const* const c = cp.get();
+    if (!c) {
+      return luaL_error (L, "shared_ptr is nil");
+    }
+    T C::** mp = static_cast <T C::**> (lua_touserdata (L, lua_upvalueindex (1)));
+    Stack <T>::push (L, c->**mp);
+    return 1;
+  }
+
+  template <class C, typename T>
+  static int getWPtrProperty (lua_State* L)
+  {
+    boost::weak_ptr<C> cw = luabridge::Stack<boost::weak_ptr<C> >::get (L, 1);
+    boost::shared_ptr<C> const cp = cw.lock();
+    if (!cp) {
+      return luaL_error (L, "cannot lock weak_ptr");
+    }
+    C const* const c = cp.get();
+    if (!c) {
+      return luaL_error (L, "weak_ptr is nil");
+    }
+    T C::** mp = static_cast <T C::**> (lua_touserdata (L, lua_upvalueindex (1)));
+    Stack <T>::push (L, c->**mp);
+    return 1;
+  }
+
+  template <class C, typename T>
+  static int setPtrProperty (lua_State* L)
+  {
+    boost::shared_ptr<C> cp = luabridge::Stack<boost::shared_ptr<C> >::get (L, 1);
+    C* const c = cp.get();
+    if (!c) {
+      return luaL_error (L, "shared_ptr is nil");
+    }
+    T C::** mp = static_cast <T C::**> (lua_touserdata (L, lua_upvalueindex (1)));
+    c->**mp = Stack <T>::get (L, 2);
+    return 0;
+  }
+
+  template <class C, typename T>
+  static int setWPtrProperty (lua_State* L)
+  {
+    boost::weak_ptr<C> cw = luabridge::Stack<boost::weak_ptr<C> >::get (L, 1);
+    boost::shared_ptr<C> cp = cw.lock();
+    if (!cp) {
+      return luaL_error (L, "cannot lock weak_ptr");
+    }
+    C* const c = cp.get();
+    if (!c) {
+      return luaL_error (L, "weak_ptr is nil");
+    }
+    T C::** mp = static_cast <T C::**> (lua_touserdata (L, lua_upvalueindex (1)));
+    c->**mp = Stack <T>::get (L, 2);
+    return 0;
+  }
 
   template <class MemFnPtr, class T,
            class ReturnType = typename FuncTraits <MemFnPtr>::ReturnType>
@@ -919,6 +1050,7 @@ struct CFunc
   static int array_index (lua_State* L) {
     T** parray = (T**) luaL_checkudata (L, 1, typeid(T).name());
     int const index = luabridge::Stack<int>::get (L, 2);
+    assert (index > 0);
     luabridge::Stack<T>::push (L, (*parray)[index-1]);
     return 1;
   }
@@ -929,6 +1061,7 @@ struct CFunc
     T** parray = (T**) luaL_checkudata (L, 1, typeid(T).name());
     int const index = luabridge::Stack<int>::get (L, 2);
     T const value = luabridge::Stack<T>::get (L, 3);
+    assert (index > 0);
     (*parray)[index-1] = value;
     return 0;
   }
@@ -969,6 +1102,14 @@ struct CFunc
     return 0;
   }
 
+  // return same array at an offset
+  template <typename T>
+  static int offsetArray (lua_State* L) {
+    T *v = luabridge::Stack<T*>::get (L, 1);
+    const unsigned int i = luabridge::Stack<unsigned int>::get (L, 2);
+    Stack <T*>::push (L, &v[i]);
+    return 1;
+  }
 
   //--------------------------------------------------------------------------
   /**
@@ -1009,6 +1150,17 @@ struct CFunc
     if (!t) { return luaL_error (L, "cannot derefencee shared_ptr"); }
     return tableToListHelper<T, C> (L, t->get());
   }
+  //--------------------------------------------------------------------------
+
+
+  template <class T, class C>
+  static int vectorToArray (lua_State *L)
+  {
+    C * const t = Userdata::get<C> (L, 1, false);
+    T * a = &((*t)[0]);
+    Stack <T*>::push (L, a);
+    return 1;
+  }
 
   //--------------------------------------------------------------------------
   template <class T, class C>
@@ -1028,7 +1180,7 @@ struct CFunc
 
   // generate an iterator
   template <class T, class C>
-  static int listIterHelper (lua_State *L, C * const t)
+  static int listIterHelper (lua_State *L, C const * const t)
   {
     if (!t) { return luaL_error (L, "invalid pointer to std::list<>/std::vector"); }
     typedef typename C::const_iterator IterType;
@@ -1041,7 +1193,7 @@ struct CFunc
   template <class T, class C>
   static int listIter (lua_State *L)
   {
-    C * const t = Userdata::get <C> (L, 1, false);
+    C const * const t = Userdata::get <C> (L, 1, true);
     return listIterHelper<T, C> (L, t);
   }
 
@@ -1095,6 +1247,20 @@ struct CFunc
   }
 
   //--------------------------------------------------------------------------
+  // push back a C-pointer to a std::list<T*>
+
+  template <class T, class C>
+  static int pushbackptr (lua_State *L)
+  {
+    C * const c = Userdata::get <C> (L, 1, false);
+    if (!c) { return luaL_error (L, "invalid pointer to std::list<>"); }
+    T * const v = Userdata::get <T> (L, 2, true);
+    if (!v) { return luaL_error (L, "invalid pointer to std::list<>::value_type"); }
+    c->push_back (v);
+    return 0;
+  }
+
+  //--------------------------------------------------------------------------
   // generate std::map from table
 
   template <class K, class V>
@@ -1145,7 +1311,7 @@ struct CFunc
   static int mapIter (lua_State *L)
   {
     typedef std::map<K, V> C;
-    C * const t = Userdata::get <C> (L, 1, false);
+    C const * const t = Userdata::get <C> (L, 1, true);
     if (!t) { return luaL_error (L, "invalid pointer to std::map"); }
     typedef typename C::const_iterator IterType;
     new (lua_newuserdata (L, sizeof (IterType*))) IterType (t->begin());
@@ -1171,14 +1337,30 @@ struct CFunc
     return 1;
   }
 
+  // generate table from std::map
+  template <class K, class V>
+  static int mapAt (lua_State *L)
+  {
+    typedef std::map<K, V> C;
+    C const* const t = Userdata::get <C> (L, 1, true);
+    if (!t) { return luaL_error (L, "invalid pointer to std::map"); }
+    K const key = Stack<K>::get (L, 2);
+    typename C::const_iterator iter = t->find(key);
+    if (iter == t->end()) {
+      return 0;
+    }
+    Stack <V>::push (L, (*iter).second);
+    return 1;
+  }
+
+
   //--------------------------------------------------------------------------
   // generate std::set from table keys ( table[member] = true )
   // http://www.lua.org/pil/11.5.html
 
-  template <class T>
+  template <class T, class C>
   static int tableToSet (lua_State *L)
   {
-    typedef std::set<T> C;
     C * const t = Userdata::get <C> (L, 1, true);
     if (!t) { return luaL_error (L, "invalid pointer to std::set"); }
     if (!lua_istable (L, -1)) { return luaL_error (L, "argument is not a table"); }
@@ -1202,10 +1384,9 @@ struct CFunc
 
   // iterate over a std::set, explicit "true" value.
   // compare to http://www.lua.org/pil/11.5.html
-  template <class T>
+  template <class T, class C>
   static int setIterIter (lua_State *L)
   {
-    typedef std::set<T> C;
     typedef typename C::const_iterator IterType;
     IterType * const end = static_cast <IterType * const> (lua_touserdata (L, lua_upvalueindex (2)));
     IterType * const iter = static_cast <IterType * const> (lua_touserdata (L, lua_upvalueindex (1)));
@@ -1221,24 +1402,22 @@ struct CFunc
   }
 
   // generate iterator
-  template <class T>
+  template <class T, class C>
   static int setIter (lua_State *L)
   {
-    typedef std::set<T> C;
-    C * const t = Userdata::get <C> (L, 1, false);
+    C const * const t = Userdata::get <C> (L, 1, true);
     if (!t) { return luaL_error (L, "invalid pointer to std::set"); }
     typedef typename C::const_iterator IterType;
     new (lua_newuserdata (L, sizeof (IterType*))) IterType (t->begin());
     new (lua_newuserdata (L, sizeof (IterType*))) IterType (t->end());
-    lua_pushcclosure (L, setIterIter<T>, 2);
+    lua_pushcclosure (L, setIterIter<T, C>, 2);
     return 1;
   }
 
   // generate table from std::set
-  template <class T>
+  template <class T, class C>
   static int setToTable (lua_State *L)
   {
-    typedef std::set<T> C;
     C const* const t = Userdata::get <C> (L, 1, true);
     if (!t) { return luaL_error (L, "invalid pointer to std::set"); }
 

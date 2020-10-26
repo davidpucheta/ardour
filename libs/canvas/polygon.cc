@@ -1,21 +1,21 @@
 /*
-    Copyright (C) 2011-2013 Paul Davis
-    Author: Carl Hetherington <cth@carlh.net>
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2015 Paul Davis <paul@linuxaudiosystems.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include "canvas/polygon.h"
 
@@ -46,15 +46,23 @@ Polygon::~Polygon ()
 void
 Polygon::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) const
 {
+	Points::size_type npoints = _points.size();
+	if (npoints < 2) {
+		return;
+	}
+
 	if (_outline || _fill) {
-		render_path (area, context);
+		const double pixel_adjust = (_outline_width == 1.0 ? 0.5 : 0.0);
 
-		if (!_points.empty ()) {
-			/* close path */
-			Duple p = item_to_window (Duple (_points.front().x, _points.front().y));
-			context->line_to (p.x, p.y);
+		for (Points::size_type i = 0; i < npoints; i++) {
+			Duple c = item_to_window (Duple (_points[i].x, _points[i].y));
+			if (i == 0) {
+				context->move_to (c.x + pixel_adjust, c.y + pixel_adjust);
+			} else {
+				context->line_to (c.x + pixel_adjust, c.y + pixel_adjust);
+			}
 		}
-
+		context->close_path ();
 	}
 
 	if (_outline) {

@@ -1,20 +1,25 @@
 /*
-    Copyright (C) 2008 Hans Baier
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2008-2012 Hans Baier <hansfbaier@googlemail.com>
+ * Copyright (C) 2008-2016 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2013-2019 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <stdlib.h>
 
@@ -93,16 +98,16 @@ Patch::get_state (void)
 
 	/* XXX this is totally wrong */
 
-	node->add_property("Number", string_compose ("%1", _id.program()));
-	node->add_property("Name",   _name);
+	node->set_property("Number", _id.program());
+	node->set_property("Name",   _name);
 
 	/*
-	typedef std::list< boost::shared_ptr< Evoral::MIDIEvent<Evoral::Beats> > > PatchMidiCommands;
+	typedef std::list< boost::shared_ptr< Evoral::Event<Temporal::Beats> > > PatchMidiCommands;
 	XMLNode* commands = node->add_child("PatchMIDICommands");
 	for (PatchMidiCommands::const_iterator event = _patch_midi_commands.begin();
 	    event != _patch_midi_commands.end();
 	    ++event) {
-		commands->add_child_copy(*((((Evoral::MIDIEvent&)*event)).to_xml()));
+		commands->add_child_copy(Evoral::MIDIXML::midi_to_xml(*event));
 	}
 	*/
 
@@ -113,7 +118,7 @@ int
 Patch::set_state (const XMLTree& tree, const XMLNode& node)
 {
 	if (node.name() != "Patch") {
-		cerr << "Incorrect node " << node.name() << " handed to Patch" << endl;
+		cerr << "Incorrect node type '" << node.name() << "' handed to Patch" << " contents " << node.content() << endl;
 		return -1;
 	}
 
@@ -151,8 +156,8 @@ XMLNode&
 Note::get_state (void)
 {
 	XMLNode* node = new XMLNode("Note");
-	node->add_property("Number", _number);
-	node->add_property("Name",   _name);
+	node->set_property("Number", _number);
+	node->set_property("Name",   _name);
 
 	return *node;
 }
@@ -180,7 +185,7 @@ XMLNode&
 NoteNameList::get_state (void)
 {
 	XMLNode* node = new XMLNode("NoteNameList");
-	node->add_property("Name", _name);
+	node->set_property("Name", _name);
 
 	return *node;
 }
@@ -234,9 +239,9 @@ XMLNode&
 Control::get_state (void)
 {
 	XMLNode* node = new XMLNode("Control");
-	node->add_property("Type",   _type);
-	node->add_property("Number", _number);
-	node->add_property("Name",   _name);
+	node->set_property("Type",   _type);
+	node->set_property("Number", _number);
+	node->set_property("Name",   _name);
 
 	return *node;
 }
@@ -249,6 +254,9 @@ Control::set_state (const XMLTree& tree, const XMLNode& node)
 		_type = node.property("Type")->value();
 	} else {
 		_type = "7bit";
+	}
+	if (_type == "NRPN") {
+		return -1;
 	}
 	_number = string_to_int(tree, node.property("Number")->value());
 	_name   = node.property("Name")->value();
@@ -276,7 +284,7 @@ XMLNode&
 ControlNameList::get_state (void)
 {
 	XMLNode* node = new XMLNode("ControlNameList");
-	node->add_property("Name", _name);
+	node->set_property("Name", _name);
 
 	return *node;
 }
@@ -292,7 +300,9 @@ ControlNameList::set_state (const XMLTree& tree, const XMLNode& node)
 	     i != node.children().end(); ++i) {
 		if ((*i)->name() == "Control") {
 			boost::shared_ptr<Control> control(new Control());
-			control->set_state (tree, *(*i));
+			if (control->set_state (tree, *(*i))) {
+				continue;
+			}
 			if (_controls.find(control->number()) == _controls.end()) {
 				_controls.insert(make_pair(control->number(), control));
 			} else {
@@ -320,8 +330,8 @@ XMLNode&
 Value::get_state (void)
 {
 	XMLNode* node = new XMLNode("Value");
-	node->add_property("Number", _number);
-	node->add_property("Name",   _name);
+	node->set_property("Number", _number);
+	node->set_property("Name",   _name);
 
 	return *node;
 }
@@ -340,7 +350,7 @@ XMLNode&
 ValueNameList::get_state (void)
 {
 	XMLNode* node = new XMLNode("ValueNameList");
-	node->add_property("Name", _name);
+	node->set_property("Name", _name);
 
 	return *node;
 }
@@ -405,7 +415,7 @@ XMLNode&
 PatchBank::get_state (void)
 {
 	XMLNode* node = new XMLNode("PatchBank");
-	node->add_property("Name",   _name);
+	node->set_property("Name",   _name);
 	XMLNode* patch_name_list = node->add_child("PatchNameList");
 	for (PatchNameList::iterator patch = _patch_name_list.begin();
 	    patch != _patch_name_list.end();
@@ -437,8 +447,9 @@ PatchBank::set_state (const XMLTree& tree, const XMLNode& node)
 		const XMLNodeList patches = patch_name_list->children();
 		for (XMLNodeList::const_iterator i = patches.begin(); i != patches.end(); ++i) {
 			boost::shared_ptr<Patch> patch (new Patch (string(), 0, _number));
-			patch->set_state(tree, *(*i));
-			_patch_name_list.push_back(patch);
+			if (0 == patch->set_state(tree, *(*i))) {
+				_patch_name_list.push_back(patch);
+			}
 		}
 	} else {
 		XMLNode* use_patch_name_list = node.child ("UsesPatchNameList");
@@ -524,7 +535,7 @@ XMLNode&
 ChannelNameSet::get_state (void)
 {
 	XMLNode* node = new XMLNode("ChannelNameSet");
-	node->add_property("Name",   _name);
+	node->set_property("Name",   _name);
 
 	XMLNode* available_for_channels = node->add_child("AvailableForChannels");
 	assert(available_for_channels);
@@ -533,12 +544,12 @@ ChannelNameSet::get_state (void)
 		XMLNode* available_channel = available_for_channels->add_child("AvailableChannel");
 		assert(available_channel);
 
-		available_channel->add_property("Channel", (long) channel);
+		available_channel->set_property("Channel", channel);
 
 		if (_available_for_channels.find(channel) != _available_for_channels.end()) {
-			available_channel->add_property("Available", "true");
+			available_channel->set_property("Available", "true");
 		} else {
-			available_channel->add_property("Available", "false");
+			available_channel->set_property("Available", "false");
 		}
 	}
 
@@ -567,8 +578,12 @@ ChannelNameSet::set_state (const XMLTree& tree, const XMLNode& node)
 			for (XMLSharedNodeList::const_iterator i = channels->begin();
 			    i != channels->end();
 			    ++i) {
-				_available_for_channels.insert(
-					string_to_int(tree, (*i)->attribute_value()));
+				try {
+					_available_for_channels.insert(
+							string_to_int(tree, (*i)->attribute_value()));
+				} catch (XMLException &e) {
+					cerr << "ChannelNameSet::set_state: " << e.what () << endl;
+				}
 			}
 		} else if (node->name() == "PatchBank") {
 			boost::shared_ptr<PatchBank> bank (new PatchBank ());
@@ -615,14 +630,14 @@ XMLNode&
 CustomDeviceMode::get_state(void)
 {
 	XMLNode* custom_device_mode = new XMLNode("CustomDeviceMode");
-	custom_device_mode->add_property("Name",   _name);
+	custom_device_mode->set_property("Name",   _name);
 	XMLNode* channel_name_set_assignments =
 		custom_device_mode->add_child("ChannelNameSetAssignments");
 	for (int i = 0; i < 15 && !_channel_name_set_assignments[i].empty(); i++) {
 		XMLNode* channel_name_set_assign =
 			channel_name_set_assignments->add_child("ChannelNameSetAssign");
-		channel_name_set_assign->add_property("Channel", i + 1);
-		channel_name_set_assign->add_property("NameSet", _channel_name_set_assignments[i]);
+		channel_name_set_assign->set_property("Channel", i + 1);
+		channel_name_set_assign->set_property("NameSet", _channel_name_set_assignments[i]);
 	}
 
 	return *custom_device_mode;
@@ -828,13 +843,17 @@ MasterDeviceNames::set_state(const XMLTree& tree, const XMLNode&)
 	     i != patch_name_lists->end();
 	     ++i) {
 
+		string n; (*i)->get_property ("Name", n);
+
 		PatchNameList patch_name_list;
 		const XMLNodeList patches = (*i)->children();
 
 		for (XMLNodeList::const_iterator p = patches.begin(); p != patches.end(); ++p) {
 			boost::shared_ptr<Patch> patch (new Patch ());
-			patch->set_state(tree, *(*p));
-			patch_name_list.push_back(patch);
+			// cerr << "Let's try: "; (*(*p)).dump (cerr); cerr << endl;
+			if (0 == patch->set_state(tree, *(*p))) {
+				patch_name_list.push_back(patch);
+			}
 		}
 
 		if (!patch_name_list.empty()) {
@@ -948,138 +967,6 @@ MIDINameDocument::master_device_names(const std::string& model)
 	return boost::shared_ptr<MasterDeviceNames>();
 }
 
-const char* general_midi_program_names[128] = {
-	"Acoustic Grand Piano",
-	"Bright Acoustic Piano",
-	"Electric Grand Piano",
-	"Honky-tonk Piano",
-	"Rhodes Piano",
-	"Chorused Piano",
-	"Harpsichord",
-	"Clavinet",
-	"Celesta",
-	"Glockenspiel",
-	"Music Box",
-	"Vibraphone",
-	"Marimba",
-	"Xylophone",
-	"Tubular Bells",
-	"Dulcimer",
-	"Hammond Organ",
-	"Percussive Organ",
-	"Rock Organ",
-	"Church Organ",
-	"Reed Organ",
-	"Accordion",
-	"Harmonica",
-	"Tango Accordion",
-	"Acoustic Guitar (nylon)",
-	"Acoustic Guitar (steel)",
-	"Electric Guitar (jazz)",
-	"Electric Guitar (clean)",
-	"Electric Guitar (muted)",
-	"Overdriven Guitar",
-	"Distortion Guitar",
-	"Guitar Harmonics",
-	"Acoustic Bass",
-	"Electric Bass (finger)",
-	"Electric Bass (pick)",
-	"Fretless Bass",
-	"Slap Bass 1",
-	"Slap Bass 2",
-	"Synth Bass 1",
-	"Synth Bass 2",
-	"Violin",
-	"Viola",
-	"Cello",
-	"Contrabass",
-	"Tremolo Strings",
-	"Pizzicato Strings",
-	"Orchestral Harp",
-	"Timpani",
-	"String Ensemble 1",
-	"String Ensemble 2",
-	"SynthStrings 1",
-	"SynthStrings 2",
-	"Choir Aahs",
-	"Voice Oohs",
-	"Synth Voice",
-	"Orchestra Hit",
-	"Trumpet",
-	"Trombone",
-	"Tuba",
-	"Muted Trumpet",
-	"French Horn",
-	"Brass Section",
-	"Synth Brass 1",
-	"Synth Brass 2",
-	"Soprano Sax",
-	"Alto Sax",
-	"Tenor Sax",
-	"Baritone Sax",
-	"Oboe",
-	"English Horn",
-	"Bassoon",
-	"Clarinet",
-	"Piccolo",
-	"Flute",
-	"Recorder",
-	"Pan Flute",
-	"Bottle Blow",
-	"Shakuhachi",
-	"Whistle",
-	"Ocarina",
-	"Lead 1 (square)",
-	"Lead 2 (sawtooth)",
-	"Lead 3 (calliope lead)",
-	"Lead 4 (chiff lead)",
-	"Lead 5 (charang)",
-	"Lead 6 (voice)",
-	"Lead 7 (fifths)",
-	"Lead 8 (bass + lead)",
-	"Pad 1 (new age)",
-	"Pad 2 (warm)",
-	"Pad 3 (polysynth)",
-	"Pad 4 (choir)",
-	"Pad 5 (bowed)",
-	"Pad 6 (metallic)",
-	"Pad 7 (halo)",
-	"Pad 8 (sweep)",
-	"FX 1 (rain)",
-	"FX 2 (soundtrack)",
-	"FX 3 (crystal)",
-	"FX 4 (atmosphere)",
-	"FX 5 (brightness)",
-	"FX 6 (goblins)",
-	"FX 7 (echoes)",
-	"FX 8 (sci-fi)",
-	"Sitar",
-	"Banjo",
-	"Shamisen",
-	"Koto",
-	"Kalimba",
-	"Bagpipe",
-	"Fiddle",
-	"Shanai",
-	"Tinkle Bell",
-	"Agogo",
-	"Steel Drums",
-	"Woodblock",
-	"Taiko Drum",
-	"Melodic Tom",
-	"Synth Drum",
-	"Reverse Cymbal",
-	"Guitar Fret Noise",
-	"Breath Noise",
-	"Seashore",
-	"Bird Tweet",
-	"Telephone Ring",
-	"Helicopter",
-	"Applause",
-	"Gunshot",
-};
-
 } //namespace Name
 
 } //namespace MIDI
-

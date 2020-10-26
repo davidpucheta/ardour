@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 1999-2009 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 1999-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2010-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ * Copyright (C) 2015 GZharun <grygoriiz@wavesglobal.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -27,15 +30,17 @@
 
 #include "pbd/error.h"
 #include "pbd/pthread_utils.h"
-#include "ardour/debug.h"
+
 #include "ardour/butler.h"
+#include "ardour/debug.h"
+#include "ardour/disk_io.h"
+#include "ardour/disk_reader.h"
 #include "ardour/io.h"
-#include "ardour/midi_diskstream.h"
 #include "ardour/session.h"
 #include "ardour/track.h"
 #include "ardour/auditioner.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace PBD;
 
@@ -45,9 +50,9 @@ Butler::Butler(Session& s)
 	: SessionHandleRef (s)
 	, thread()
 	, have_thread (false)
-	, audio_dstream_capture_buffer_size(0)
-	, audio_dstream_playback_buffer_size(0)
-	, midi_dstream_buffer_size(0)
+	, _audio_capture_buffer_size(0)
+	, _audio_playback_buffer_size(0)
+	, _midi_buffer_size(0)
 	, pool_trash(16)
 	, _xthread (true)
 {
@@ -78,26 +83,20 @@ Butler::config_changed (std::string p)
 		_session.adjust_playback_buffering ();
 		if (Config->get_buffering_preset() == Custom) {
 			/* size is in Samples, not bytes */
-			audio_dstream_playback_buffer_size = (uint32_t) floor (Config->get_audio_playback_buffer_seconds() * _session.frame_rate());
+			_audio_playback_buffer_size = (uint32_t) floor (Config->get_audio_playback_buffer_seconds() * _session.sample_rate());
 			_session.adjust_playback_buffering ();
-		} else {
-			std::cerr << "Skip explicit buffer seconds, preset in use\n";
 		}
 	} else if (p == "capture-buffer-seconds") {
 		if (Config->get_buffering_preset() == Custom) {
-			audio_dstream_capture_buffer_size = (uint32_t) floor (Config->get_audio_capture_buffer_seconds() * _session.frame_rate());
+			_audio_capture_buffer_size = (uint32_t) floor (Config->get_audio_capture_buffer_seconds() * _session.sample_rate());
 			_session.adjust_capture_buffering ();
-		} else {
-			std::cerr << "Skip explicit buffer seconds, preset in use\n";
 		}
 	} else if (p == "buffering-preset") {
-		Diskstream::set_buffering_parameters (Config->get_buffering_preset());
-		audio_dstream_capture_buffer_size = (uint32_t) floor (Config->get_audio_capture_buffer_seconds() * _session.frame_rate());
-		audio_dstream_playback_buffer_size = (uint32_t) floor (Config->get_audio_playback_buffer_seconds() * _session.frame_rate());
+		DiskIOProcessor::set_buffering_parameters (Config->get_buffering_preset());
+		_audio_capture_buffer_size = (uint32_t) floor (Config->get_audio_capture_buffer_seconds() * _session.sample_rate());
+		_audio_playback_buffer_size = (uint32_t) floor (Config->get_audio_playback_buffer_seconds() * _session.sample_rate());
 		_session.adjust_capture_buffering ();
 		_session.adjust_playback_buffering ();
-	} else if (p == "midi-readahead") {
-		MidiDiskstream::set_readahead_frames ((framecnt_t) (Config->get_midi_readahead() * _session.frame_rate()));
 	}
 }
 
@@ -105,20 +104,18 @@ int
 Butler::start_thread()
 {
 	// set up capture and playback buffering
-	Diskstream::set_buffering_parameters (Config->get_buffering_preset());
+	DiskIOProcessor::set_buffering_parameters (Config->get_buffering_preset());
 
 	/* size is in Samples, not bytes */
-	const float rate = (float)_session.frame_rate();
-	audio_dstream_capture_buffer_size = (uint32_t) floor (Config->get_audio_capture_buffer_seconds() * rate);
-	audio_dstream_playback_buffer_size = (uint32_t) floor (Config->get_audio_playback_buffer_seconds() * rate);
+	const float rate = (float)_session.sample_rate();
+	_audio_capture_buffer_size = (uint32_t) floor (Config->get_audio_capture_buffer_seconds() * rate);
+	_audio_playback_buffer_size = (uint32_t) floor (Config->get_audio_playback_buffer_seconds() * rate);
 
 	/* size is in bytes
 	 * XXX: AudioEngine needs to tell us the MIDI buffer size
 	 * (i.e. how many MIDI bytes we might see in a cycle)
 	 */
-	midi_dstream_buffer_size = (uint32_t) floor (Config->get_midi_track_buffer_seconds() * rate);
-
-	MidiDiskstream::set_readahead_frames ((framecnt_t) (Config->get_midi_readahead() * rate));
+	_midi_buffer_size = (uint32_t) floor (Config->get_midi_track_buffer_seconds() * rate);
 
 	should_run = false;
 
@@ -206,12 +203,23 @@ Butler::thread_work ()
 		if (transport_work_requested()) {
 			DEBUG_TRACE (DEBUG::Butler, string_compose ("do transport work @ %1\n", g_get_monotonic_time()));
 			_session.butler_transport_work ();
-			DEBUG_TRACE (DEBUG::Butler, string_compose ("\ttransport work complete @ %1\n", g_get_monotonic_time()));
+			DEBUG_TRACE (DEBUG::Butler, string_compose ("\ttransport work complete @ %1, twr = %2\n", g_get_monotonic_time(), transport_work_requested()));
+
+			if (_session.locate_initiated()) {
+				/* we have done the "stop" required for a
+				   locate (DeclickToLocate state in TFSM), but
+				   once that finishes we're going to do a locate,
+				   so do not bother with buffer refills at this
+				   time.
+				*/
+				DEBUG_TRACE (DEBUG::Butler, string_compose ("\tlocate pending, so just pause @ %1 till woken again\n", g_get_monotonic_time()));
+				paused.signal ();
+				continue;
+			}
 		}
 
-		frameoffset_t audition_seek;
-		if (should_run && _session.is_auditioning()
-				&& (audition_seek = _session.the_auditioner()->seek_frame()) >= 0) {
+		sampleoffset_t audition_seek;
+		if (should_run && _session.is_auditioning() && (audition_seek = _session.the_auditioner()->seek_sample()) >= 0) {
 			boost::shared_ptr<Track> tr = boost::dynamic_pointer_cast<Track> (_session.the_auditioner());
 			DEBUG_TRACE (DEBUG::Butler, "seek the auditioner\n");
 			tr->seek(audition_seek);
@@ -223,6 +231,8 @@ Butler::thread_work ()
 
 		RouteList rl_with_auditioner = *rl;
 		rl_with_auditioner.push_back (_session.the_auditioner());
+
+		DEBUG_TRACE (DEBUG::Butler, string_compose ("butler starts refill loop, twr = %1\n", transport_work_requested()));
 
 		for (i = rl_with_auditioner.begin(); !transport_work_requested() && should_run && i != rl_with_auditioner.end(); ++i) {
 
@@ -236,13 +246,13 @@ Butler::thread_work ()
 
 			if (io && !io->active()) {
 				/* don't read inactive tracks */
-				DEBUG_TRACE (DEBUG::Butler, string_compose ("butler skips inactive track %1\n", tr->name()));
+				// DEBUG_TRACE (DEBUG::Butler, string_compose ("butler skips inactive track %1\n", tr->name()));
 				continue;
 			}
-			DEBUG_TRACE (DEBUG::Butler, string_compose ("butler refills %1, playback load = %2\n", tr->name(), tr->playback_buffer_load()));
+			// DEBUG_TRACE (DEBUG::Butler, string_compose ("butler refills %1, playback load = %2\n", tr->name(), tr->playback_buffer_load()));
 			switch (tr->do_refill ()) {
 			case 0:
-				DEBUG_TRACE (DEBUG::Butler, string_compose ("\ttrack refill done %1\n", tr->name()));
+				//DEBUG_TRACE (DEBUG::Butler, string_compose ("\ttrack refill done %1\n", tr->name()));
 				break;
 
 			case 1:
@@ -268,7 +278,7 @@ Butler::thread_work ()
 			goto restart;
 		}
 
-		disk_work_outstanding = flush_tracks_to_disk_normal (rl, err);
+		disk_work_outstanding = disk_work_outstanding || flush_tracks_to_disk_normal (rl, err);
 
 		if (err && _session.actively_recording()) {
 			/* stop the transport and try to catch as much possible
@@ -327,15 +337,15 @@ Butler::flush_tracks_to_disk_normal (boost::shared_ptr<RouteList> rl, uint32_t& 
 
 		int ret;
 
-		DEBUG_TRACE (DEBUG::Butler, string_compose ("butler flushes track %1 capture load %2\n", tr->name(), tr->capture_buffer_load()));
+		// DEBUG_TRACE (DEBUG::Butler, string_compose ("butler flushes track %1 capture load %2\n", tr->name(), tr->capture_buffer_load()));
 		ret = tr->do_flush (ButlerContext, false);
 		switch (ret) {
 		case 0:
-			DEBUG_TRACE (DEBUG::Butler, string_compose ("\tflush complete for %1\n", tr->name()));
+			//DEBUG_TRACE (DEBUG::Butler, string_compose ("\tflush complete for %1\n", tr->name()));
 			break;
 
 		case 1:
-			DEBUG_TRACE (DEBUG::Butler, string_compose ("\tflush not finished for %1\n", tr->name()));
+			//DEBUG_TRACE (DEBUG::Butler, string_compose ("\tflush not finished for %1\n", tr->name()));
 			disk_work_outstanding = true;
 			break;
 
@@ -404,6 +414,7 @@ Butler::flush_tracks_to_disk_after_locate (boost::shared_ptr<RouteList> rl, uint
 void
 Butler::schedule_transport_work ()
 {
+	DEBUG_TRACE (DEBUG::Butler, "requesting more transport work\n");
 	g_atomic_int_inc (&should_do_transport_work);
 	summon ();
 }
@@ -497,4 +508,3 @@ Butler::drop_references ()
 
 
 } // namespace ARDOUR
-

@@ -1,21 +1,28 @@
 /*
-    Copyright (C) 2003 Paul Davis
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2005-2008 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2005-2019 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2005 Karsten Wiese <fzuuzf@googlemail.com>
+ * Copyright (C) 2005 Taybin Rutkin <taybin@taybin.com>
+ * Copyright (C) 2006-2014 David Robillard <d@drobilla.net>
+ * Copyright (C) 2007 Doug McLain <doug@nostar.net>
+ * Copyright (C) 2009-2012 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2015 Ben Loftis <ben@harrisonconsoles.com>
+ * Copyright (C) 2014-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #ifndef __ardour_gtk_time_axis_h__
 #define __ardour_gtk_time_axis_h__
@@ -33,18 +40,19 @@
 #include <gtkmm/label.h>
 #include <gtkmm/sizegroup.h>
 
-#include <gtkmm2ext/focus_entry.h>
-
 #include "pbd/stateful.h"
 #include "pbd/signals.h"
 
+#include "evoral/Parameter.h"
+
 #include "ardour/types.h"
+#include "ardour/presentation_info.h"
 #include "ardour/region.h"
-#include "evoral/Parameter.hpp"
 
 #include "canvas/line.h"
 
-#include "prompter.h"
+#include "widgets/focus_entry.h"
+
 #include "axis_view.h"
 #include "enums.h"
 #include "editing.h"
@@ -55,6 +63,7 @@ namespace ARDOUR {
 	class Session;
 	class RouteGroup;
 	class Playlist;
+	class Stripable;
 }
 
 namespace Gtk {
@@ -88,13 +97,13 @@ class PasteContext;
  */
 class TimeAxisView : public virtual AxisView
 {
-	private:
+private:
 	enum NamePackingBits {
 		NameLabelPacked = 0x1,
 		NameEntryPacked = 0x2
 	};
 
-	public:
+public:
 	TimeAxisView(ARDOUR::Session* sess, PublicEditor& ed, TimeAxisView* parent, ArdourCanvas::Canvas& canvas);
 	virtual ~TimeAxisView ();
 
@@ -135,6 +144,8 @@ class TimeAxisView : public virtual AxisView
 
 	void set_selected (bool);
 
+	virtual bool selectable() const { return true; }
+
 	/**
 	 * potential handler for entered events
 	 */
@@ -166,7 +177,7 @@ class TimeAxisView : public virtual AxisView
 	virtual void show_selection (TimeSelection&);
 	virtual void hide_selection ();
 	virtual void reshow_selection (TimeSelection&);
-	virtual void show_timestretch (framepos_t start, framepos_t end, int layers, int layer);
+	virtual void show_timestretch (samplepos_t start, samplepos_t end, int layers, int layer);
 	virtual void hide_timestretch ();
 
 	/* editing operations */
@@ -174,26 +185,32 @@ class TimeAxisView : public virtual AxisView
 	virtual void cut_copy_clear (Selection&, Editing::CutCopyOp) {}
 
 	/** Paste a selection.
-	 *  @param pos Position to paste to (session frames).
+	 *  @param pos Position to paste to (session samples).
 	 *  @param selection Selection to paste.
 	 *  @param ctx Paste context.
+	 *  @param sub_num music-time sub-division: \c -1: snap to bar, \c 1: exact beat, \c >1: \c (1 \c / \p sub_num \c ) beat-divisions
 	 */
-	virtual bool paste (ARDOUR::framepos_t pos,
-	                    const Selection&   selection,
-	                    PasteContext&      ctx) { return false; }
+	virtual bool paste (ARDOUR::samplepos_t pos,
+	                    const Selection&    selection,
+	                    PasteContext&       ctx,
+	                    const int32_t sub_num)
+	{
+		return false;
+	}
+
 
 	virtual void set_selected_regionviews (RegionSelection&) {}
-	virtual void set_selected_points (PointSelection&) {}
+	virtual void set_selected_points (PointSelection&);
 
 	virtual void fade_range (TimeSelection&) {}
 
-	virtual boost::shared_ptr<ARDOUR::Region> find_next_region (framepos_t /*pos*/, ARDOUR::RegionPoint, int32_t /*dir*/) {
+	virtual boost::shared_ptr<ARDOUR::Region> find_next_region (samplepos_t /*pos*/, ARDOUR::RegionPoint, int32_t /*dir*/) {
 		return boost::shared_ptr<ARDOUR::Region> ();
 	}
 
 	void order_selection_trims (ArdourCanvas::Item *item, bool put_start_on_top);
 
-	virtual void get_selectables (ARDOUR::framepos_t, ARDOUR::framepos_t, double, double, std::list<Selectable*>&, bool within = false);
+	virtual void get_selectables (ARDOUR::samplepos_t, ARDOUR::samplepos_t, double, double, std::list<Selectable*>&, bool within = false);
 	virtual void get_inverted_selectables (Selection&, std::list<Selectable *>& results);
 
 	void add_ghost (RegionView*);
@@ -211,13 +228,11 @@ class TimeAxisView : public virtual AxisView
 	virtual StreamView* view () const { return 0; }
 
 	typedef std::vector<boost::shared_ptr<TimeAxisView> > Children;
-	Children get_child_list ();
-
-	SelectionRect* get_selection_rect(uint32_t id);
+	Children get_child_list () const;
 
 	static uint32_t preset_height (Height);
 
-	protected:
+protected:
 	static Glib::RefPtr<Gtk::SizeGroup> controls_meters_size_group;
 	static Glib::RefPtr<Gtk::SizeGroup> midi_scroomer_size_group;
 	static unsigned int name_width_px;
@@ -229,9 +244,7 @@ class TimeAxisView : public virtual AxisView
 	Gtk::VBox              time_axis_vbox;
 	Gtk::HBox              time_axis_hbox;
 	Gtk::Frame             time_axis_frame;
-	Gtk::HBox              name_hbox;
 	Gtk::HBox              top_hbox;
-	Gtk::Label             name_label;
 	Gtk::Fixed             scroomer_placeholder;
 	bool                  _name_editing;
 	uint32_t               height;  /* in canvas units */
@@ -254,20 +267,13 @@ class TimeAxisView : public virtual AxisView
 
 	virtual bool can_edit_name() const;
 
-	bool name_entry_key_release (GdkEventKey *ev);
-	bool name_entry_key_press (GdkEventKey *ev);
-	bool name_entry_focus_out (GdkEventFocus *ev);
-	void name_entry_populate_popup (Gtk::Menu *);
-
-	Gtk::Entry* name_entry;
-	bool ending_name_edit;
-	bool by_popup_menu;
 	void begin_name_edit ();
-	void end_name_edit (int);
+	void end_name_edit (std::string, int);
+	virtual std::string name () const { return name_label.get_text (); }
 
 	/* derived classes can override these */
 
-	virtual void name_entry_changed ();
+	virtual bool name_entry_changed (std::string const&);
 
 	/** Handle mouse relaese on our LHS control name ebox.
 	 *
@@ -296,6 +302,7 @@ class TimeAxisView : public virtual AxisView
 
 	Children children;
 	bool is_child (TimeAxisView*);
+	virtual bool propagate_time_selection () const { return false; }
 
 	virtual void remove_child (boost::shared_ptr<TimeAxisView>);
 	void add_child (boost::shared_ptr<TimeAxisView>);
@@ -305,6 +312,7 @@ class TimeAxisView : public virtual AxisView
 	virtual void selection_click (GdkEventButton*);
 
 	void color_handler ();
+	void parameter_changed (std::string const &);
 
 	void conditionally_add_to_selection ();
 
@@ -324,8 +332,11 @@ private:
 	static uint32_t extra_height;
 	static int const _max_order;
 
+	SelectionRect* get_selection_rect(uint32_t id);
+
 	void compute_heights ();
 	bool maybe_set_cursor (int y);
+	void set_name_ellipsize_mode ();
 
 }; /* class TimeAxisView */
 

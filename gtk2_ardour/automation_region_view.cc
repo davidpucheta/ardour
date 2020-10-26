@@ -1,21 +1,24 @@
 /*
-    Copyright (C) 2007 Paul Davis
-    Author: David Robillard
-
-    This program is free software; you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation; either version 2 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-*/
+ * Copyright (C) 2007-2015 David Robillard <d@drobilla.net>
+ * Copyright (C) 2008-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2009-2011 Carl Hetherington <carl@carlh.net>
+ * Copyright (C) 2014-2017 Nick Mainsbridge <mainsbridge@gmail.com>
+ * Copyright (C) 2017-2019 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <utility>
 
@@ -25,6 +28,7 @@
 #include "ardour/event_type_map.h"
 #include "ardour/midi_automation_list_binder.h"
 #include "ardour/midi_region.h"
+#include "ardour/midi_track.h"
 #include "ardour/session.h"
 
 #include "gtkmm2ext/keyboard.h"
@@ -38,7 +42,7 @@
 #include "public_editor.h"
 #include "ui_config.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 AutomationRegionView::AutomationRegionView (ArdourCanvas::Container*                  parent,
                                             AutomationTimeAxisView&                   time_axis,
@@ -52,6 +56,8 @@ AutomationRegionView::AutomationRegionView (ArdourCanvas::Container*            
 	, _source_relative_time_converter(region->session().tempo_map(), region->position() - region->start())
 	, _parameter(param)
 {
+	TimeAxisViewItem::set_position (_region->position(), this);
+
 	if (list) {
 		assert(list->parameter() == param);
 		create_line(list);
@@ -66,6 +72,7 @@ AutomationRegionView::AutomationRegionView (ArdourCanvas::Container*            
 
 AutomationRegionView::~AutomationRegionView ()
 {
+	in_destructor = true;
 	RegionViewGoingAway (this); /* EMIT_SIGNAL */
 }
 
@@ -119,7 +126,7 @@ AutomationRegionView::get_fill_color() const
 void
 AutomationRegionView::mouse_mode_changed ()
 {
-	// Adjust frame colour (become more transparent for internal tools)
+	/* Adjust frame colour (become more transparent for internal tools) */
 	set_frame_color();
 }
 
@@ -134,6 +141,7 @@ AutomationRegionView::canvas_group_event (GdkEvent* ev)
 
 	if (trackview.editor().internal_editing() &&
 	    ev->type == GDK_BUTTON_RELEASE &&
+	    ev->button.button == 1 &&
 	    e.current_mouse_mode() == Editing::MouseDraw &&
 	    !e.drags()->active()) {
 
@@ -156,11 +164,11 @@ AutomationRegionView::canvas_group_event (GdkEvent* ev)
 	return RegionView::canvas_group_event (ev);
 }
 
-/** @param when Position in frames, where 0 is the start of the region.
+/** @param when Position in samples, where 0 is the start of the region.
  *  @param y y position, relative to our TimeAxisView.
  */
 void
-AutomationRegionView::add_automation_event (GdkEvent *, framepos_t when, double y, bool with_guard_points)
+AutomationRegionView::add_automation_event (GdkEvent *, samplepos_t when, double y, bool with_guard_points)
 {
 	if (!_line) {
 		boost::shared_ptr<Evoral::Control> c = _region->control(_parameter, true);
@@ -174,18 +182,28 @@ AutomationRegionView::add_automation_event (GdkEvent *, framepos_t when, double 
 	AutomationTimeAxisView* const view = automation_view ();
 
 	/* compute vertical fractional position */
+	y = 1.0 - (y / _line->height());
 
-	const double h = trackview.current_height() - TimeAxisViewItem::NAME_HIGHLIGHT_SIZE - 2;
-	y = 1.0 - (y / h);
+	/* snap sample, prepare conversion to double beats */
+	double when_d = snap_sample_to_sample (when - _region->start ()).sample + _region->start ();
 
-	/* snap frame */
-
-	when = snap_frame_to_frame (when - _region->start ()) + _region->start ();
-
-	/* map using line */
-
-	double when_d = when;
+	/* convert 'when' to music-time relative to the region and scale y from interface to internal */
 	_line->view_to_model_coord (when_d, y);
+
+	if (UIConfiguration::instance().get_new_automation_points_on_lane()) {
+		boost::shared_ptr<Evoral::Control> c = _region->control (_parameter, false);
+		assert (c);
+		if (c->list()->size () == 0) {
+			/* we need the MidiTrack::MidiControl, not the region's (midi model source) control */
+			boost::shared_ptr<ARDOUR::MidiTrack> mt = boost::dynamic_pointer_cast<ARDOUR::MidiTrack> (view->parent_stripable ());
+			assert (mt);
+			boost::shared_ptr<Evoral::Control> mc = mt->control(_parameter);
+			assert (mc);
+			y = mc->user_double ();
+		} else {
+			y = c->list()->eval (when_d);
+		}
+	}
 
 	XMLNode& before = _line->the_list()->get_state();
 
@@ -202,11 +220,13 @@ AutomationRegionView::add_automation_event (GdkEvent *, framepos_t when, double 
 }
 
 bool
-AutomationRegionView::paste (framepos_t                                      pos,
+AutomationRegionView::paste (samplepos_t                                     pos,
                              unsigned                                        paste_count,
                              float                                           times,
                              boost::shared_ptr<const ARDOUR::AutomationList> slist)
 {
+	using namespace ARDOUR;
+
 	AutomationTimeAxisView* const             view    = automation_view();
 	boost::shared_ptr<ARDOUR::AutomationList> my_list = _line->the_list();
 
@@ -215,15 +235,24 @@ AutomationRegionView::paste (framepos_t                                      pos
 		return false;
 	}
 
-	/* add multi-paste offset if applicable */
-	pos += view->editor().get_paste_offset(
-		pos, paste_count, _source_relative_time_converter.to(slist->length()));
+	AutomationType src_type = (AutomationType)slist->parameter().type ();
+	double len = slist->length();
 
-	const double model_pos = _source_relative_time_converter.from(
+	/* add multi-paste offset if applicable */
+	if (parameter_is_midi (src_type)) {
+		// convert length to samples (incl tempo-ramps)
+		len = DoubleBeatsSamplesConverter (view->session()->tempo_map(), pos).to (len * paste_count);
+		pos += view->editor ().get_paste_offset (pos, paste_count > 0 ? 1 : 0, len);
+	} else {
+		pos += view->editor ().get_paste_offset (pos, paste_count, len);
+	}
+
+	/* convert sample-position to model's unit and position */
+	const double model_pos = _source_relative_time_converter.from (
 		pos - _source_relative_time_converter.origin_b());
 
 	XMLNode& before = my_list->get_state();
-	my_list->paste(*slist, model_pos, times);
+	my_list->paste(*slist, model_pos, DoubleBeatsSamplesConverter (view->session()->tempo_map(), pos));
 	view->session()->add_command(
 		new MementoCommand<ARDOUR::AutomationList>(_line->memento_command_binder(), &before, &my_list->get_state()));
 
@@ -241,7 +270,7 @@ AutomationRegionView::set_height (double h)
 }
 
 bool
-AutomationRegionView::set_position (framepos_t pos, void* src, double* ignored)
+AutomationRegionView::set_position (samplepos_t pos, void* src, double* ignored)
 {
 	if (_line) {
 		_line->set_maximum_time (_region->length ());

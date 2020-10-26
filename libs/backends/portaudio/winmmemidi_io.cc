@@ -1,5 +1,6 @@
 /*
- * Copyright (C) 2015 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2015-2016 Tim Mayberry <mojofunk@gmail.com>
+ * Copyright (C) 2016 Robin Gareus <robin@gareus.org>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -11,13 +12,14 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include <windows.h>
 #include <mmsystem.h>
+#include <glibmm.h>
 
 #include <sstream>
 #include <set>
@@ -29,7 +31,7 @@
 #include "winmmemidi_io.h"
 #include "debug.h"
 
-#include "i18n.h"
+#include "pbd/i18n.h"
 
 using namespace ARDOUR;
 
@@ -223,7 +225,7 @@ WinMMEMidiIO::get_input_name_from_index (int index, std::string& name)
 		                          capabilities.wMid,
 		                          capabilities.wPid));
 
-		name = capabilities.szPname;
+		name = Glib::locale_to_utf8 (capabilities.szPname);
 		return true;
 	} else {
 		DEBUG_MIDI ("Unable to get WinMME input device capabilities\n");
@@ -241,7 +243,8 @@ WinMMEMidiIO::get_output_name_from_index (int index, std::string& name)
 		                          capabilities.szPname,
 		                          capabilities.wMid,
 		                          capabilities.wPid));
-		name = capabilities.szPname;
+
+		name = Glib::locale_to_utf8 (capabilities.szPname);
 		return true;
 	} else {
 		DEBUG_MIDI ("Unable to get WinMME output device capabilities\n");

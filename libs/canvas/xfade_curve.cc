@@ -1,22 +1,21 @@
 /*
-  Copyright (C) 2013 Paul Davis
-  Copyright (C) 2014 Robin Gareus <robin@gareus.org>
-
-  This program is free software; you can redistribute it and/or modify
-  it under the terms of the GNU General Public License as published by
-  the Free Software Foundation; either version 2 of the License, or
-  (at your option) any later version.
-
-  This program is distributed in the hope that it will be useful,
-  but WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  GNU General Public License for more details.
-
-  You should have received a copy of the GNU General Public License
-  along with this program; if not, write to the Free Software
-  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
-
-*/
+ * Copyright (C) 2014-2017 Paul Davis <paul@linuxaudiosystems.com>
+ * Copyright (C) 2014-2017 Robin Gareus <robin@gareus.org>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+ */
 
 #include <cmath>
 #include <exception>
@@ -24,17 +23,12 @@
 
 #include "canvas/xfade_curve.h"
 #include "canvas/interpolated_curve.h"
-#include "canvas/utils.h"
 
 using namespace ArdourCanvas;
 using std::min;
 using std::max;
 
-#ifdef USE_TRACKS_CODE_FEATURES
-static const bool show_bg_fades = false;
-#else
 static const bool show_bg_fades = true;
-#endif
 
 XFadeCurve::XFadeCurve (Canvas* c)
 	: Item (c)
@@ -118,7 +112,7 @@ XFadeCurve::compute_bounding_box () const
 		_bounding_box = bbox.expand (1.0);
 
 	} else {
-		_bounding_box = boost::optional<Rect> ();
+		_bounding_box = Rect ();
 	}
 
 	_bounding_box_dirty = false;
@@ -185,7 +179,7 @@ XFadeCurve::get_path(Rect const & area, Cairo::RefPtr<Cairo::Context> context, C
 			window_space = item_to_window (Duple (c.samples[idx].x, 0.0), false);
 			if (window_space.x >= area.x0) break;
 		}
-		for (Points::size_type idx = c.n_samples; right > left;) {
+		for (Points::size_type idx = c.n_samples - 1; right > left;) {
 			if (--idx <= left) break;
 			window_space = item_to_window (Duple (c.samples[idx].x, 0.0), false);
 			if (window_space.x <= area.x1) break;
@@ -233,10 +227,10 @@ XFadeCurve::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) co
 	if (_in.points.size() < 2) { return; }
 	if (_out.points.size() < 2) { return; }
 
-	Rect self = item_to_window (_bounding_box.get());
-	boost::optional<Rect> d = self.intersection (area);
+	Rect self = item_to_window (_bounding_box);
+	Rect d = self.intersection (area);
 	assert (d);
-	Rect draw = d.get ();
+	Rect draw = d;
 
 	context->save ();
 	context->rectangle (draw.x0, draw.y0, draw.width(), draw.height());
@@ -250,10 +244,10 @@ XFadeCurve::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) co
 	Cairo::Path *path_in = get_path(draw, context, _in);
 	Cairo::Path *path_out = get_path(draw, context, _out);
 
-	Color outline_shaded = _outline_color;
+	Gtkmm2ext::Color outline_shaded = _outline_color;
 	outline_shaded = 0.5 * (outline_shaded & 0xff) + (outline_shaded & ~0xff);
 
-	Color fill_shaded = _fill_color;
+	Gtkmm2ext::Color fill_shaded = _fill_color;
 	fill_shaded = 0.5 * (fill_shaded & 0xff) + (fill_shaded & ~0xff);
 
 #define IS_START (_xfadeposition == Start)
@@ -262,7 +256,7 @@ XFadeCurve::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) co
 	context->begin_new_path ();
 	context->append_path (IS_START ? *path_in : *path_out);
 	close_path(draw, context, IS_START ?_in : _out, false);
-	set_source_rgba (context, _fill_color);
+	Gtkmm2ext::set_source_rgba (context, _fill_color);
 	context->fill ();
 
 	if (show_background_fade) {
@@ -276,7 +270,7 @@ XFadeCurve::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) co
 		context->begin_new_path ();
 		context->append_path (IS_START ? *path_out: *path_in);
 		close_path(draw, context, IS_START ? _out : _in, true);
-		set_source_rgba (context, fill_shaded);
+		Gtkmm2ext::set_source_rgba (context, fill_shaded);
 		context->set_fill_rule (Cairo::FILL_RULE_WINDING);
 		context->fill ();
 		context->restore ();
@@ -285,7 +279,7 @@ XFadeCurve::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) co
 	/* draw lines over fills */
 	/* fade in line */
 	if (IS_START || show_background_fade) {
-		set_source_rgba (context, IS_START ? _outline_color : outline_shaded);
+		Gtkmm2ext::set_source_rgba (context, IS_START ? _outline_color : outline_shaded);
 		context->set_line_width (IS_START ? 1.0 : .5);
 
 		context->begin_new_path ();
@@ -295,7 +289,7 @@ XFadeCurve::render (Rect const & area, Cairo::RefPtr<Cairo::Context> context) co
 
 	/* fade out line */
 	if (!IS_START || show_background_fade) {
-		set_source_rgba (context, IS_START ? outline_shaded :_outline_color);
+		Gtkmm2ext::set_source_rgba (context, IS_START ? outline_shaded :_outline_color);
 		context->set_line_width (IS_START ? .5 : 1.0);
 
 		context->begin_new_path ();
